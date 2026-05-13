@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Truck, QrCode, CreditCard, Banknote } from 'lucide-react'; // Thêm icon
+import { ArrowLeft, CheckCircle2, Truck, QrCode, CreditCard, Banknote, Loader2 } from 'lucide-react';
 
 export default function Checkout() {
   const navigate = useNavigate();
@@ -9,57 +9,110 @@ export default function Checkout() {
   const [checkoutItems, setCheckoutItems] = useState([]);
   const selectedIds = location.state?.selectedItems || [];
 
-  const MY_BANK = {
-    BANK_ID: "MB",
-    ACCOUNT_NO: "0336766665"
-  };
-
-  const [customerInfo, setCustomerInfo] = useState({
-    name: '', phone: '', address: '', note: ''
-  });
-
-  // --- STATE MỚI: Phương thức thanh toán ---
-  // Mặc định cho khách chọn COD trước cho thân thiện
+  const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '', address: '', note: '' });
   const [paymentMethod, setPaymentMethod] = useState('cod');
 
+  // Trạng thái cho luồng PayOS
+  const [isProcessing, setIsProcessing] = useState(false);
   const [showQR, setShowQR] = useState(false);
-  const [orderId, setOrderId] = useState('');
+  const [qrData, setQrData] = useState(null); // Lưu thông tin QR PayOS trả về
+  const [activeOrderCode, setActiveOrderCode] = useState(null);
+
+  // Dùng Ref để dọn dẹp interval khi rời trang
+  const pollingIntervalRef = useRef(null);
 
   useEffect(() => {
     const savedCart = JSON.parse(localStorage.getItem('glassesCart')) || [];
     const itemsToCheckout = savedCart.filter(item => selectedIds.includes(item.cartId));
-
     setCheckoutItems(itemsToCheckout);
-    setOrderId(`DH${Math.floor(Math.random() * 10000)}`);
 
     if (itemsToCheckout.length === 0) {
       alert("Vui lòng chọn sản phẩm trước khi thanh toán!");
       navigate('/cart');
     }
+
+    return () => {
+      // Khi rời trang (unmount), phải dập tắt bộ đếm để tránh lag máy
+      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+    };
   }, []);
 
   const calculateTotal = () => {
     return checkoutItems.reduce((total, item) => total + (item.price * item.quantity), 0);
   };
 
-  // --- HÀM XỬ LÝ ĐẶT HÀNG CHUNG ---
-  const handlePlaceOrder = () => {
+  // --- HÀM 1: KHÁCH BẤM ĐẶT HÀNG ---
+  const handlePlaceOrder = async () => {
     if (!customerInfo.name || !customerInfo.phone || !customerInfo.address) {
       alert("Vui lòng điền đầy đủ thông tin giao hàng!");
       return;
     }
 
     if (paymentMethod === 'banking') {
-      // Nếu chọn chuyển khoản -> Mở QR Code
-      setShowQR(true);
+      // LUỒNG TỰ ĐỘNG PAYOS
+      setIsProcessing(true);
+      try {
+        // Gọi Backend khởi tạo link PayOS
+        const response = await fetch('/api/create-payment-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: calculateTotal(),
+            description: `KinhMat ${customerInfo.phone.slice(-4)}` // Mô tả ngắn gọn
+          })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          // PayOS trả về bin, accountNumber, amount, description -> Ta tự ghép ra ảnh QR
+          const payData = data.paymentData;
+          const qrImageUrl = `https://img.vietqr.io/image/${payData.bin}-${payData.accountNumber}-compact2.png?amount=${payData.amount}&addInfo=${payData.description}&accountName=${payData.accountName}`;
+
+          setQrData({ url: qrImageUrl, amount: payData.amount, desc: payData.description });
+          setActiveOrderCode(data.orderCode);
+          setShowQR(true);
+
+          // Bắt đầu bật chế độ "Lính canh": Cứ 2 giây hỏi Backend 1 lần xem tiền vào chưa
+          startPollingPayment(data.orderCode);
+        } else {
+          alert("Lỗi kết nối PayOS, vui lòng thử lại!");
+        }
+      } catch (error) {
+        console.error(error);
+        alert("Không thể kết nối đến máy chủ thanh toán.");
+      } finally {
+        setIsProcessing(false);
+      }
+
     } else {
-      // Nếu chọn COD -> Hoàn tất đơn hàng ngay lập tức
-      processSuccessfulOrder();
+      // LUỒNG COD BÌNH THƯỜNG
+      processSuccessfulOrder(Number(Date.now().toString().slice(-9)));
     }
   };
 
-  // --- HÀM HOÀN TẤT & XÓA GIỎ HÀNG (Dùng chung cho cả COD và QR) ---
-  const processSuccessfulOrder = () => {
+  // --- HÀM 2: LÍNH CANH (POLLING) ---
+  const startPollingPayment = (orderCode) => {
+    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+
+    pollingIntervalRef.current = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/check-payment/${orderCode}`);
+        const data = await response.json();
+
+        // NẾU BACKEND BÁO ĐÃ CÓ TIỀN VÀO!
+        if (data.status === 'PAID') {
+          clearInterval(pollingIntervalRef.current); // Tắt lính canh
+          processSuccessfulOrder(orderCode); // Hoàn tất đơn
+        }
+      } catch (error) {
+        console.log("Đang chờ thanh toán...");
+      }
+    }, 2000); // 2 giây hỏi 1 lần
+  };
+
+  // --- HÀM 3: HOÀN TẤT ĐƠN HÀNG (CHẠY KHI COD HOẶC KHI PAYOS BÁO TING TINH) ---
+  const processSuccessfulOrder = (finalOrderCode) => {
     const currentCart = JSON.parse(localStorage.getItem('glassesCart')) || [];
     const purchasedIds = checkoutItems.map(item => item.cartId);
     const remainingCart = currentCart.filter(item => !purchasedIds.includes(item.cartId));
@@ -67,28 +120,31 @@ export default function Checkout() {
     localStorage.setItem('glassesCart', JSON.stringify(remainingCart));
     window.dispatchEvent(new Event('cartUpdated'));
 
-    // --- PHẦN MỚI: LƯU ĐƠN HÀNG CHO ADMIN QUẢN LÝ ---
     const newOrder = {
-      id: orderId,
+      id: `DH${finalOrderCode}`,
       customer: customerInfo,
       items: checkoutItems,
       total: calculateTotal(),
       paymentMethod: paymentMethod,
-      status: 'pending', // Trạng thái mặc định: Đang chờ duyệt
+      status: paymentMethod === 'banking' ? 'paid' : 'pending', // Phân loại rạch ròi
       date: new Date().toISOString()
     };
 
     const existingOrders = JSON.parse(localStorage.getItem('glassesOrders')) || [];
-    localStorage.setItem('glassesOrders', JSON.stringify([newOrder, ...existingOrders])); // Đẩy đơn mới lên đầu
+    localStorage.setItem('glassesOrders', JSON.stringify([newOrder, ...existingOrders]));
 
-    const methodText = paymentMethod === 'cod' ? 'Thanh toán khi nhận hàng' : 'Chuyển khoản QR';
-    alert(`🎉 ĐẶT HÀNG THÀNH CÔNG!\nMã đơn: ${orderId}\nPhương thức: ${methodText}\nCảm ơn bạn đã mua sắm.`);
-    navigate('/');
+    const methodText = paymentMethod === 'cod' ? 'Thanh toán khi nhận hàng' : 'Đã thanh toán tự động qua QR';
+
+    // Đá sang trang Success và ném cho nó cái mã đơn hàng + phương thức để hiển thị
+    navigate('/success', {
+      state: {
+        orderId: `DH${finalOrderCode}`,
+        method: methodText
+      }
+    });
   };
 
-  const qrUrl = `https://img.vietqr.io/image/${MY_BANK.BANK_ID}-${MY_BANK.ACCOUNT_NO}-compact2.png?amount=${calculateTotal()}&addInfo=${orderId}&accountName=${MY_BANK.ACCOUNT_NAME}`;
-
-  if (checkoutItems.length === 0) return null; // Tránh render nháy trước khi redirect
+  if (checkoutItems.length === 0) return null;
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 pb-24">
@@ -102,10 +158,8 @@ export default function Checkout() {
 
         <div className="flex flex-col lg:flex-row gap-8">
 
-          {/* CỘT TRÁI: FORM GIAO HÀNG & CHỌN PHƯƠNG THỨC */}
+          {/* CỘT TRÁI: FORM */}
           <div className="lg:w-2/3 space-y-6">
-
-            {/* Box 1: Thông tin người nhận */}
             <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-gray-100">
               <h2 className="text-xl font-bold flex items-center gap-2 mb-6">
                 <Truck className="text-blue-600 w-6 h-6" /> Thông tin nhận hàng
@@ -113,44 +167,27 @@ export default function Checkout() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-sm font-bold text-gray-700">Họ và tên *</label>
-                  <input type="text" placeholder="Nguyễn Văn A"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none"
-                    value={customerInfo.name} onChange={e => setCustomerInfo({ ...customerInfo, name: e.target.value })}
-                  />
+                  <input type="text" placeholder="Nguyễn Văn A" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none" value={customerInfo.name} onChange={e => setCustomerInfo({ ...customerInfo, name: e.target.value })} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-bold text-gray-700">Số điện thoại *</label>
-                  <input type="tel" placeholder="0901234567"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none"
-                    value={customerInfo.phone} onChange={e => setCustomerInfo({ ...customerInfo, phone: e.target.value })}
-                  />
+                  <input type="tel" placeholder="0901234567" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none" value={customerInfo.phone} onChange={e => setCustomerInfo({ ...customerInfo, phone: e.target.value })} />
                 </div>
                 <div className="space-y-1 md:col-span-2">
-                  <label className="text-sm font-bold text-gray-700">Địa chỉ giao hàng chi tiết *</label>
-                  <input type="text" placeholder="Số nhà, Tên đường, Phường/Xã, Quận/Huyện, Tỉnh/TP"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none"
-                    value={customerInfo.address} onChange={e => setCustomerInfo({ ...customerInfo, address: e.target.value })}
-                  />
+                  <label className="text-sm font-bold text-gray-700">Địa chỉ chi tiết *</label>
+                  <input type="text" placeholder="Số nhà, Phường/Xã..." className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none" value={customerInfo.address} onChange={e => setCustomerInfo({ ...customerInfo, address: e.target.value })} />
                 </div>
               </div>
             </div>
 
-            {/* Box 2: Chọn phương thức thanh toán */}
             <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-gray-100">
               <h2 className="text-xl font-bold flex items-center gap-2 mb-6">
                 <CreditCard className="text-blue-600 w-6 h-6" /> Phương thức thanh toán
               </h2>
-
               <div className="space-y-3">
-
-                {/* Option 1: COD */}
+                {/* Option COD */}
                 <label className={`flex items-center p-4 border-2 rounded-2xl cursor-pointer transition-all ${paymentMethod === 'cod' ? 'border-blue-600 bg-blue-50/50' : 'border-gray-100 hover:border-blue-200'}`}>
-                  <input
-                    type="radio" name="payment" value="cod"
-                    checked={paymentMethod === 'cod'}
-                    onChange={() => { setPaymentMethod('cod'); setShowQR(false); }}
-                    className="hidden"
-                  />
+                  <input type="radio" name="payment" value="cod" checked={paymentMethod === 'cod'} onChange={() => { setPaymentMethod('cod'); setShowQR(false); clearInterval(pollingIntervalRef.current); }} className="hidden" />
                   <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center mr-4 flex-shrink-0 ${paymentMethod === 'cod' ? 'border-blue-600' : 'border-gray-300'}`}>
                     {paymentMethod === 'cod' && <div className="w-3 h-3 bg-blue-600 rounded-full"></div>}
                   </div>
@@ -161,33 +198,26 @@ export default function Checkout() {
                   </div>
                 </label>
 
-                {/* Option 2: Banking / QR */}
+                {/* Option QR Tự động */}
                 <label className={`flex items-center p-4 border-2 rounded-2xl cursor-pointer transition-all ${paymentMethod === 'banking' ? 'border-blue-600 bg-blue-50/50' : 'border-gray-100 hover:border-blue-200'}`}>
-                  <input
-                    type="radio" name="payment" value="banking"
-                    checked={paymentMethod === 'banking'}
-                    onChange={() => setPaymentMethod('banking')}
-                    className="hidden"
-                  />
+                  <input type="radio" name="payment" value="banking" checked={paymentMethod === 'banking'} onChange={() => setPaymentMethod('banking')} className="hidden" />
                   <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center mr-4 flex-shrink-0 ${paymentMethod === 'banking' ? 'border-blue-600' : 'border-gray-300'}`}>
                     {paymentMethod === 'banking' && <div className="w-3 h-3 bg-blue-600 rounded-full"></div>}
                   </div>
                   <QrCode className="w-6 h-6 text-blue-600 mr-3 flex-shrink-0" />
                   <div>
-                    <div className="font-bold text-gray-900">Chuyển khoản qua mã QR (Khuyên dùng)</div>
-                    <div className="text-sm text-gray-500">Mở app Ngân hàng hoặc MoMo quét mã QR tự động.</div>
+                    <div className="font-bold text-gray-900">Chuyển khoản QR (Duyệt tự động 24/7)</div>
+                    <div className="text-sm text-gray-500">Mở app Ngân hàng quét mã. Hệ thống tự động xác nhận đơn trong 3 giây.</div>
                   </div>
                 </label>
-
               </div>
             </div>
-
           </div>
 
-          {/* CỘT PHẢI: BILL & NÚT CHỨC NĂNG */}
+          {/* CỘT PHẢI: TỔNG KẾT & QR CODE */}
           <div className="lg:w-1/3">
             <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-gray-100 sticky top-24">
-              <h3 className="text-xl font-bold text-gray-900 mb-4">Mã đơn: <span className="text-blue-600">{orderId}</span></h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-6 border-b pb-4">Đơn hàng của bạn</h3>
 
               <div className="space-y-3 mb-6 max-h-48 overflow-y-auto pr-2">
                 {checkoutItems.map((item, index) => (
@@ -205,46 +235,56 @@ export default function Checkout() {
                 </div>
               </div>
 
-              {/* LOGIC HIỂN THỊ NÚT VÀ QR CODE */}
+              {/* KHU VỰC HIỂN THỊ NÚT HOẶC MÃ QR */}
               {paymentMethod === 'cod' ? (
-                // NẾU CHỌN COD: Chỉ hiện 1 nút bấm xong là hoàn tất
-                <button
-                  onClick={handlePlaceOrder}
-                  className="w-full py-4 rounded-xl font-bold text-lg bg-gray-900 text-white hover:bg-blue-600 transition flex items-center justify-center gap-2 shadow-lg"
-                >
+                <button onClick={handlePlaceOrder} className="w-full py-4 rounded-xl font-bold text-lg bg-gray-900 text-white hover:bg-blue-600 transition flex items-center justify-center gap-2 shadow-lg">
                   <CheckCircle2 className="w-6 h-6" /> Xác nhận Đặt Hàng
                 </button>
               ) : (
-                // NẾU CHỌN BANKING: Hiện luồng tạo QR
                 !showQR ? (
-                  <button
-                    onClick={handlePlaceOrder}
-                    className="w-full py-4 rounded-xl font-bold text-lg bg-gray-900 text-white hover:bg-blue-600 transition flex items-center justify-center gap-2 shadow-lg"
-                  >
-                    <QrCode className="w-6 h-6" /> Tạo mã QR Thanh toán
+                  <button onClick={handlePlaceOrder} disabled={isProcessing} className="w-full py-4 rounded-xl font-bold text-lg bg-gray-900 text-white hover:bg-blue-600 disabled:bg-gray-400 transition flex items-center justify-center gap-2 shadow-lg">
+                    {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : <QrCode className="w-6 h-6" />}
+                    {isProcessing ? "Đang tạo mã QR..." : "Tạo mã QR Thanh toán"}
                   </button>
                 ) : (
-                  <div className="flex flex-col items-center animate-in zoom-in duration-300">
-                    <div className="bg-blue-50 p-4 rounded-2xl border-2 border-blue-200 w-full flex justify-center mb-4">
-                      <img src={qrUrl} alt="QR Thanh Toan" className="w-full max-w-[200px] object-contain rounded-xl mix-blend-multiply" />
+                  <div className="flex flex-col items-center animate-in fade-in duration-500 bg-blue-50/50 p-6 rounded-2xl border-2 border-blue-100">
+                    <h4 className="font-bold text-blue-900 mb-4 text-center">Quét mã để thanh toán</h4>
+                    <div className="bg-white p-2 rounded-2xl shadow-sm w-full flex justify-center mb-4 relative overflow-hidden">
+                      <img src={qrData.url} alt="QR PayOS" className="w-full max-w-[200px] object-contain rounded-xl" />
+                      {/* Hiệu ứng quét lade */}
+                      <div className="absolute top-0 left-0 w-full h-1 bg-green-400/80 shadow-[0_0_15px_#4ade80] animate-[scan_2s_ease-in-out_infinite]"></div>
                     </div>
-                    <p className="text-sm text-center text-gray-500 mb-4">
-                      Quét mã để thanh toán.<br />Hệ thống tự động xác nhận sau khi nhận tiền.
-                    </p>
-                    <button
-                      onClick={processSuccessfulOrder} // Gọi hàm hoàn tất chung
-                      className="w-full py-4 rounded-xl font-bold text-lg bg-green-500 text-white hover:bg-green-600 transition flex items-center justify-center gap-2 shadow-lg"
-                    >
-                      <CheckCircle2 className="w-6 h-6" /> Đã chuyển khoản xong
+
+                    <div className="bg-white px-4 py-3 rounded-xl w-full text-center shadow-sm border border-gray-100 mb-4">
+                      <p className="text-xs text-gray-500 mb-1">Mã đơn hàng (Nội dung CK)</p>
+                      <p className="font-black text-lg text-blue-600 tracking-widest">{qrData.desc}</p>
+                    </div>
+
+                    <div className="flex items-center gap-3 w-full justify-center text-sm font-bold text-gray-600 bg-white py-3 rounded-full border border-gray-200">
+                      <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                      Hệ thống đang chờ nhận tiền...
+                    </div>
+
+                    <button onClick={() => { setShowQR(false); clearInterval(pollingIntervalRef.current); }} className="mt-4 text-sm text-gray-400 hover:text-red-500 font-medium transition">
+                      Hủy giao dịch
                     </button>
                   </div>
                 )
               )}
             </div>
           </div>
-
         </div>
       </div>
+
+      <style dangerouslySetInnerHTML={{
+        __html: `
+        @keyframes scan {
+          0% { top: 0%; opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { top: 100%; opacity: 0; }
+        }
+      `}} />
     </div>
   );
 }

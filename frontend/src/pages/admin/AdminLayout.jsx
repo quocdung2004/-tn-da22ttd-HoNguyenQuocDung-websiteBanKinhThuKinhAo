@@ -1,13 +1,17 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Package, ShoppingBag, Settings, LogOut, LayoutDashboard } from 'lucide-react';
+import { Package, Tag, LogOut, LayoutDashboard, ListTree } from 'lucide-react'; // Thêm icon Tag vào đây
 
 export default function AdminLayout() {
   const location = useLocation();
 
+  // Đưa tất cả các chức năng chính của Admin vào chung 1 mảng
   const menuItems = [
     { path: '/admin', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Tổng quan Đơn hàng' },
     { path: '/admin/products', icon: <Package className="w-5 h-5" />, label: 'Quản lý Kính (Kho)' },
+    { path: '/admin/brand', icon: <Tag className="w-5 h-5" />, label: 'Quản lý Nhãn hàng' }, // Đã thêm vào đây
+    { path: '/admin/categories', icon: <ListTree className="w-5 h-5" />, label: 'Quản lý Danh mục kính' }, // Đã thêm vào đây
+
   ];
 
   return (
@@ -21,14 +25,16 @@ export default function AdminLayout() {
           <p className="text-xs text-gray-400 mt-1">Admin Workspace</p>
         </div>
 
+        {/* Danh sách Menu chính */}
         <nav className="flex-1 p-4 space-y-2">
           {menuItems.map((item) => (
             <Link
               key={item.path}
               to={item.path}
               className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                location.pathname === item.path 
-                  ? 'bg-blue-600 text-white font-bold shadow-lg shadow-blue-900/50' 
+                // Kiểm tra xem đường dẫn hiện tại có khớp để bôi xanh không
+                location.pathname === item.path
+                  ? 'bg-blue-600 text-white font-bold shadow-lg shadow-blue-900/50'
                   : 'text-gray-400 hover:bg-gray-800 hover:text-white'
               }`}
             >
@@ -37,16 +43,17 @@ export default function AdminLayout() {
           ))}
         </nav>
 
+        {/* Khu vực dưới cùng: Nút thoát */}
         <div className="p-4 border-t border-gray-800">
-          <Link to="/" className="flex items-center gap-3 px-4 py-3 text-gray-400 hover:bg-gray-800 hover:text-white rounded-xl transition-all">
+          <Link to="/" className="flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-500 hover:text-white rounded-xl transition-all font-medium">
             <LogOut className="w-5 h-5" /> Về trang Khách hàng
           </Link>
         </div>
       </aside>
 
-      {/* NỘI DUNG CHÍNH BÊN PHẢI (Outlet sẽ render AdminDashboard hoặc AdminProducts vào đây) */}
+      {/* NỘI DUNG CHÍNH BÊN PHẢI */}
       <main className="flex-1 overflow-y-auto">
-        <Outlet /> 
+        <Outlet />
       </main>
     </div>
   );

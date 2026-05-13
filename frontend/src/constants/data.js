@@ -4,7 +4,7 @@ export const PRODUCTS = [
     id: 1,
     name: "Kính Cận Titanium Classic",
     brand: "Owndays",
-    price: 1250000,
+    price: 4000,
     image: "/images/KinhCanTitaniumClassic.png",
     shape: "Vuông",
     isARAvailable: true, // Cờ (flag) để hiện icon AR
