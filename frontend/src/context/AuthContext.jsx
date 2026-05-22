@@ -1,19 +1,21 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext } from 'react';
 
 // 1. Khởi tạo Trạm phát sóng
 const AuthContext = createContext();
 
 // 2. Tạo một cái vỏ bọc (Provider) để bọc toàn bộ App lại
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null); // Trạng thái lưu thông tin khách hàng
-
-  // Khi web vừa tải, kiểm tra xem trước đó khách đã đăng nhập chưa
-  useEffect(() => {
+  // Đồng bộ nạp thông tin user ngay lập tức khi khởi chạy để tránh lỗi F5 ở các trang được bảo vệ
+  const [user, setUser] = useState(() => {
     const storedUser = localStorage.getItem('glassesUser');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
+    try {
+      return storedUser ? JSON.parse(storedUser) : null;
+    } catch (error) {
+      console.error('Lỗi phân giải glassesUser:', error);
+      localStorage.removeItem('glassesUser');
+      return null;
     }
-  }, []);
+  });
 
   // Hàm xử lý Đăng nhập
   const login = (userData, token) => {

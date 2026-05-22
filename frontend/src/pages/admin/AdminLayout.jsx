@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Package, Tag, LogOut, LayoutDashboard, ListTree } from 'lucide-react'; // Thêm icon Tag vào đây
+import { Package, Tag, LogOut, LayoutDashboard, ListTree, PlusCircle, Users } from 'lucide-react'; // Thêm icon Tag vào đây
 
 export default function AdminLayout() {
   const location = useLocation();
@@ -11,7 +11,8 @@ export default function AdminLayout() {
     { path: '/admin/products', icon: <Package className="w-5 h-5" />, label: 'Quản lý Kính (Kho)' },
     { path: '/admin/brand', icon: <Tag className="w-5 h-5" />, label: 'Quản lý Nhãn hàng' }, // Đã thêm vào đây
     { path: '/admin/categories', icon: <ListTree className="w-5 h-5" />, label: 'Quản lý Danh mục kính' }, // Đã thêm vào đây
-
+    { path: '/admin/imports', icon: <PlusCircle className="w-5 h-5" />, label: 'Quản lý Nhập hàng' },
+    { path: '/admin/users', icon: <Users className="w-5 h-5" />, label: 'Quản lý Tài khoản' },
   ];
 
   return (

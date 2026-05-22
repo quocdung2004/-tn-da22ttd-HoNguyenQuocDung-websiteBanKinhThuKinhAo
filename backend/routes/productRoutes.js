@@ -22,4 +22,7 @@ router.put('/:id', verifyToken, cpUpload, productController.updateProduct);
 // Route Xóa (Chỉ cần ID và Token, không dính dáng đến file)
 router.delete('/:id', verifyToken, productController.deleteProduct);
 
+// Route Khôi phục (Cần ID và Token)
+router.put('/:id/restore', verifyToken, productController.restoreProduct);
+
 module.exports = router;

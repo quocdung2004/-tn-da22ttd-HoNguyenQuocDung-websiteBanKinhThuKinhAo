@@ -17,8 +17,22 @@ app.use(express.json());
 // ==============================================
 // Lệnh kết nối và báo cáo trạng thái ra Terminal
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
+  .then(async () => {
     console.log('🟢 Đã kết nối thành công tới MongoDB Atlas!');
+    
+    // Thực thi migration 1 lần an toàn để đồng bộ hóa sản phẩm cũ
+    try {
+      const Product = require('./models/Product');
+      const result = await Product.updateMany(
+        { isActive: { $exists: false } },
+        { $set: { isActive: true } }
+      );
+      if (result.modifiedCount > 0) {
+        console.log(`🧹 Migration: Đã tự động cập nhật isActive = true cho ${result.modifiedCount} sản phẩm cũ.`);
+      }
+    } catch (migError) {
+      console.error('⚠️ Lỗi chạy migration sản phẩm cũ:', migError);
+    }
   })
   .catch((error) => {
     console.error('🔴 Lỗi kết nối MongoDB:', error.message);
@@ -39,29 +53,35 @@ const payos = new PayOS({
 // API: Tạo mã QR thanh toán
 app.post('/api/create-payment-link', async (req, res) => {
   try {
-    const { amount, description } = req.body;
+    const { amount, description, orderCode } = req.body;
     
-    // Lấy 9 số cuối của thời gian để tạo mã đơn hàng không trùng lặp
-    const orderCode = Number(Date.now().toString().slice(-9));
+    // Sử dụng orderCode truyền lên từ frontend, luôn ép sang kiểu Number an toàn
+    const finalOrderCode = orderCode ? Number(orderCode) : Number(Date.now().toString().slice(-9));
+
+    console.log(`🔌 [Backend-PayOS] Nhận yêu cầu tạo link cho orderCode: ${finalOrderCode} (Type: ${typeof finalOrderCode}), số tiền: ${amount}`);
 
     const requestData = {
-      orderCode: orderCode,
-      amount: amount, 
-      description: description.substring(0, 25), 
+      orderCode: finalOrderCode,
+      amount: Number(amount), 
+      description: description ? description.substring(0, 25) : `KinhMat ${finalOrderCode}`, 
       cancelUrl: 'http://localhost:5173/checkout', 
       returnUrl: 'http://localhost:5173/success', 
     };
 
     const paymentLinkRes = await payos.paymentRequests.create(requestData);
+    console.log(`✅ [Backend-PayOS] Tạo link PayOS thành công cho đơn: ${finalOrderCode}`);
     
     res.json({
       success: true,
-      orderCode: orderCode,
+      orderCode: finalOrderCode,
       paymentData: paymentLinkRes
     });
 
   } catch (error) {
     console.error('❌ Lỗi tạo link PayOS:', error);
+    if (error.response) {
+      console.error('📦 Cục dữ liệu lỗi thô từ PayOS (create):', JSON.stringify(error.response.data || error.response, null, 2));
+    }
     res.status(500).json({ success: false, message: 'Không thể tạo mã QR' });
   }
 });
@@ -69,8 +89,12 @@ app.post('/api/create-payment-link', async (req, res) => {
 // API: Lính canh kiểm tra thanh toán (BẢN V2 CHUẨN)
 app.get('/api/check-payment/:orderCode', async (req, res) => {
   try {
-    const orderCode = Number(req.params.orderCode);
-    console.log(`\n⏳ Lính canh đang kiểm tra đơn: ${orderCode}`); 
+    const orderCodeStr = req.params.orderCode;
+    // Chắc chắn lọc bỏ chữ "DH" nếu lỡ frontend truyền lên có chữ DH, chỉ giữ lại số
+    const cleanNumberString = orderCodeStr.replace('DH', '');
+    const orderCode = Number(cleanNumberString);
+    
+    console.log(`\n⏳ Lính canh đang kiểm tra trạng thái đơn: ${orderCode} (Tìm trong MongoDB dạng: DH${orderCode})`); 
     
     // Gọi PayOS
     const paymentInfo = await payos.get(`/v2/payment-requests/${orderCode}`);
@@ -84,12 +108,24 @@ app.get('/api/check-payment/:orderCode', async (req, res) => {
     console.log(`🎯 Trạng thái chốt lại:`, status); 
 
     if (status === 'PAID') {
+      const Order = require('./models/Order');
+      // Tìm đúng orderCode MongoDB dạng DHxxxx (chỉ thêm 1 lần DH)
+      const targetCode = `DH${orderCode}`;
+      console.log(`✍️ Tiến hành cập nhật MongoDB đơn ${targetCode} sang 'paid'...`);
+      const updateResult = await Order.findOneAndUpdate({ orderCode: targetCode }, { status: 'paid' }, { new: true });
+      console.log(`🔎 Kết quả cập nhật MongoDB:`, updateResult ? `Thành công (Trạng thái mới: ${updateResult.status})` : 'Thất bại (Không tìm thấy đơn)');
+      
       res.json({ status: 'PAID' });
     } else {
       res.json({ status: 'PENDING' });
     }
   } catch (error) {
-    console.error(`❌ Lính canh vấp ngã:`, error.message);
+    console.error(`❌ Lính canh vấp ngã khi kiểm tra đơn ${req.params.orderCode}:`, error.message);
+    if (error.response) {
+      console.error('📦 Cục dữ liệu lỗi thô từ PayOS (check):', JSON.stringify(error.response.data || error.response, null, 2));
+    } else {
+      console.error('📦 Chi tiết lỗi thô:', error);
+    }
     res.status(500).json({ status: 'ERROR' });
   }
 });
@@ -134,6 +170,12 @@ const brandRoutes = require('./routes/brandRoutes');
 app.use('/api/brands', brandRoutes);
 const categoryRoutes = require('./routes/categoryRoutes');
 app.use('/api/categories', categoryRoutes);
+const productRoutes = require('./routes/productRoutes');
+app.use('/api/products', productRoutes);
+const orderRoutes = require('./routes/orderRoutes');
+app.use('/api/orders', orderRoutes);
+const importReceiptRoutes = require('./routes/importReceiptRoutes');
+app.use('/api/imports', importReceiptRoutes);
 const PORT = 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server Backend đã sẵn sàng tại: http://localhost:${PORT}`);

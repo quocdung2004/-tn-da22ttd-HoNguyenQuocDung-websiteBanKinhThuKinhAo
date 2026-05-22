@@ -41,6 +41,76 @@ export default function Checkout() {
     return checkoutItems.reduce((total, item) => total + (item.price * item.quantity), 0);
   };
 
+  // --- HÀM HỖ TRỢ: TẠO ĐƠN HÀNG TRÊN MONGODB TRƯỚC ---
+  const createPendingOrder = async (finalOrderCode, initialStatus = 'pending') => {
+    const dbOrder = {
+      orderCode: `DH${finalOrderCode}`,
+      customerInfo: customerInfo,
+      items: checkoutItems.map(item => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        priceAtPurchase: item.price,
+        hasPrescription: item.hasPrescription || false,
+        od: item.od || '',
+        os: item.os || ''
+      })),
+      total: calculateTotal(),
+      paymentMethod: paymentMethod,
+      status: initialStatus
+    };
+
+    try {
+      const token = localStorage.getItem('glassesToken');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(dbOrder)
+      });
+      const resData = await response.json();
+      return resData.success;
+    } catch (err) {
+      console.error('Lỗi kết nối API lưu đơn hàng:', err);
+      return false;
+    }
+  };
+
+  // --- HÀM HỖ TRỢ: DỌN DẸP GIỎ HÀNG & CHUYỂN TRANG SAU KHI THÀNH CÔNG ---
+  const finalizeOrderClientSide = (finalOrderCode, methodText, finalStatus = 'pending') => {
+    const currentCart = JSON.parse(localStorage.getItem('glassesCart')) || [];
+    const purchasedIds = checkoutItems.map(item => item.cartId);
+    const remainingCart = currentCart.filter(item => !purchasedIds.includes(item.cartId));
+
+    localStorage.setItem('glassesCart', JSON.stringify(remainingCart));
+    window.dispatchEvent(new Event('cartUpdated'));
+
+    // Sao lưu vào localStorage để giữ tương thích ngược
+    const newOrder = {
+      id: `DH${finalOrderCode}`,
+      customer: customerInfo,
+      items: checkoutItems,
+      total: calculateTotal(),
+      paymentMethod: paymentMethod,
+      status: finalStatus,
+      date: new Date().toISOString()
+    };
+
+    const existingOrders = JSON.parse(localStorage.getItem('glassesOrders')) || [];
+    localStorage.setItem('glassesOrders', JSON.stringify([newOrder, ...existingOrders]));
+
+    // Điều hướng sang trang thành công
+    navigate('/success', {
+      state: {
+        orderId: `DH${finalOrderCode}`,
+        method: methodText
+      }
+    });
+  };
+
   // --- HÀM 1: KHÁCH BẤM ĐẶT HÀNG ---
   const handlePlaceOrder = async () => {
     if (!customerInfo.name || !customerInfo.phone || !customerInfo.address) {
@@ -48,33 +118,46 @@ export default function Checkout() {
       return;
     }
 
+    const finalOrderCode = Number(Date.now().toString().slice(-9));
+
     if (paymentMethod === 'banking') {
-      // LUỒNG TỰ ĐỘNG PAYOS
+      // LUỒNG CHUYỂN KHOẢN QUA PAYOS
       setIsProcessing(true);
+      
+      // A. Tạo đơn hàng PENDING trên MongoDB trước để tránh thất thoát dữ liệu
+      const dbSaved = await createPendingOrder(finalOrderCode, 'pending');
+      if (!dbSaved) {
+        alert("Không thể khởi tạo đơn hàng trên hệ thống. Vui lòng thử lại!");
+        setIsProcessing(false);
+        return;
+      }
+
       try {
-        // Gọi Backend khởi tạo link PayOS
+        // B. Gọi Backend khởi tạo link PayOS sử dụng mã đơn hàng đã đồng bộ
+        console.log(`🔌 [Frontend-Checkout] Gửi yêu cầu tạo link thanh toán cho mã đơn: ${finalOrderCode}`);
         const response = await fetch('/api/create-payment-link', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            orderCode: finalOrderCode, // Gửi mã đơn hàng duy nhất lên backend
             amount: calculateTotal(),
-            description: `KinhMat ${customerInfo.phone.slice(-4)}` // Mô tả ngắn gọn
+            description: `KinhMat ${finalOrderCode}`
           })
         });
 
         const data = await response.json();
 
         if (data.success) {
-          // PayOS trả về bin, accountNumber, amount, description -> Ta tự ghép ra ảnh QR
+          // PayOS trả về link và thông tin để Frontend tự tạo QR khớp chuẩn 100%
           const payData = data.paymentData;
           const qrImageUrl = `https://img.vietqr.io/image/${payData.bin}-${payData.accountNumber}-compact2.png?amount=${payData.amount}&addInfo=${payData.description}&accountName=${payData.accountName}`;
 
           setQrData({ url: qrImageUrl, amount: payData.amount, desc: payData.description });
-          setActiveOrderCode(data.orderCode);
+          setActiveOrderCode(finalOrderCode);
           setShowQR(true);
 
-          // Bắt đầu bật chế độ "Lính canh": Cứ 2 giây hỏi Backend 1 lần xem tiền vào chưa
-          startPollingPayment(data.orderCode);
+          // C. Bật lính canh kiểm tra thanh toán mỗi 2 giây
+          startPollingPayment(finalOrderCode);
         } else {
           alert("Lỗi kết nối PayOS, vui lòng thử lại!");
         }
@@ -86,8 +169,16 @@ export default function Checkout() {
       }
 
     } else {
-      // LUỒNG COD BÌNH THƯỜNG
-      processSuccessfulOrder(Number(Date.now().toString().slice(-9)));
+      // LUỒNG THANH TOÁN COD
+      setIsProcessing(true);
+      const dbSaved = await createPendingOrder(finalOrderCode, 'pending');
+      setIsProcessing(false);
+      
+      if (dbSaved) {
+        finalizeOrderClientSide(finalOrderCode, 'Thanh toán khi nhận hàng (COD)', 'pending');
+      } else {
+        alert("Không thể tạo đơn hàng COD. Vui lòng thử lại!");
+      }
     }
   };
 
@@ -103,45 +194,12 @@ export default function Checkout() {
         // NẾU BACKEND BÁO ĐÃ CÓ TIỀN VÀO!
         if (data.status === 'PAID') {
           clearInterval(pollingIntervalRef.current); // Tắt lính canh
-          processSuccessfulOrder(orderCode); // Hoàn tất đơn
+          finalizeOrderClientSide(orderCode, 'Đã thanh toán tự động qua QR', 'paid');
         }
       } catch (error) {
         console.log("Đang chờ thanh toán...");
       }
     }, 2000); // 2 giây hỏi 1 lần
-  };
-
-  // --- HÀM 3: HOÀN TẤT ĐƠN HÀNG (CHẠY KHI COD HOẶC KHI PAYOS BÁO TING TINH) ---
-  const processSuccessfulOrder = (finalOrderCode) => {
-    const currentCart = JSON.parse(localStorage.getItem('glassesCart')) || [];
-    const purchasedIds = checkoutItems.map(item => item.cartId);
-    const remainingCart = currentCart.filter(item => !purchasedIds.includes(item.cartId));
-
-    localStorage.setItem('glassesCart', JSON.stringify(remainingCart));
-    window.dispatchEvent(new Event('cartUpdated'));
-
-    const newOrder = {
-      id: `DH${finalOrderCode}`,
-      customer: customerInfo,
-      items: checkoutItems,
-      total: calculateTotal(),
-      paymentMethod: paymentMethod,
-      status: paymentMethod === 'banking' ? 'paid' : 'pending', // Phân loại rạch ròi
-      date: new Date().toISOString()
-    };
-
-    const existingOrders = JSON.parse(localStorage.getItem('glassesOrders')) || [];
-    localStorage.setItem('glassesOrders', JSON.stringify([newOrder, ...existingOrders]));
-
-    const methodText = paymentMethod === 'cod' ? 'Thanh toán khi nhận hàng' : 'Đã thanh toán tự động qua QR';
-
-    // Đá sang trang Success và ném cho nó cái mã đơn hàng + phương thức để hiển thị
-    navigate('/success', {
-      state: {
-        orderId: `DH${finalOrderCode}`,
-        method: methodText
-      }
-    });
   };
 
   if (checkoutItems.length === 0) return null;

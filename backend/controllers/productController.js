@@ -4,7 +4,7 @@ const Product = require('../models/Product');
 exports.createProduct = async (req, res) => {
   try {
     // Lấy các trường text từ req.body (Lưu ý: arUrl không lấy ở đây nữa vì nó đã thành File)
-    const { name, price, description, stock, brand, category } = req.body;
+    const { name, price, description, stock, importPrice, brand, category } = req.body;
     let images = [];
     let arUrl = '';
 
@@ -19,7 +19,7 @@ exports.createProduct = async (req, res) => {
     }
 
     const newProduct = new Product({
-      name, price, description, images, arUrl, stock, brand, category
+      name, price, description, images, arUrl, stock, importPrice: Number(importPrice) || 0, brand, category
     });
 
     await newProduct.save();
@@ -33,8 +33,11 @@ exports.createProduct = async (req, res) => {
 // [GET] Lấy danh sách Sản phẩm
 exports.getProducts = async (req, res) => {
   try {
-    // Dùng populate để lấy luôn tên Brand và Category thay vì chỉ lấy cái ID
-    const products = await Product.find()
+    // Nếu truyền query all=true thì trả về tất cả (bao gồm cả sản phẩm bị ẩn/xóa mềm - dùng cho Admin)
+    // Ngược lại chỉ trả về các sản phẩm đang bán (isActive !== false - dùng cho Customer)
+    const filter = req.query.all === 'true' ? {} : { isActive: { $ne: false } };
+
+    const products = await Product.find(filter)
       .populate('brand', 'name') 
       .populate('category', 'name')
       .sort({ createdAt: -1 });
@@ -49,10 +52,14 @@ exports.getProducts = async (req, res) => {
 // [PUT] Cập nhật Sản phẩm
 exports.updateProduct = async (req, res) => {
   try {
-    const { name, price, description, stock, brand, category } = req.body;
+    const { name, price, description, stock, importPrice, brand, category, isActive } = req.body;
     
     // Tạo object chứa dữ liệu mới cơ bản
-    let updateData = { name, price, description, stock, brand, category };
+    let updateData = { name, price, description, stock, importPrice: Number(importPrice) || 0, brand, category };
+    
+    if (isActive !== undefined) {
+      updateData.isActive = isActive === 'true' || isActive === true;
+    }
 
     // Nếu Admin có quét chọn tải album ảnh mới lên (sẽ ghi đè ảnh cũ)
     if (req.files && req.files['images']) {
@@ -78,18 +85,43 @@ exports.updateProduct = async (req, res) => {
   }
 };
 
-// [DELETE] Xóa Sản phẩm
+// [DELETE] Xóa Sản phẩm (Xóa Mềm - Soft Delete)
 exports.deleteProduct = async (req, res) => {
   try {
-    const deletedProduct = await Product.findByIdAndDelete(req.params.id);
+    // Không xóa cứng để tránh mồ côi khóa ngoại trong Đơn hàng (Order) và Lịch sử nhập (ImportReceipt)
+    const updatedProduct = await Product.findByIdAndUpdate(
+      req.params.id, 
+      { isActive: false }, 
+      { new: true }
+    );
     
-    if (!deletedProduct) {
+    if (!updatedProduct) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm!' });
     }
 
-    res.json({ success: true, message: 'Đã xóa sản phẩm thành công!' });
+    res.json({ success: true, message: 'Đã ẩn (xóa mềm) sản phẩm thành công!', product: updatedProduct });
   } catch (error) {
     console.error('Lỗi xóa Product:', error);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ!' });
+  }
+};
+
+// [PUT] Khôi phục Sản phẩm đã bị xóa mềm (Dành cho Admin)
+exports.restoreProduct = async (req, res) => {
+  try {
+    const updatedProduct = await Product.findByIdAndUpdate(
+      req.params.id, 
+      { isActive: true }, 
+      { new: true }
+    );
+    
+    if (!updatedProduct) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm!' });
+    }
+
+    res.json({ success: true, message: 'Khôi phục sản phẩm thành công!', product: updatedProduct });
+  } catch (error) {
+    console.error('Lỗi khôi phục Product:', error);
     res.status(500).json({ success: false, message: 'Lỗi máy chủ!' });
   }
 };

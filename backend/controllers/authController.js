@@ -46,6 +46,11 @@ exports.login = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Sai tên đăng nhập hoặc mật khẩu!' });
     }
 
+    // 1.1 Kiểm tra tài khoản có bị khóa không
+    if (user.isBlocked) {
+      return res.status(403).json({ success: false, message: 'Tài khoản của bạn đã bị khóa bởi Quản trị viên!' });
+    }
+
     // 2. Kiểm tra có phải tài khoản Google/Facebook không (Chặn nhập pass)
     if (user.authProvider !== 'local') {
       return res.status(400).json({ success: false, message: 'Tài khoản này được đăng ký bằng Google/Facebook.' });

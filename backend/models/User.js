@@ -8,6 +8,7 @@ const userSchema = new mongoose.Schema({
   role: { type: Number, default: 0 }, // 0: Khách, 1: Admin, 2: Staff
   name: { type: String },
   phone: { type: String },
+  isBlocked: { type: Boolean, default: false }
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

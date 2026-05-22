@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Image as ImageIcon, Edit, Trash2, X, Box, Search } from 'lucide-react';
+import { Plus, Image as ImageIcon, Edit, Trash2, X, Box, Search, RotateCcw } from 'lucide-react';
 
 export default function ProductManager() {
   const [products, setProducts] = useState([]);
   const [brands, setBrands] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
   
   // STATE CỦA FORM
   const [formData, setFormData] = useState({ 
-    name: '', price: '', description: '', stock: '', brand: '', category: '' 
+    name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true 
   });
   
   // STATE XỬ LÝ ẢNH & FILE 3D
@@ -28,20 +29,18 @@ export default function ProductManager() {
   const fetchData = async () => {
     try {
       const [prodRes, brandRes, catRes] = await Promise.all([
-        fetch('/api/products').then(res => res.json()),
+        fetch('/api/products?all=true').then(res => res.json()), // Gọi all=true để Admin quản lý toàn bộ
         fetch('/api/brands').then(res => res.json()),
         fetch('/api/categories').then(res => res.json())
       ]);
       
+      console.log("Danh sách Nhãn hàng từ DB:", brandRes.brands);
+      console.log("Danh sách Danh mục từ DB:", catRes.categories);
+
       if (prodRes.success) setProducts(prodRes.products);
-      if (brandRes.success) {
-        setBrands(brandRes.brands);
-        if (brandRes.brands.length > 0 && !editingId) setFormData(prev => ({...prev, brand: brandRes.brands[0]._id}));
-      }
-      if (catRes.success) {
-        setCategories(catRes.categories);
-        if (catRes.categories.length > 0 && !editingId) setFormData(prev => ({...prev, category: catRes.categories[0]._id}));
-      }
+      if (brandRes.success) setBrands(brandRes.brands);
+      if (catRes.success) setCategories(catRes.categories);
+      
     } catch (error) {
       console.error('Lỗi tải dữ liệu:', error);
     }
@@ -50,6 +49,33 @@ export default function ProductManager() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // LỌC SẢN PHẨM Ở FRONTEND THEO TÊN, NHÃN HÀNG, DANH MỤC (REAL-TIME, KHÔNG PHÂN BIỆT HOA THƯỜNG, KHÔNG CRASH NẾU NULL)
+  const filteredProducts = products.filter(prod => {
+    const term = searchTerm.toLowerCase().trim();
+    if (!term) return true;
+    
+    const nameMatch = prod.name ? prod.name.toLowerCase().includes(term) : false;
+    const brandMatch = prod.brand?.name ? prod.brand.name.toLowerCase().includes(term) : false;
+    const categoryMatch = prod.category?.name ? prod.category.name.toLowerCase().includes(term) : false;
+    
+    return nameMatch || brandMatch || categoryMatch;
+  });
+
+  // THỐNG KÊ SỐ LƯỢNG SẢN PHẨM THEO DANH MỤC (CHỈ ĐẾM SẢN PHẨM ĐANG HOẠT ĐỘNG isActive !== false, GOM CÁC SẢN PHẨM THIẾU DANH MỤC VÀO "Chưa phân loại")
+  const getCategoryStats = () => {
+    const stats = {};
+    const activeProducts = products.filter(p => p.isActive !== false);
+    
+    activeProducts.forEach(prod => {
+      const catName = prod.category?.name || "Chưa phân loại";
+      stats[catName] = (stats[catName] || 0) + 1;
+    });
+    
+    return Object.entries(stats).map(([name, count]) => ({ name, count }));
+  };
+
+  const categoryStats = getCategoryStats();
 
   // XỬ LÝ CHỌN ALBUM ẢNH
   const handleImageChange = (e) => {
@@ -69,7 +95,8 @@ export default function ProductManager() {
       description: prod.description || '',
       stock: prod.stock,
       brand: prod.brand ? prod.brand._id : '',
-      category: prod.category ? prod.category._id : ''
+      category: prod.category ? prod.category._id : '',
+      isActive: prod.isActive !== false // nạp đúng trạng thái
     });
     setImagePreviews(prod.images || []); // Hiện mảng ảnh cũ từ DB
     setImageFiles([]); 
@@ -81,7 +108,8 @@ export default function ProductManager() {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingId(null);
-    setFormData({ name: '', price: '', description: '', stock: '', brand: brands[0]?._id || '', category: categories[0]?._id || '' });
+    // Reset form về trạng thái rỗng
+    setFormData({ name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true });
     setImagePreviews([]);
     setImageFiles([]);
     setArFile(null);
@@ -89,7 +117,7 @@ export default function ProductManager() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Bạn có chắc chắn muốn xóa vĩnh viễn sản phẩm này không?')) return;
+    if (!window.confirm('Bạn có chắc muốn ẩn (xóa mềm) gọng kính này khỏi trang bán hàng của khách không?')) return;
     try {
       const token = localStorage.getItem('glassesToken');
       const response = await fetch(`/api/products/${id}`, {
@@ -99,7 +127,28 @@ export default function ProductManager() {
       const data = await response.json();
       
       if (data.success) {
-        alert('Xóa thành công!');
+        alert('Đã ẩn sản phẩm thành công!');
+        fetchData();
+      } else {
+        alert(data.message);
+      }
+    } catch (error) {
+      alert('Lỗi kết nối máy chủ!');
+    }
+  };
+
+  const handleRestore = async (id) => {
+    if (!window.confirm('Bạn có muốn khôi phục sản phẩm này hiển thị lại trên cửa hàng không?')) return;
+    try {
+      const token = localStorage.getItem('glassesToken');
+      const response = await fetch(`/api/products/${id}/restore`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        alert('Khôi phục sản phẩm thành công!');
         fetchData();
       } else {
         alert(data.message);
@@ -121,6 +170,11 @@ export default function ProductManager() {
     dataToSend.append('stock', formData.stock);
     dataToSend.append('brand', formData.brand);
     dataToSend.append('category', formData.category);
+    
+    // Gửi trạng thái isActive khi đang sửa sản phẩm
+    if (editingId) {
+      dataToSend.append('isActive', formData.isActive);
+    }
     
     // Đính kèm Mảng ảnh
     if (imageFiles.length > 0) {
@@ -173,10 +227,52 @@ export default function ProductManager() {
           </button>
         </div>
 
-        {/* BẢNG DANH SÁCH (Bây giờ chiếm full chiều rộng) */}
+        {/* THẺ THỐNG KÊ DANH MỤC KÍNH (CARDS/BADGES) */}
+        {categoryStats.length > 0 && (
+          <div className="p-6 bg-white rounded-3xl border border-gray-100 shadow-sm flex flex-col gap-4 animate-in fade-in duration-300">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Phân tích tồn kho hoạt động theo loại kính</h3>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+              {categoryStats.map((stat, index) => (
+                <div key={index} className="bg-gray-50/50 hover:bg-blue-50/20 px-4 py-3 rounded-2xl border border-gray-100 hover:border-blue-100 flex items-center gap-3 transition duration-300">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+                  <div className="min-w-0">
+                    <p className="text-gray-500 text-[10px] font-bold uppercase tracking-wider truncate">{stat.name}</p>
+                    <p className="text-sm font-black text-gray-900 mt-0.5">{stat.count} <span className="text-xs text-gray-400 font-normal">chiếc</span></p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* BẢNG DANH SÁCH */}
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-6 border-b border-gray-50 flex justify-between items-center">
-            <h2 className="text-xl font-bold text-gray-900">Danh sách hiện tại ({products.length})</h2>
+          <div className="p-6 border-b border-gray-50 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <h2 className="text-xl font-bold text-gray-900">Danh sách hiện tại ({filteredProducts.length})</h2>
+            
+            {/* THANH TÌM KIẾM FRONTEND REALTIME */}
+            <div className="relative w-full sm:w-80">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Tìm kính, nhãn hàng, loại..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-11 pr-10 py-2.5 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white transition text-sm font-medium"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-gray-400 hover:text-gray-600"
+                >
+                  Xóa
+                </button>
+              )}
+            </div>
           </div>
           
           <div className="overflow-x-auto">
@@ -192,16 +288,36 @@ export default function ProductManager() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {products.length === 0 ? (
-                  <tr><td colSpan="6" className="px-6 py-8 text-center text-gray-500">Kho đang trống.</td></tr>
+                {filteredProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="px-6 py-12 text-center text-gray-500">
+                      <div className="flex flex-col items-center justify-center gap-2 py-4">
+                        <Search className="w-8 h-8 text-gray-300" />
+                        <p className="font-bold text-gray-600">Không tìm thấy gọng kính nào</p>
+                        <p className="text-sm text-gray-400">Hãy thử nhập từ khóa khác hoặc xóa bộ lọc.</p>
+                      </div>
+                    </td>
+                  </tr>
                 ) : (
-                  products.map((prod) => (
-                    <tr key={prod._id} className="hover:bg-gray-50 transition">
+                  filteredProducts.map((prod) => (
+                    <tr key={prod._id} className={`hover:bg-gray-50 transition ${!prod.isActive ? 'bg-red-50/20' : ''}`}>
                       <td className="px-6 py-4">
-                        {/* Lấy ảnh đầu tiên trong mảng images làm avatar */}
                         <img src={prod.images && prod.images[0] ? prod.images[0] : '/placeholder.png'} alt={prod.name} className="h-14 w-14 object-cover rounded-xl border border-gray-200 bg-white" />
                       </td>
-                      <td className="px-6 py-4 font-bold text-gray-900">{prod.name}</td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-gray-900">{prod.name}</span>
+                          {prod.isActive !== false ? (
+                            <span className="bg-green-100 text-green-700 text-[10px] px-2.5 py-0.5 rounded-full font-extrabold uppercase tracking-wider">
+                              Hoạt động
+                            </span>
+                          ) : (
+                            <span className="bg-red-100 text-red-700 text-[10px] px-2.5 py-0.5 rounded-full font-extrabold uppercase tracking-wider">
+                              Đã ẩn
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 text-blue-600 font-bold">{prod.price.toLocaleString('vi-VN')}đ</td>
                       <td className="px-6 py-4">
                         <div className="text-sm font-medium text-gray-900">{prod.category?.name}</div>
@@ -217,9 +333,15 @@ export default function ProductManager() {
                           <button onClick={() => handleEdit(prod)} className="p-2 bg-yellow-50 text-yellow-600 rounded-lg hover:bg-yellow-100 transition" title="Sửa">
                             <Edit className="w-4 h-4" />
                           </button>
-                          <button onClick={() => handleDelete(prod._id)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition" title="Xóa">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {prod.isActive !== false ? (
+                            <button onClick={() => handleDelete(prod._id)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition" title="Ẩn kính (Xóa mềm)">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <button onClick={() => handleRestore(prod._id)} className="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition" title="Khôi phục hiển thị">
+                              <RotateCcw className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -272,19 +394,36 @@ export default function ProductManager() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-6">
+                  {/* === ĐÃ FIX LỖI TÀNG HÌNH Ở ĐÂY: THÊM <option value=""> === */}
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Danh mục</label>
                     <select required value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none">
+                      <option value="">-- Chọn Danh mục --</option>
                       {categories.map(cat => <option key={cat._id} value={cat._id}>{cat.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Nhãn hàng</label>
                     <select required value={formData.brand} onChange={e => setFormData({...formData, brand: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none">
+                      <option value="">-- Chọn Nhãn hàng --</option>
                       {brands.map(brand => <option key={brand._id} value={brand._id}>{brand.name}</option>)}
                     </select>
                   </div>
                 </div>
+
+                {editingId && (
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Trạng thái hoạt động</label>
+                    <select 
+                      value={formData.isActive ? "true" : "false"} 
+                      onChange={e => setFormData({...formData, isActive: e.target.value === "true"})} 
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none animate-in fade-in duration-200"
+                    >
+                      <option value="true">Hoạt động</option>
+                      <option value="false">Đã ẩn</option>
+                    </select>
+                  </div>
+                )}
 
                 {/* VÙNG CHỌN FILE 3D (.GLB) */}
                 <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">

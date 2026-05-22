@@ -6,19 +6,58 @@ export default function AdminDashboard() {
   const [products, setProducts] = useState([]);
 
   useEffect(() => {
-    const savedOrders = JSON.parse(localStorage.getItem('glassesOrders')) || [];
-    const savedProducts = JSON.parse(localStorage.getItem('glassesProducts')) || [];
-    setOrders(savedOrders);
-    setProducts(savedProducts);
+    const fetchDashboardData = async () => {
+      try {
+        // 1. Tải danh sách Kính từ MongoDB (lấy all=true để tính toán tồn kho chính xác)
+        const prodRes = await fetch('/api/products?all=true');
+        const prodData = await prodRes.json();
+        if (prodData.success) {
+          setProducts(prodData.products);
+        }
+
+        // 2. Tải danh sách Đơn hàng từ API MongoDB (sử dụng Token bảo mật)
+        const token = localStorage.getItem('glassesToken');
+        const orderRes = await fetch('/api/orders', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        const orderData = await orderRes.json();
+        if (orderData.success) {
+          setOrders(orderData.orders);
+        } else {
+          // Fallback về localStorage nếu không tải được qua API
+          const savedOrders = JSON.parse(localStorage.getItem('glassesOrders')) || [];
+          setOrders(savedOrders);
+        }
+      } catch (err) {
+        console.error('Lỗi tải dữ liệu Dashboard:', err);
+        // Fallback an toàn về localStorage
+        const savedOrders = JSON.parse(localStorage.getItem('glassesOrders')) || [];
+        setOrders(savedOrders);
+      }
+    };
+
+    fetchDashboardData();
   }, []);
 
   // --- 1. TÍNH TOÁN KPI TỔNG QUAN ---
-  // Lọc các đơn hàng thành công hoặc đang giao (không tính đơn hủy)
-  const validOrders = orders.filter(o => o.status !== 'cancelled');
+  // Lọc các đơn hàng hợp lệ đã thanh toán/xử lý/giao/hoàn tất (loại trừ cancelled và pending)
+  const validOrders = orders.filter(o => o.status !== 'cancelled' && o.status !== 'pending');
   
   const totalRevenue = validOrders.reduce((sum, o) => sum + o.total, 0);
-  // Giả sử lợi nhuận (Profit) = 40% doanh thu
-  const totalProfit = totalRevenue * 0.4; 
+  
+  // Tính lợi nhuận thực tế dựa trên importPriceAtPurchase của từng mặt hàng bán được
+  const totalProfit = validOrders.reduce((profitSum, order) => {
+    const orderCost = order.items.reduce((itemCostSum, item) => {
+      // importPriceAtPurchase đã được đóng băng tại thời điểm bán hàng
+      const itemCost = (item.importPriceAtPurchase || 0) * item.quantity;
+      return itemCostSum + itemCost;
+    }, 0);
+    const orderProfit = order.total - orderCost;
+    return profitSum + orderProfit;
+  }, 0);
+  
   const totalItemsSold = validOrders.reduce((sum, o) => sum + o.items.reduce((s, item) => s + item.quantity, 0), 0);
 
   // --- 2. TÍNH TOÁN TOP 5 SẢN PHẨM BÁN CHẠY NHẤT ---
@@ -35,8 +74,16 @@ export default function AdminDashboard() {
     // Chuyển object thành mảng, kết hợp data từ danh sách Kính, rồi sắp xếp giảm dần
     return Object.entries(productSales)
       .map(([id, quantity]) => {
-        const productInfo = products.find(p => p.id === parseInt(id)) || { name: 'Sản phẩm đã xóa', image: '', price: 0 };
-        return { ...productInfo, sold: quantity, revenue: quantity * productInfo.price };
+        const productInfo = products.find(p => p._id === id) || { name: 'Sản phẩm đã xóa', images: [], price: 0 };
+        const image = productInfo.images && productInfo.images[0] ? productInfo.images[0] : '';
+        return { 
+          ...productInfo, 
+          name: productInfo.name || 'Sản phẩm đã xóa', 
+          image, 
+          price: productInfo.price || 0,
+          sold: quantity, 
+          revenue: quantity * (productInfo.price || 0) 
+        };
       })
       .sort((a, b) => b.sold - a.sold)
       .slice(0, 5); // Lấy Top 5
@@ -48,8 +95,9 @@ export default function AdminDashboard() {
     
     validOrders.forEach(order => {
       order.items.forEach(item => {
-        const productInfo = products.find(p => p.id === item.productId);
-        const brandName = productInfo?.brand || 'Khác';
+        const productInfo = products.find(p => p._id === item.productId);
+        // Trích xuất brand name từ object được populate bởi backend
+        const brandName = productInfo?.brand?.name || productInfo?.brand || 'Khác';
         brandRevenue[brandName] = (brandRevenue[brandName] || 0) + (item.price * item.quantity);
       });
     });
@@ -205,6 +253,45 @@ export default function AdminDashboard() {
           </div>
 
         </div>
+
+        {/* ================= DÒNG 3: CẢNH BÁO SẮP HẾT HÀNG (TỒN KHO <= 5) ================= */}
+        <div className="mt-8 bg-white p-6 sm:p-8 rounded-3xl border border-gray-100 shadow-sm">
+          <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+            <Package className="w-6 h-6 text-red-500 animate-pulse" /> Cảnh Báo Sản Phẩm Sắp Hết Hàng (Tồn kho ≤ 5)
+          </h2>
+          
+          {products.filter(p => p.stock <= 5).length === 0 ? (
+            <p className="text-gray-400 text-center py-8 font-bold">🎉 Tuyệt vời! Tất cả sản phẩm đều đủ số lượng trong kho.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {products.filter(p => p.stock <= 5).map((product, idx) => (
+                <div key={idx} className="flex items-center gap-4 p-4 bg-red-50/20 border border-red-100/50 rounded-2xl hover:bg-red-50/50 transition">
+                  {product.images && product.images[0] ? (
+                    <img src={product.images[0]} className="w-12 h-12 object-cover rounded-xl border border-red-100 bg-white" alt="" />
+                  ) : (
+                    <div className="w-12 h-12 bg-gray-50 rounded-xl border flex items-center justify-center text-gray-300">
+                      <Package className="w-5 h-5" />
+                    </div>
+                  )}
+                  
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-gray-900 truncate text-sm">{product.name}</h3>
+                    <p className="text-xs text-gray-500 mt-1">Hiện có: <span className="font-black text-red-600">{product.stock} cái</span></p>
+                  </div>
+                  
+                  <div>
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                      product.stock === 0 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {product.stock === 0 ? 'Hết hàng' : 'Cần nhập gấp'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );

@@ -1,9 +1,11 @@
 import { BrowserRouter, Routes, Route, Outlet } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute'; // Import ProtectedRoute mới tạo
+
 // Import Layouts
 import Navbar from './components/Navbar';
 import AdminLayout from '../src/pages/admin/AdminLayout';
-import StaffLayout from './pages/staff/StaffLayout'; // Thêm Layout mới cho Staff
+import StaffLayout from './pages/staff/StaffLayout'; // Layout mới cho Staff
 import Login from '../src/pages/Login';
 import Register from '../src/pages/Register';
 
@@ -21,6 +23,8 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminProducts from '../src/pages/admin/ProductManager';
 import BrandManager from '../src/pages/admin/BrandManager';
 import CategoryManager from '../src/pages/admin/CategoryManager';
+import ImportManager from './pages/admin/ImportManager';
+import UserManager from './pages/admin/UserManager';
 
 // Import Pages (Staff)
 import OrderManagement from './pages/staff/OrderManagement';
@@ -42,32 +46,50 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          
           {/* ================= KHU VỰC 1: KHÁCH HÀNG (Có Navbar) ================= */}
           <Route element={<CustomerLayout />}>
             <Route path="/" element={<Home />} />
             <Route path="/product/:id" element={<ProductDetail />} />
             <Route path="/cart" element={<Cart />} />
-            <Route path="/checkout" element={<Checkout />} />
             <Route path="/my-prescription" element={<MyPrescription />} />
             <Route path="/success" element={<Success />} />
-            <Route path="/profile" element={<Profile />} />
+
+            {/* Các Route cần yêu cầu Đăng nhập mới được sử dụng */}
+            <Route path="/checkout" element={
+              <ProtectedRoute allowedRoles={[0, 1, 2]}>
+                <Checkout />
+              </ProtectedRoute>
+            } />
+            <Route path="/profile" element={
+              <ProtectedRoute allowedRoles={[0, 1, 2]}>
+                <Profile />
+              </ProtectedRoute>
+            } />
           </Route>
 
-          {/* ================= KHU VỰC 2: ADMIN (Quyền cao nhất) ================= */}
-          {/* Admin được xem Dashboard, Quản lý sản phẩm, và cả Quản lý đơn hàng */}
-          <Route path="/admin" element={<AdminLayout />}>
+          {/* ================= KHU VỰC 2: ADMIN (Quyền cao nhất - role 1) ================= */}
+          <Route path="/admin" element={
+            <ProtectedRoute allowedRoles={[1]}>
+              <AdminLayout />
+            </ProtectedRoute>
+          }>
             <Route index element={<AdminDashboard />} />
             <Route path="products" element={<AdminProducts />} />
             <Route path="orders" element={<OrderManagement />} />
             <Route path="brand" element={<BrandManager />} />
             <Route path="categories" element={<CategoryManager />} />
-
+            <Route path="imports" element={<ImportManager />} />
+            <Route path="users" element={<UserManager />} />
           </Route>
 
-          {/* ================= KHU VỰC 3: STAFF (Bị giới hạn quyền) ================= */}
-          {/* Staff dùng một Layout riêng, không có link dẫn tới trang Thống kê hay Sản phẩm */}
-          <Route path="/staff" element={<StaffLayout />}>
-            <Route index element={<OrderManagement />} /> {/* Đường dẫn: /staff */}
+          {/* ================= KHU VỰC 3: STAFF (Giới hạn quyền - role 1 & 2) ================= */}
+          <Route path="/staff" element={
+            <ProtectedRoute allowedRoles={[1, 2]}>
+              <StaffLayout />
+            </ProtectedRoute>
+          }>
+            <Route index element={<OrderManagement />} />
           </Route>
 
         </Routes>
