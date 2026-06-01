@@ -4,96 +4,126 @@ import ProtectedRoute from './components/ProtectedRoute'; // Import ProtectedRou
 
 // Import Layouts
 import Navbar from './components/Navbar';
-import AdminLayout from '../src/pages/admin/AdminLayout';
+import AdminLayout from './pages/admin/AdminLayout';
 import StaffLayout from './pages/staff/StaffLayout'; // Layout mới cho Staff
-import Login from '../src/pages/Login';
-import Register from '../src/pages/Register';
+import Login from './pages/Login';
+import Register from './pages/Register';
 
 // Import Pages (Khách hàng)
-import Home from '../src/pages/customer/Home';
-import ProductDetail from '../src/pages/customer/ProductDetail';
-import Cart from '../src/pages/customer/Cart';
-import Checkout from '../src/pages/customer/Checkout';
-import MyPrescription from '../src/pages/customer/Prescription';
-import Success from '../src/pages/customer/Success';
+import Home from './pages/customer/Home';
+import ProductDetail from './pages/customer/ProductDetail';
+import Cart from './pages/customer/Cart';
+import Checkout from './pages/customer/Checkout';
+import MyPrescription from './pages/customer/Prescription';
+import Success from './pages/customer/Success';
 import Profile from './pages/customer/Profile';
+import MyOrders from './pages/customer/MyOrders';
+import Wallet from './pages/customer/Wallet';
 
 // Import Pages (Admin)
 import AdminDashboard from './pages/admin/AdminDashboard';
-import AdminProducts from '../src/pages/admin/ProductManager';
-import BrandManager from '../src/pages/admin/BrandManager';
-import CategoryManager from '../src/pages/admin/CategoryManager';
+import AdminProducts from './pages/admin/ProductManager';
+import BrandManager from './pages/admin/BrandManager';
+import CategoryManager from './pages/admin/CategoryManager';
 import ImportManager from './pages/admin/ImportManager';
 import UserManager from './pages/admin/UserManager';
+import CancelRequests from './pages/admin/CancelRequests'; // Trang quản trị duyệt hủy đơn hàng (PHASE 2)
 
 // Import Pages (Staff)
 import OrderManagement from './pages/staff/OrderManagement';
+import WithdrawRequests from './pages/staff/WithdrawRequests';
 
-// --- TẠO LAYOUT KHÁCH HÀNG (Có Navbar) ---
-const CustomerLayout = () => {
-  return (
-    <>
-      <Navbar />
-      <Outlet />
-    </>
-  );
-};
+
+import { SocketProvider } from './context/SocketContext';
 
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          
-          {/* ================= KHU VỰC 1: KHÁCH HÀNG (Có Navbar) ================= */}
-          <Route element={<CustomerLayout />}>
-            <Route path="/" element={<Home />} />
-            <Route path="/product/:id" element={<ProductDetail />} />
-            <Route path="/cart" element={<Cart />} />
-            <Route path="/my-prescription" element={<MyPrescription />} />
-            <Route path="/success" element={<Success />} />
+      <SocketProvider>
+        <BrowserRouter>
+          <Routes>
+            
+            {/* ================= KHU VỰC 1: CUSTOMER & GUEST ================= */}
+            <Route path="/" element={
+              <>
+                <Navbar />
+                <div className="pt-16 min-h-screen bg-gray-55">
+                  <Outlet />
+                </div>
+              </>
+            }>
+              <Route index element={<Home />} />
+              <Route path="/product/:id" element={<ProductDetail />} />
+              <Route path="/cart" element={<Cart />} />
+              
+              {/* Các route yêu cầu ĐĂNG NHẬP của Khách hàng/Nhân viên/Admin */}
+              <Route path="/checkout" element={
+                <ProtectedRoute allowedRoles={[0, 1, 2]}>
+                  <Checkout />
+                </ProtectedRoute>
+              } />
+              <Route path="/prescription" element={
+                <ProtectedRoute allowedRoles={[0, 1, 2]}>
+                  <MyPrescription />
+                </ProtectedRoute>
+              } />
+              <Route path="/profile" element={
+                <ProtectedRoute allowedRoles={[0, 1, 2]}>
+                  <Profile />
+                </ProtectedRoute>
+              } />
+              <Route path="/success" element={
+                <ProtectedRoute allowedRoles={[0, 1, 2]}>
+                  <Success />
+                </ProtectedRoute>
+              } />
+              <Route path="/my-orders" element={
+                <ProtectedRoute allowedRoles={[0, 1, 2]}>
+                  <MyOrders />
+                </ProtectedRoute>
+              } />
+              <Route path="/my-wallet" element={
+                <ProtectedRoute allowedRoles={[0, 1, 2]}>
+                  <Wallet />
+                </ProtectedRoute>
+              } />
+            </Route>
 
-            {/* Các Route cần yêu cầu Đăng nhập mới được sử dụng */}
-            <Route path="/checkout" element={
-              <ProtectedRoute allowedRoles={[0, 1, 2]}>
-                <Checkout />
+            {/* Đăng nhập / Đăng ký */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+
+            {/* ================= KHU VỰC 2: ADMIN (Quyền cao nhất - role 1) ================= */}
+            <Route path="/admin" element={
+              <ProtectedRoute allowedRoles={[1]}>
+                <AdminLayout />
               </ProtectedRoute>
-            } />
-            <Route path="/profile" element={
-              <ProtectedRoute allowedRoles={[0, 1, 2]}>
-                <Profile />
+            }>
+              <Route index element={<AdminDashboard />} />
+              <Route path="products" element={<AdminProducts />} />
+              <Route path="orders" element={<OrderManagement />} />
+              <Route path="brand" element={<BrandManager />} />
+              <Route path="categories" element={<CategoryManager />} />
+              <Route path="imports" element={<ImportManager />} />
+              <Route path="users" element={<UserManager />} />
+              <Route path="cancel-requests" element={<CancelRequests />} />
+              <Route path="withdraw-requests" element={<WithdrawRequests />} />
+            </Route>
+
+            {/* ================= KHU VỰC 3: STAFF (Giới hạn quyền - role 1 & 2) ================= */}
+            <Route path="/staff" element={
+              <ProtectedRoute allowedRoles={[1, 2]}>
+                <StaffLayout />
               </ProtectedRoute>
-            } />
-          </Route>
+            }>
+              <Route index element={<OrderManagement />} />
+              <Route path="cancel-requests" element={<CancelRequests />} />
+              <Route path="withdraw-requests" element={<WithdrawRequests />} />
+            </Route>
 
-          {/* ================= KHU VỰC 2: ADMIN (Quyền cao nhất - role 1) ================= */}
-          <Route path="/admin" element={
-            <ProtectedRoute allowedRoles={[1]}>
-              <AdminLayout />
-            </ProtectedRoute>
-          }>
-            <Route index element={<AdminDashboard />} />
-            <Route path="products" element={<AdminProducts />} />
-            <Route path="orders" element={<OrderManagement />} />
-            <Route path="brand" element={<BrandManager />} />
-            <Route path="categories" element={<CategoryManager />} />
-            <Route path="imports" element={<ImportManager />} />
-            <Route path="users" element={<UserManager />} />
-          </Route>
-
-          {/* ================= KHU VỰC 3: STAFF (Giới hạn quyền - role 1 & 2) ================= */}
-          <Route path="/staff" element={
-            <ProtectedRoute allowedRoles={[1, 2]}>
-              <StaffLayout />
-            </ProtectedRoute>
-          }>
-            <Route index element={<OrderManagement />} />
-          </Route>
-
-        </Routes>
-      </BrowserRouter>
+          </Routes>
+        </BrowserRouter>
+      </SocketProvider>
     </AuthProvider>
   );
 }

@@ -1,31 +1,50 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { View, ArrowRight, Sparkles, ShoppingBag, ShieldCheck, Loader2, Box } from 'lucide-react';
+import { useSocket } from '../../context/SocketContext';
 
 export default function Home() {
   const navigate = useNavigate();
+  const { socket } = useSocket();
   
   // STATE LƯU DỮ LIỆU TỪ BACKEND
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const fetchProducts = async () => {
+    try {
+      const res = await fetch('/api/products');
+      const data = await res.json();
+      if (data.success) {
+        setProducts(data.products);
+      }
+    } catch (error) {
+      console.error("Lỗi tải danh sách sản phẩm:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // GỌI API LẤY DANH SÁCH SẢN PHẨM KHI VỪA MỞ TRANG
   useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const res = await fetch('/api/products');
-        const data = await res.json();
-        if (data.success) {
-          setProducts(data.products);
-        }
-      } catch (error) {
-        console.error("Lỗi tải danh sách sản phẩm:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchProducts();
   }, []);
+
+  // LẮNG NGHE SỰ KIỆN CẬP NHẬT TỒN KHO REALTIME
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleStockUpdate = (payload) => {
+      console.log('⚡ [Socket.IO Client] Nhận tín hiệu cập nhật tồn kho sỉ/lẻ:', payload);
+      fetchProducts();
+    };
+
+    socket.on('product:stockUpdated', handleStockUpdate);
+
+    return () => {
+      socket.off('product:stockUpdated', handleStockUpdate);
+    };
+  }, [socket]);
 
   return (
     <div className="bg-gray-50 min-h-screen pb-20">

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, User, Menu, X, Glasses, ChevronRight, ChevronDown, LogOut, Package } from 'lucide-react';
+import { ShoppingCart, User, Menu, X, Glasses, ChevronRight, ChevronDown, LogOut, Package, Wallet } from 'lucide-react';
 import { useAuth } from '../context/AuthContext'; // Import Trạm phát sóng (Đổi đường dẫn nếu cần)
+import { getCartKey } from '../utils/cartHelper';
+import NotificationBell from './NotificationBell';
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -31,7 +33,8 @@ const Navbar = () => {
   };
 
   const calculateTotalItems = () => {
-    const cart = JSON.parse(localStorage.getItem('glassesCart')) || [];
+    const cartKey = getCartKey();
+    const cart = JSON.parse(localStorage.getItem(cartKey)) || [];
     const total = cart.reduce((sum, item) => sum + item.quantity, 0);
     setCartCount(total);
   };
@@ -40,7 +43,7 @@ const Navbar = () => {
     calculateTotalItems(); 
     window.addEventListener('cartUpdated', calculateTotalItems);
     return () => window.removeEventListener('cartUpdated', calculateTotalItems);
-  }, []);
+  }, [user]);
 
   return (
     <>
@@ -74,6 +77,9 @@ const Navbar = () => {
             {/* NÚT CHỨC NĂNG */}
             <div className="flex items-center space-x-4">
               
+              {/* CHUÔNG THÔNG BÁO */}
+              <NotificationBell />
+
               {/* GIỎ HÀNG */}
               <Link to="/cart" className="relative p-2 text-gray-600 hover:text-blue-600 transition">
                 <ShoppingCart className="w-6 h-6" />
@@ -114,6 +120,10 @@ const Navbar = () => {
                         <Link to="/my-orders" className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition" onClick={() => setIsProfileOpen(false)}>
                           <Package className="w-4 h-4" />
                           <span className="font-medium">Đơn hàng của tôi</span>
+                        </Link>
+                        <Link to="/my-wallet" className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition" onClick={() => setIsProfileOpen(false)}>
+                          <Wallet className="w-4 h-4" />
+                          <span className="font-medium">Ví của tôi</span>
                         </Link>
                         <hr className="my-2 border-gray-100" />
                         <button onClick={handleLogout} className="w-full flex items-center space-x-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition">
@@ -183,6 +193,10 @@ const Navbar = () => {
               <Link to="/my-orders" onClick={closeMenu} className="flex items-center space-x-3 text-gray-700 hover:text-blue-600 font-medium py-2">
                 <Package className="w-5 h-5" />
                 <span>Đơn hàng của tôi</span>
+              </Link>
+              <Link to="/my-wallet" onClick={closeMenu} className="flex items-center space-x-3 text-gray-700 hover:text-blue-600 font-medium py-2">
+                <Wallet className="w-5 h-5" />
+                <span>Ví của tôi</span>
               </Link>
               <button onClick={handleLogout} className="w-full flex items-center justify-center space-x-2 bg-red-100 text-red-600 py-3.5 rounded-xl font-bold hover:bg-red-200 transition mt-4">
                 <LogOut className="w-5 h-5" />

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Image as ImageIcon, Edit, Trash2, X, Box, Search, RotateCcw } from 'lucide-react';
+import { useSocket } from '../../context/SocketContext';
 
 export default function ProductManager() {
+  const { socket } = useSocket();
   const [products, setProducts] = useState([]);
   const [brands, setBrands] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -49,6 +51,22 @@ export default function ProductManager() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Đăng ký lắng nghe sự kiện cập nhật tồn kho realtime
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleStockUpdate = (payload) => {
+      console.log('⚡ [Socket.IO Client] Nhận tín hiệu cập nhật tồn kho sỉ/lẻ:', payload);
+      fetchData();
+    };
+
+    socket.on('product:stockUpdated', handleStockUpdate);
+
+    return () => {
+      socket.off('product:stockUpdated', handleStockUpdate);
+    };
+  }, [socket]);
 
   // LỌC SẢN PHẨM Ở FRONTEND THEO TÊN, NHÃN HÀNG, DANH MỤC (REAL-TIME, KHÔNG PHÂN BIỆT HOA THƯỜNG, KHÔNG CRASH NẾU NULL)
   const filteredProducts = products.filter(prod => {

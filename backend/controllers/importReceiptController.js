@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const ImportReceipt = require('../models/ImportReceipt');
 const Product = require('../models/Product');
+const { checkAndEmitLowStockNotification } = require('../utils/notificationHelper');
+const { getIO } = require('../socket');
 
 // [POST] Tạo phiếu nhập hàng (Tự động cộng stock, validate giá trị và sản phẩm)
 exports.createReceipt = async (req, res) => {
@@ -13,12 +15,34 @@ exports.createReceipt = async (req, res) => {
   }
 
   try {
-    const { receiptCode, items, note } = req.body;
-    const creator = req.user?.name || req.user?.email || 'Admin';
+    const { items, note } = req.body;
 
-    if (!receiptCode || !items || !Array.isArray(items) || items.length === 0) {
+    if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, message: 'Thông tin phiếu nhập không đầy đủ!' });
     }
+
+    // TỰ ĐỘNG SINH MÃ PHIẾU KHÔNG TRÙNG LẶP TRÊN BACKEND (UNIQUE)
+    let generatedReceiptCode;
+    let isUnique = false;
+    while (!isUnique) {
+      const today = new Date();
+      const dateStr = today.getFullYear().toString() + 
+                      (today.getMonth() + 1).toString().padStart(2, '0') + 
+                      today.getDate().toString().padStart(2, '0');
+      const randomSuffix = Math.floor(1000 + Math.random() * 9000); // 4 số ngẫu nhiên cực kỳ an toàn
+      generatedReceiptCode = `NK${dateStr}${randomSuffix}`;
+      
+      const exists = await ImportReceipt.findOne({ receiptCode: generatedReceiptCode });
+      if (!exists) {
+        isUnique = true;
+      }
+    }
+
+    // THU THẬP THÔNG TIN NGƯỜI ĐĂNG NHẬP THỰC TẾ (BẢO MẬT API-LEVEL)
+    const creatorId = req.user?.id;
+    const creatorName = req.user?.name || req.user?.username || 'Admin';
+
+    console.log(`🔌 [Backend-Import] Đang khởi tạo phiếu nhập sỉ: ${generatedReceiptCode} bởi ${creatorName} (${creatorId})`);
 
     // 1. BƯỚC TIỀN KIỂM TRA (PRE-VALIDATION): Cam kết không chạy nửa vời nếu dính lỗi
     for (const item of items) {
@@ -44,36 +68,69 @@ exports.createReceipt = async (req, res) => {
       session.startTransaction();
 
       // Lưu phiếu nhập
-      const newReceipt = new ImportReceipt({ receiptCode, creator, items, note });
+      const newReceipt = new ImportReceipt({ 
+        receiptCode: generatedReceiptCode, 
+        creator: creatorName, // Giữ tương thích ngược
+        creatorId, 
+        creatorName, 
+        items, 
+        note 
+      });
       await newReceipt.save({ session });
 
       // Cộng tồn kho và đổi giá sỉ hiện hành cho từng sản phẩm
       for (const item of items) {
-        await Product.findByIdAndUpdate(
+        const updatedProduct = await Product.findByIdAndUpdate(
           item.productId,
           {
             $inc: { stock: Number(item.quantity) },
             $set: { importPrice: Number(item.importPrice) }
           },
-          { session }
+          { session, new: true }
         );
+
+        // ================= REALTIME STOCK INTEGRATION =================
+        getIO().emit('product:stockUpdated', {
+          productId: updatedProduct._id.toString(),
+          stock: updatedProduct.stock,
+          reason: 'import'
+        });
+        await checkAndEmitLowStockNotification(updatedProduct);
+        // ===============================================================
       }
 
       await session.commitTransaction();
       session.endSession();
     } else {
       // Chế độ Standalone (Bảo đảm an toàn tuyệt đối nhờ bước Tiền Kiểm Tra 1 đã xác thực thành công)
-      const newReceipt = new ImportReceipt({ receiptCode, creator, items, note });
+      const newReceipt = new ImportReceipt({ 
+        receiptCode: generatedReceiptCode, 
+        creator: creatorName, // Giữ tương thích ngược
+        creatorId, 
+        creatorName, 
+        items, 
+        note 
+      });
       await newReceipt.save();
 
       for (const item of items) {
-        await Product.findByIdAndUpdate(
+        const updatedProduct = await Product.findByIdAndUpdate(
           item.productId,
           {
             $inc: { stock: Number(item.quantity) },
             $set: { importPrice: Number(item.importPrice) }
-          }
+          },
+          { new: true }
         );
+
+        // ================= REALTIME STOCK INTEGRATION =================
+        getIO().emit('product:stockUpdated', {
+          productId: updatedProduct._id.toString(),
+          stock: updatedProduct.stock,
+          reason: 'import'
+        });
+        await checkAndEmitLowStockNotification(updatedProduct);
+        // ===============================================================
       }
     }
 

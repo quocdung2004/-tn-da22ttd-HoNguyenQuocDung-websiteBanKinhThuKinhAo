@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Image as ImageIcon, Tag, Globe, Trash2 } from 'lucide-react';
+import { Plus, Image as ImageIcon, Tag, Globe, Search } from 'lucide-react';
 
 export default function BrandManager() {
   const [brands, setBrands] = useState([]);
@@ -8,6 +8,7 @@ export default function BrandManager() {
   const [imagePreview, setImagePreview] = useState(null); // Để hiển thị ảnh xem trước
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
+  const [searchTerm, setSearchTerm] = useState('');
 
   // 1. Gọi API lấy danh sách nhãn hàng khi vừa vào trang
   const fetchBrands = async () => {
@@ -78,6 +79,14 @@ export default function BrandManager() {
     }
   };
 
+  // Lọc danh sách thương hiệu theo từ khóa tìm kiếm (không phân biệt hoa thường, chống crash)
+  const filteredBrands = brands.filter((brand) => {
+    const name = brand.name ? brand.name.toLowerCase() : '';
+    const origin = brand.origin ? brand.origin.toLowerCase() : '';
+    const query = searchTerm.toLowerCase();
+    return name.includes(query) || origin.includes(query);
+  });
+
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -130,8 +139,31 @@ export default function BrandManager() {
 
           {/* CỘT PHẢI: DANH SÁCH NHÃN HÀNG */}
           <div className="lg:col-span-2 bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-50">
-              <h2 className="text-xl font-bold text-gray-900">Danh sách hiện tại ({brands.length})</h2>
+            <div className="p-6 border-b border-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Danh sách hiện tại ({brands.length})</h2>
+                {searchTerm && (
+                  <p className="text-xs text-gray-400 mt-1">Tìm thấy {filteredBrands.length} kết quả phù hợp</p>
+                )}
+              </div>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Tìm kiếm thương hiệu..."
+                  className="pl-10 pr-8 py-2.5 bg-gray-50 border border-gray-150 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition text-sm w-full sm:w-60 font-medium text-gray-700"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 font-bold text-sm"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
             
             <div className="overflow-x-auto">
@@ -144,16 +176,24 @@ export default function BrandManager() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {brands.length === 0 ? (
-                    <tr><td colSpan="3" className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu. Hãy thêm nhãn hàng đầu tiên!</td></tr>
+                  {filteredBrands.length === 0 ? (
+                    <tr>
+                      <td colSpan="3" className="px-6 py-12 text-center">
+                        <div className="flex flex-col items-center justify-center gap-2 text-gray-400">
+                          <Search className="w-10 h-10 text-gray-300" />
+                          <p className="font-bold text-sm">Không tìm thấy nhãn hàng phù hợp</p>
+                          <p className="text-xs text-gray-400">Thử tìm kiếm với từ khóa khác xem sao nhé!</p>
+                        </div>
+                      </td>
+                    </tr>
                   ) : (
-                    brands.map((brand) => (
-                      <tr key={brand._id} className="hover:bg-gray-50 transition">
+                    filteredBrands.map((brand) => (
+                      <tr key={brand._id} className="hover:bg-gray-50/50 transition">
                         <td className="px-6 py-4">
                           <img src={brand.logoUrl} alt={brand.name} className="h-10 object-contain rounded" />
                         </td>
                         <td className="px-6 py-4 font-bold text-gray-900">{brand.name}</td>
-                        <td className="px-6 py-4 text-gray-600">{brand.origin}</td>
+                        <td className="px-6 py-4 text-gray-600">{brand.origin || '--'}</td>
                       </tr>
                     ))
                   )}

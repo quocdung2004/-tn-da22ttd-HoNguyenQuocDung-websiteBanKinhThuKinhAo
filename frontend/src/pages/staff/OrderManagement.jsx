@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Package, Clock, CheckCircle, Truck, XCircle, Search, Eye, Filter, Loader2, AlertCircle, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useSocket } from '../../context/SocketContext';
 
 export default function OrderManagement() {
   const { user } = useAuth();
+  const { socket } = useSocket();
   const isStaff = user?.role === 2;
 
   const [orders, setOrders] = useState([]);
@@ -15,6 +17,8 @@ export default function OrderManagement() {
   // State quản lý chi tiết đơn hàng (Modal)
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [cancellingOrderId, setCancellingOrderId] = useState(null);
+  const [adminCancelReason, setAdminCancelReason] = useState('');
 
   // 1. Tải danh sách đơn hàng thực tế từ MongoDB qua API
   const fetchOrders = async () => {
@@ -69,18 +73,42 @@ export default function OrderManagement() {
     fetchOrders();
   }, []);
 
+  // Đăng ký lắng nghe sự kiện đơn hàng realtime
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleOrderUpdate = () => {
+      console.log('⚡ [Socket.IO Client] Nhận sự kiện cập nhật đơn hàng. Đang làm mới danh sách quản lý đơn hàng...');
+      fetchOrders();
+    };
+
+    socket.on('order:new', handleOrderUpdate);
+    socket.on('order:statusChanged', handleOrderUpdate);
+    socket.on('order:cancelHandled', handleOrderUpdate);
+
+    return () => {
+      socket.off('order:new', handleOrderUpdate);
+      socket.off('order:statusChanged', handleOrderUpdate);
+      socket.off('order:cancelHandled', handleOrderUpdate);
+    };
+  }, [socket]);
+
   // 2. Hàm cập nhật trạng thái đơn hàng (Đồng bộ logic Backend + Kiểm soát luồng)
-  const updateOrderStatus = async (orderId, newStatus) => {
+  const updateOrderStatus = async (orderId, newStatus, cancelReason = '') => {
     setIsUpdating(true);
     try {
       const token = localStorage.getItem('glassesToken');
+      const bodyPayload = { status: newStatus };
+      if (newStatus === 'cancelled' && cancelReason) {
+        bodyPayload.cancelReason = cancelReason;
+      }
       const res = await fetch(`/api/orders/${orderId}/status`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ status: newStatus })
+        body: JSON.stringify(bodyPayload)
       });
       const data = await res.json();
       if (data.success) {
@@ -433,7 +461,15 @@ export default function OrderManagement() {
                     <select
                       value={selectedOrder.status}
                       disabled={isUpdating}
-                      onChange={(e) => updateOrderStatus(selectedOrder._id, e.target.value)}
+                      onChange={(e) => {
+                        const newStatus = e.target.value;
+                        if (newStatus === 'cancelled') {
+                          setCancellingOrderId(selectedOrder._id);
+                          setAdminCancelReason('');
+                        } else {
+                          updateOrderStatus(selectedOrder._id, newStatus);
+                        }
+                      }}
                       className="bg-white border border-gray-200 text-gray-800 text-xs rounded-xl p-2 font-bold outline-none cursor-pointer w-full"
                     >
                       {getValidTransitions(selectedOrder.status).map(st => (
@@ -503,6 +539,60 @@ export default function OrderManagement() {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Modal xác nhận hủy đơn dành cho Staff/Admin */}
+      {cancellingOrderId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-gray-100 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-3 mb-4 text-red-500">
+              <XCircle className="w-7 h-7" />
+              <h3 className="text-xl font-bold text-gray-900">Xác Nhận Hủy Đơn Hàng</h3>
+            </div>
+            
+            <p className="text-gray-500 text-sm mb-6 leading-relaxed">
+              Bạn đang thực hiện hủy đơn hàng này trực tiếp. Vui lòng cung cấp lý do hủy chi tiết để thông báo cho khách hàng và lưu trữ lịch sử hệ thống.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-gray-700 text-xs font-bold uppercase mb-2">Lý do hủy đơn *</label>
+                <textarea
+                  rows={3}
+                  value={adminCancelReason}
+                  onChange={(e) => setAdminCancelReason(e.target.value)}
+                  placeholder="Nhập lý do chi tiết (không được bỏ trống)..."
+                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCancellingOrderId(null);
+                    setAdminCancelReason('');
+                  }}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-5 py-3 rounded-2xl text-sm transition"
+                >
+                  Bỏ qua
+                </button>
+                <button
+                  type="button"
+                  disabled={!adminCancelReason.trim()}
+                  onClick={() => {
+                    updateOrderStatus(cancellingOrderId, 'cancelled', adminCancelReason.trim());
+                    setCancellingOrderId(null);
+                    setAdminCancelReason('');
+                  }}
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold px-5 py-3 rounded-2xl text-sm transition disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-red-100"
+                >
+                  Xác nhận hủy đơn
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

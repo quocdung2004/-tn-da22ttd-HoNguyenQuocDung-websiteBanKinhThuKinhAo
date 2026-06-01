@@ -28,7 +28,27 @@ const orderSchema = new mongoose.Schema({
   
   total: { type: Number, required: true },
   paymentMethod: { type: String, enum: ['cod', 'banking'], default: 'cod' },
-  status: { type: String, enum: ['pending', 'paid', 'processing', 'shipping', 'shipped', 'completed', 'cancelled'], default: 'pending' },
+  status: { 
+    type: String, 
+    enum: ['pending', 'paid', 'processing', 'shipping', 'shipped', 'completed', 'cancelled', 'cancel_requested'], 
+    default: 'pending' 
+  },
+  
+  // --- THÔNG TIN HỦY ĐƠN & HOÀN TIỀN (PHASE 1) ---
+  previousStatusBeforeCancelRequest: { type: String }, // Lưu trạng thái trước khi gửi yêu cầu hủy để dễ rollback
+  refundStatus: { 
+    type: String, 
+    enum: ['none', 'pending', 'wallet_refunded', 'rejected'], 
+    default: 'none' 
+  },
+  cancelReason: { type: String },
+  cancelRequestedAt: { type: Date },
+  cancelRejectReason: { type: String },
+  refundHandledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  refundHandledAt: { type: Date },
+  processingStartedAt: { type: Date },
+  stockRestored: { type: Boolean, default: false }, // Biến cờ bảo vệ chống hoàn stock trùng lặp
+
   createdAt: { type: Date, default: Date.now }
 });
 

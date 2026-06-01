@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, UserCheck, ShieldAlert, PlusCircle, Pencil, Lock, Unlock, Mail, Phone, User, RefreshCw, X, AlertTriangle } from 'lucide-react';
+import { Users, UserCheck, ShieldAlert, PlusCircle, Pencil, Lock, Unlock, Mail, Phone, User, RefreshCw, X, AlertTriangle, Search } from 'lucide-react';
 
 export default function UserManager() {
   const [users, setUsers] = useState([]);
@@ -8,6 +8,7 @@ export default function UserManager() {
   
   // Tab hiện tại: 'staff' hoặc 'customer'
   const [activeTab, setActiveTab] = useState('staff');
+  const [searchTerm, setSearchTerm] = useState('');
   
   // State quản lý Modal Thêm/Sửa Staff
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
@@ -56,7 +57,13 @@ export default function UserManager() {
     fetchUsers();
   }, []);
 
-  // Lọc danh sách theo tab hoạt động
+  // Xử lý đổi Tab và Reset từ khóa tìm kiếm cho trực quan
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setSearchTerm('');
+  };
+
+  // 1. Lọc danh sách theo tab hoạt động
   // role === 2 là Staff, role === 0 là Customer. Riêng role === 1 là Admin cũng hiển thị ở Staff để đầy đủ quản trị.
   const filteredUsers = users.filter(u => {
     if (activeTab === 'staff') {
@@ -64,6 +71,20 @@ export default function UserManager() {
     } else {
       return u.role === 0;
     }
+  });
+
+  // 2. Tìm kiếm động thời gian thực trên Tab hiện tại (không crash, không phân biệt hoa thường)
+  const searchedUsers = filteredUsers.filter((user) => {
+    const name = user.name ? user.name.toLowerCase() : '';
+    const username = user.username ? user.username.toLowerCase() : '';
+    const email = user.email ? user.email.toLowerCase() : '';
+    const phone = user.phone ? user.phone.toLowerCase() : '';
+    const query = searchTerm.toLowerCase();
+    
+    return name.includes(query) || 
+           username.includes(query) || 
+           email.includes(query) || 
+           phone.includes(query);
   });
 
   // Mở Modal lập tài khoản Staff mới
@@ -199,7 +220,7 @@ export default function UserManager() {
       {/* ================= THANH TABS CHỌN ĐỐI TƯỢNG ================= */}
       <div className="flex bg-white p-1.5 rounded-2xl border border-gray-100 max-w-md shadow-sm mb-8">
         <button
-          onClick={() => setActiveTab('staff')}
+          onClick={() => handleTabChange('staff')}
           className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all ${
             activeTab === 'staff'
               ? 'bg-gray-900 text-white shadow-md'
@@ -209,7 +230,7 @@ export default function UserManager() {
           <UserCheck className="w-4 h-4" /> Nhân Viên ({users.filter(u => u.role === 1 || u.role === 2).length})
         </button>
         <button
-          onClick={() => setActiveTab('customer')}
+          onClick={() => handleTabChange('customer')}
           className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all ${
             activeTab === 'customer'
               ? 'bg-gray-900 text-white shadow-md'
@@ -247,135 +268,180 @@ export default function UserManager() {
           <p className="text-gray-400 mt-1">Danh sách đối tượng này hiện đang trống rỗng.</p>
         </div>
       ) : (
-        <div className="bg-white border border-gray-100 rounded-3xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50/50">
-                  <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400 pl-6 sm:pl-8">Họ Tên / Username</th>
-                  <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Email</th>
-                  <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Điện Thoại</th>
-                  <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Vai Trò</th>
-                  <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Trạng Thái</th>
-                  <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400 pr-6 sm:pr-8 text-right">Thao Tác</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filteredUsers.map((user) => (
-                  <tr 
-                    key={user._id} 
-                    className={`hover:bg-gray-50/50 transition-colors ${
-                      user.isBlocked ? 'bg-red-50/10' : ''
-                    }`}
-                  >
-                    {/* Username & Họ tên */}
-                    <td className="p-4 sm:p-5 pl-6 sm:pl-8">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${
-                          user.role === 1 
-                            ? 'bg-amber-100 text-amber-700' 
-                            : user.role === 2 
-                            ? 'bg-blue-100 text-blue-700' 
-                            : 'bg-gray-100 text-gray-700'
-                        }`}>
-                          {user.name ? user.name.substring(0, 2).toUpperCase() : 'US'}
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
-                            {user.name || 'Chưa thiết lập'}
-                            {user.isBlocked && (
-                              <span className="px-2 py-0.5 bg-red-100 text-red-700 text-[10px] font-black rounded-md">Bị khóa</span>
-                            )}
-                          </h4>
-                          <span className="text-xs text-gray-400 font-medium">@{user.username}</span>
-                        </div>
-                      </div>
-                    </td>
-                    
-                    {/* Email */}
-                    <td className="p-4 sm:p-5 text-sm text-gray-600 font-medium">
-                      {user.email ? (
-                        <span className="flex items-center gap-1.5">
-                          <Mail className="w-4 h-4 text-gray-400" /> {user.email}
-                        </span>
-                      ) : (
-                        <span className="text-gray-300">--</span>
-                      )}
-                    </td>
-                    
-                    {/* Điện thoại */}
-                    <td className="p-4 sm:p-5 text-sm text-gray-600 font-medium">
-                      {user.phone ? (
-                        <span className="flex items-center gap-1.5">
-                          <Phone className="w-4 h-4 text-gray-400" /> {user.phone}
-                        </span>
-                      ) : (
-                        <span className="text-gray-300">--</span>
-                      )}
-                    </td>
-                    
-                    {/* Vai Trò */}
-                    <td className="p-4 sm:p-5">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
-                        user.role === 1
-                          ? 'bg-amber-100 text-amber-800'
-                          : user.role === 2
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {user.role === 1 ? 'Admin' : user.role === 2 ? 'Staff' : 'Khách'}
-                      </span>
-                    </td>
-                    
-                    {/* Trạng Thái */}
-                    <td className="p-4 sm:p-5">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-black flex items-center gap-1.5 w-fit ${
-                        user.isBlocked
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-emerald-100 text-emerald-700'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          user.isBlocked ? 'bg-red-600' : 'bg-emerald-600'
-                        }`}></span>
-                        {user.isBlocked ? 'Đang Khóa' : 'Hoạt Động'}
-                      </span>
-                    </td>
-                    
-                    {/* Thao tác */}
-                    <td className="p-4 sm:p-5 pr-6 sm:pr-8 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {/* Chỉ cho sửa thông tin nếu là Staff (role 2) */}
-                        {user.role === 2 && (
-                          <button
-                            onClick={() => handleOpenEditStaff(user)}
-                            className="p-2 bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 rounded-xl transition"
-                            title="Chỉnh sửa thông tin"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                        )}
-                        
-                        {/* Nút Khóa / Mở khóa (Ẩn nếu là chính tài khoản đang login) */}
-                        {user._id !== localStorage.getItem('glassesUser') && (
-                          <button
-                            onClick={() => handleOpenConfirmToggleBlock(user)}
-                            className={`p-2 rounded-xl transition ${
-                              user.isBlocked
-                                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-700'
-                                : 'bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700'
-                            }`}
-                            title={user.isBlocked ? 'Mở khóa tài khoản' : 'Khóa tài khoản'}
-                          >
-                            {user.isBlocked ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="space-y-6">
+          
+          {/* THANH TÌM KIẾM ĐỘC LẬP TỪNG TAB */}
+          <div className="bg-white p-4 sm:p-5 border border-gray-100 rounded-3xl shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h3 className="font-bold text-gray-900 text-sm">
+                Danh sách {activeTab === 'staff' ? 'Nhân Viên' : 'Khách Hàng'} ({filteredUsers.length})
+              </h3>
+              {searchTerm && (
+                <p className="text-xs text-gray-400 mt-0.5">Tìm thấy {searchedUsers.length} kết quả phù hợp</p>
+              )}
+            </div>
+            
+            <div className="relative">
+              <input
+                type="text"
+                placeholder={`Tìm ${activeTab === 'staff' ? 'nhân viên' : 'khách hàng'}...`}
+                className="pl-10 pr-8 py-2.5 bg-gray-50 border border-gray-150 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition text-sm w-full sm:w-64 font-medium text-gray-700"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 font-bold text-sm"
+                >
+                  ×
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* HIỂN THỊ BẢNG HOẶC EMPTY STATE */}
+          {searchedUsers.length === 0 ? (
+            <div className="text-center py-20 bg-white border border-gray-100 rounded-3xl shadow-sm">
+              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400">
+                <Search className="w-8 h-8" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">Không tìm thấy kết quả</h3>
+              <p className="text-gray-400 mt-1">Không tìm thấy tài khoản phù hợp với từ khóa "{searchTerm}".</p>
+            </div>
+          ) : (
+            <div className="bg-white border border-gray-100 rounded-3xl shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50/50">
+                      <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400 pl-6 sm:pl-8">Họ Tên / Username</th>
+                      <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Email</th>
+                      <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Điện Thoại</th>
+                      <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Vai Trò</th>
+                      <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400">Trạng Thái</th>
+                      <th className="p-4 sm:p-5 text-xs font-bold uppercase tracking-wider text-gray-400 pr-6 sm:pr-8 text-right">Thao Tác</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {searchedUsers.map((user) => (
+                      <tr 
+                        key={user._id} 
+                        className={`hover:bg-gray-50/50 transition-colors ${
+                          user.isBlocked ? 'bg-red-50/10' : ''
+                        }`}
+                      >
+                        {/* Username & Họ tên */}
+                        <td className="p-4 sm:p-5 pl-6 sm:pl-8">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${
+                              user.role === 1 
+                                ? 'bg-amber-100 text-amber-700' 
+                                : user.role === 2 
+                                ? 'bg-blue-100 text-blue-700' 
+                                : 'bg-gray-100 text-gray-700'
+                            }`}>
+                              {user.name ? user.name.substring(0, 2).toUpperCase() : 'US'}
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-gray-900 text-sm flex items-center gap-1.5">
+                                {user.name || 'Chưa thiết lập'}
+                                {user.isBlocked && (
+                                  <span className="px-2 py-0.5 bg-red-100 text-red-700 text-[10px] font-black rounded-md">Bị khóa</span>
+                                )}
+                              </h4>
+                              <span className="text-xs text-gray-400 font-medium">@{user.username}</span>
+                            </div>
+                          </div>
+                        </td>
+                        
+                        {/* Email */}
+                        <td className="p-4 sm:p-5 text-sm text-gray-600 font-medium">
+                          {user.email ? (
+                            <span className="flex items-center gap-1.5">
+                              <Mail className="w-4 h-4 text-gray-400" /> {user.email}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300">--</span>
+                          )}
+                        </td>
+                        
+                        {/* Điện thoại */}
+                        <td className="p-4 sm:p-5 text-sm text-gray-600 font-medium">
+                          {user.phone ? (
+                            <span className="flex items-center gap-1.5">
+                              <Phone className="w-4 h-4 text-gray-400" /> {user.phone}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300">--</span>
+                          )}
+                        </td>
+                        
+                        {/* Vai Trò */}
+                        <td className="p-4 sm:p-5">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                            user.role === 1
+                              ? 'bg-amber-100 text-amber-800'
+                              : user.role === 2
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {user.role === 1 ? 'Admin' : user.role === 2 ? 'Staff' : 'Khách'}
+                          </span>
+                        </td>
+                        
+                        {/* Trạng Thái */}
+                        <td className="p-4 sm:p-5">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-black flex items-center gap-1.5 w-fit ${
+                            user.isBlocked
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              user.isBlocked ? 'bg-red-600' : 'bg-emerald-600'
+                            }`}></span>
+                            {user.isBlocked ? 'Đang Khóa' : 'Hoạt Động'}
+                          </span>
+                        </td>
+                        
+                        {/* Thao tác */}
+                        <td className="p-4 sm:p-5 pr-6 sm:pr-8 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {/* Chỉ cho sửa thông tin nếu là Staff (role 2) */}
+                            {user.role === 2 && (
+                              <button
+                                onClick={() => handleOpenEditStaff(user)}
+                                className="p-2 bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 rounded-xl transition"
+                                title="Chỉnh sửa thông tin"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            )}
+                            
+                            {/* Nút Khóa / Mở khóa (Ẩn nếu là chính tài khoản đang login) */}
+                            {user._id !== localStorage.getItem('glassesUser') && (
+                              <button
+                                onClick={() => handleOpenConfirmToggleBlock(user)}
+                                className={`p-2 rounded-xl transition ${
+                                  user.isBlocked
+                                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-700'
+                                    : 'bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700'
+                                }`}
+                                title={user.isBlocked ? 'Mở khóa tài khoản' : 'Khóa tài khoản'}
+                              >
+                                {user.isBlocked ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

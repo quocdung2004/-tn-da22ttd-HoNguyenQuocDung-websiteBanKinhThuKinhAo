@@ -176,7 +176,23 @@ const orderRoutes = require('./routes/orderRoutes');
 app.use('/api/orders', orderRoutes);
 const importReceiptRoutes = require('./routes/importReceiptRoutes');
 app.use('/api/imports', importReceiptRoutes);
+const adminRoutes = require('./routes/adminRoutes');
+app.use('/api/admin', adminRoutes);
+const walletRoutes = require('./routes/walletRoutes');
+app.use('/api/wallet', walletRoutes);
+
+// Đăng ký định tuyến thông báo (Notification System)
+const notificationRoutes = require('./routes/notificationRoutes');
+app.use('/api/notifications', notificationRoutes);
+
+// Khởi tạo máy chủ HTTP tích hợp Socket.IO Realtime
+const http = require('http');
+const { initSocket } = require('./socket');
+
+const server = http.createServer(app);
+initSocket(server);
+
 const PORT = 3001;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server Backend đã sẵn sàng tại: http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server Backend HTTP & Socket.IO đã sẵn sàng tại: http://localhost:${PORT}`);
 });

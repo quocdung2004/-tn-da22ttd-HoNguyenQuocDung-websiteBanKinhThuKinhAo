@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Calendar, ClipboardList, Package, User, PlusCircle, Eye, X, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Calendar, ClipboardList, Package, User, PlusCircle, Eye, X, Loader2, AlertCircle, Search } from 'lucide-react';
 
 export default function ImportManager() {
   const [receipts, setReceipts] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // State form nhập mới
-  const [receiptCode, setReceiptCode] = useState('');
+  const [currentUser, setCurrentUser] = useState(null);
   const [note, setNote] = useState('');
   const [importItems, setImportItems] = useState([
     { productId: '', quantity: 1, importPrice: 0 }
@@ -17,16 +18,6 @@ export default function ImportManager() {
 
   // State Modal xem chi tiết phiếu nhập
   const [selectedReceipt, setSelectedReceipt] = useState(null);
-
-  // 1. Sinh mã nhập kho ngẫu nhiên khi vào trang
-  const generateReceiptCode = () => {
-    const today = new Date();
-    const dateStr = today.getFullYear().toString() + 
-                    (today.getMonth() + 1).toString().padStart(2, '0') + 
-                    today.getDate().toString().padStart(2, '0');
-    const randomSuffix = Math.floor(100 + Math.random() * 900); // 3 số ngẫu nhiên
-    setReceiptCode(`NK${dateStr}${randomSuffix}`);
-  };
 
   // 2. Fetch dữ liệu từ API MongoDB
   const fetchData = async () => {
@@ -62,7 +53,14 @@ export default function ImportManager() {
 
   useEffect(() => {
     fetchData();
-    generateReceiptCode();
+    const userStr = localStorage.getItem('glassesUser');
+    if (userStr) {
+      try {
+        setCurrentUser(JSON.parse(userStr));
+      } catch (e) {
+        console.error('Lỗi phân tích người dùng:', e);
+      }
+    }
   }, []);
 
   // 3. Quản lý các dòng sản phẩm trong form nhập hàng
@@ -98,19 +96,6 @@ export default function ImportManager() {
     e.preventDefault();
     if (isSubmitting) return;
 
-    // Validate dữ liệu Frontend trước
-    if (!receiptCode.trim()) {
-      alert('Vui lòng điền mã phiếu nhập kho!');
-      return;
-    }
-
-    // Kiểm tra trùng mã phiếu
-    const codeDup = receipts.some(r => r.receiptCode.toLowerCase() === receiptCode.toLowerCase());
-    if (codeDup) {
-      alert('Mã phiếu nhập kho đã tồn tại! Vui lòng sinh mã mới.');
-      return;
-    }
-
     for (let i = 0; i < importItems.length; i++) {
       const item = importItems[i];
       if (!item.productId) {
@@ -137,7 +122,6 @@ export default function ImportManager() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          receiptCode,
           note,
           items: importItems
         })
@@ -150,7 +134,6 @@ export default function ImportManager() {
         // Reset form
         setNote('');
         setImportItems([{ productId: '', quantity: 1, importPrice: 0 }]);
-        generateReceiptCode();
 
         // Tải lại dữ liệu mới nhất
         fetchData();
@@ -164,6 +147,25 @@ export default function ImportManager() {
       setIsSubmitting(false);
     }
   };
+
+  // 5. Lọc danh sách phiếu nhập động thời gian thực (receiptCode, creator, creatorName, và tên sản phẩm bên trong)
+  const filteredReceipts = receipts.filter((receipt) => {
+    const code = receipt.receiptCode ? receipt.receiptCode.toLowerCase() : '';
+    const creator = receipt.creator ? receipt.creator.toLowerCase() : '';
+    const creatorName = receipt.creatorName ? receipt.creatorName.toLowerCase() : '';
+    const query = searchTerm.toLowerCase();
+
+    // Tìm kiếm trong các tên sản phẩm thuộc phiếu nhập
+    const hasMatchingProduct = receipt.items && receipt.items.some(item => {
+      const prodName = item.productId && item.productId.name ? item.productId.name.toLowerCase() : '';
+      return prodName.includes(query);
+    });
+
+    return code.includes(query) || 
+           creator.includes(query) || 
+           creatorName.includes(query) || 
+           hasMatchingProduct;
+  });
 
   return (
     <div className="p-4 sm:p-8 bg-gray-50 min-h-screen pb-24">
@@ -214,10 +216,9 @@ export default function ImportManager() {
                       <label className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-2">Mã phiếu nhập</label>
                       <input 
                         type="text" 
-                        required
-                        className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold text-blue-600"
-                        value={receiptCode}
-                        onChange={(e) => setReceiptCode(e.target.value.toUpperCase())}
+                        disabled
+                        className="w-full px-4 py-3 bg-gray-100 border-none rounded-2xl text-sm font-bold text-gray-400 cursor-not-allowed"
+                        value="Tự động sinh tại máy chủ"
                       />
                     </div>
                     <div>
@@ -225,8 +226,8 @@ export default function ImportManager() {
                       <input 
                         type="text" 
                         disabled
-                        className="w-full px-4 py-3 bg-gray-100 border-none rounded-2xl text-sm font-bold text-gray-600 cursor-not-allowed"
-                        value="Admin Workspace"
+                        className="w-full px-4 py-3 bg-gray-100 border-none rounded-2xl text-sm font-bold text-gray-500 cursor-not-allowed"
+                        value={currentUser ? (currentUser.name || currentUser.username || 'Admin') : 'Đang xác thực...'}
                       />
                     </div>
                   </div>
@@ -340,16 +341,45 @@ export default function ImportManager() {
             </div>
 
             {/* ================= CỘT 3: DANH SÁCH LỊCH SỬ NHẬP KHO ================= */}
-            <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm h-fit">
-              <h2 className="text-xl font-black text-gray-900 mb-6 flex items-center gap-2">
-                <ClipboardList className="w-6 h-6 text-blue-600" /> Lịch sử phiếu nhập
-              </h2>
+            <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm h-fit space-y-6">
+              <div>
+                <h2 className="text-xl font-black text-gray-900 flex items-center gap-2">
+                  <ClipboardList className="w-6 h-6 text-blue-600" /> Lịch sử phiếu nhập ({receipts.length})
+                </h2>
+                {searchTerm && (
+                  <p className="text-xs text-gray-400 mt-1">Tìm thấy {filteredReceipts.length} kết quả phù hợp</p>
+                )}
+              </div>
 
-              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-                {receipts.length === 0 ? (
-                  <p className="text-gray-400 text-center py-8 font-medium">Chưa có phiếu nhập kho nào.</p>
+              {/* Ô TÌM KIẾM NHANH */}
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Tìm mã phiếu, người lập, sản phẩm..."
+                  className="pl-10 pr-8 py-2.5 bg-gray-50 border border-gray-150 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition text-xs w-full font-medium text-gray-700"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 font-bold text-sm"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
+                {filteredReceipts.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Search className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                    <p className="font-bold text-sm text-gray-500">Không tìm thấy kết quả</p>
+                    <p className="text-xs text-gray-400">Thử tìm kiếm với từ khóa khác xem sao nhé!</p>
+                  </div>
                 ) : (
-                  receipts.map(receipt => (
+                  filteredReceipts.map(receipt => (
                     <div 
                       key={receipt._id}
                       className="p-4 bg-gray-50 rounded-2xl hover:bg-blue-50/30 border border-transparent hover:border-blue-100 transition cursor-pointer"
@@ -364,7 +394,7 @@ export default function ImportManager() {
 
                       <div className="grid grid-cols-2 gap-2 text-xs font-bold text-gray-500 mt-2">
                         <div className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {new Date(receipt.date).toLocaleDateString('vi-VN')}</div>
-                        <div className="flex items-center gap-1"><User className="w-3.5 h-3.5" /> {receipt.creator}</div>
+                        <div className="flex items-center gap-1"><User className="w-3.5 h-3.5" /> {receipt.creatorName || receipt.creator || 'Admin'}</div>
                       </div>
 
                       <p className="text-xs text-gray-400 mt-2 truncate font-medium">{receipt.note || 'Không có ghi chú'}</p>
@@ -407,7 +437,7 @@ export default function ImportManager() {
                 </div>
                 <div>
                   <span className="text-gray-400 text-xs font-bold uppercase block mb-1">Nhân viên tạo:</span>
-                  <p className="font-bold text-gray-800">{selectedReceipt.creator}</p>
+                  <p className="font-bold text-gray-800">{selectedReceipt.creatorName || selectedReceipt.creator || 'Admin'}</p>
                 </div>
                 <div className="col-span-2">
                   <span className="text-gray-400 text-xs font-bold uppercase block mb-1">Ghi chú phiếu:</span>

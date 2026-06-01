@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Truck, QrCode, CreditCard, Banknote, Loader2 } from 'lucide-react';
+import { getCartKey } from '../../utils/cartHelper';
 
 export default function Checkout() {
   const navigate = useNavigate();
@@ -22,7 +23,8 @@ export default function Checkout() {
   const pollingIntervalRef = useRef(null);
 
   useEffect(() => {
-    const savedCart = JSON.parse(localStorage.getItem('glassesCart')) || [];
+    const cartKey = getCartKey();
+    const savedCart = JSON.parse(localStorage.getItem(cartKey)) || [];
     const itemsToCheckout = savedCart.filter(item => selectedIds.includes(item.cartId));
     setCheckoutItems(itemsToCheckout);
 
@@ -81,11 +83,12 @@ export default function Checkout() {
 
   // --- HÀM HỖ TRỢ: DỌN DẸP GIỎ HÀNG & CHUYỂN TRANG SAU KHI THÀNH CÔNG ---
   const finalizeOrderClientSide = (finalOrderCode, methodText, finalStatus = 'pending') => {
-    const currentCart = JSON.parse(localStorage.getItem('glassesCart')) || [];
+    const cartKey = getCartKey();
+    const currentCart = JSON.parse(localStorage.getItem(cartKey)) || [];
     const purchasedIds = checkoutItems.map(item => item.cartId);
     const remainingCart = currentCart.filter(item => !purchasedIds.includes(item.cartId));
 
-    localStorage.setItem('glassesCart', JSON.stringify(remainingCart));
+    localStorage.setItem(cartKey, JSON.stringify(remainingCart));
     window.dispatchEvent(new Event('cartUpdated'));
 
     // Sao lưu vào localStorage để giữ tương thích ngược

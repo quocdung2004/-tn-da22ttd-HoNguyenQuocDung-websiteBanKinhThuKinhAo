@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Package, Tag, LogOut, LayoutDashboard, ListTree, PlusCircle, Users } from 'lucide-react'; // Thêm icon Tag vào đây
+import { Package, Tag, LogOut, LayoutDashboard, ListTree, PlusCircle, Users, XOctagon, Wallet } from 'lucide-react';
+import NotificationBell from '../../components/NotificationBell';
 
 export default function AdminLayout() {
   const location = useLocation();
@@ -9,14 +10,16 @@ export default function AdminLayout() {
   const menuItems = [
     { path: '/admin', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Tổng quan Đơn hàng' },
     { path: '/admin/products', icon: <Package className="w-5 h-5" />, label: 'Quản lý Kính (Kho)' },
-    { path: '/admin/brand', icon: <Tag className="w-5 h-5" />, label: 'Quản lý Nhãn hàng' }, // Đã thêm vào đây
-    { path: '/admin/categories', icon: <ListTree className="w-5 h-5" />, label: 'Quản lý Danh mục kính' }, // Đã thêm vào đây
+    { path: '/admin/brand', icon: <Tag className="w-5 h-5" />, label: 'Quản lý Nhãn hàng' },
+    { path: '/admin/categories', icon: <ListTree className="w-5 h-5" />, label: 'Quản lý Danh mục kính' },
     { path: '/admin/imports', icon: <PlusCircle className="w-5 h-5" />, label: 'Quản lý Nhập hàng' },
     { path: '/admin/users', icon: <Users className="w-5 h-5" />, label: 'Quản lý Tài khoản' },
+    { path: '/admin/cancel-requests', icon: <XOctagon className="w-5 h-5" />, label: 'Yêu cầu hủy đơn' },
+    { path: '/admin/withdraw-requests', icon: <Wallet className="w-5 h-5" />, label: 'Yêu cầu rút tiền' },
   ];
 
   return (
-    <div className="flex h-screen bg-gray-50 font-sans">
+    <div className="flex h-screen bg-gray-55 font-sans">
       {/* SIDEBAR BÊN TRÁI DÀNH CHO ADMIN */}
       <aside className="w-64 bg-gray-900 text-white flex flex-col">
         <div className="p-6 border-b border-gray-800">
@@ -53,8 +56,16 @@ export default function AdminLayout() {
       </aside>
 
       {/* NỘI DUNG CHÍNH BÊN PHẢI */}
-      <main className="flex-1 overflow-y-auto">
-        <Outlet />
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Header trên cùng chứa chuông thông báo */}
+        <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-end px-8 shrink-0">
+          <NotificationBell />
+        </header>
+
+        {/* Màn hình nội dung chính */}
+        <div className="flex-1 overflow-y-auto">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

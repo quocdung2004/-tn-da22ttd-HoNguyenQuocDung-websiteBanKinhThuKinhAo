@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Trash2, Plus, Minus, ArrowLeft, ShoppingBag, ShieldCheck, AlertTriangle } from 'lucide-react'; // Import thêm AlertTriangle
+import { getCartKey } from '../../utils/cartHelper';
 
 export default function Cart() {
   const navigate = useNavigate();
@@ -11,14 +12,16 @@ export default function Cart() {
   const [itemToDelete, setItemToDelete] = useState(null); // Chứa ID của sản phẩm đang định xóa
 
   useEffect(() => {
-    const savedCart = JSON.parse(localStorage.getItem('glassesCart')) || [];
+    const cartKey = getCartKey();
+    const savedCart = JSON.parse(localStorage.getItem(cartKey)) || [];
     setCartItems(savedCart);
     setSelectedItems(savedCart.map(item => item.cartId));
   }, []);
 
   const saveAndSyncCart = (newCart) => {
     setCartItems(newCart);
-    localStorage.setItem('glassesCart', JSON.stringify(newCart));
+    const cartKey = getCartKey();
+    localStorage.setItem(cartKey, JSON.stringify(newCart));
     window.dispatchEvent(new Event('cartUpdated'));
   };
 

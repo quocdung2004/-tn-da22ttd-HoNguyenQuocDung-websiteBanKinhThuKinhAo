@@ -1,17 +1,19 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { ShoppingBag, LogOut } from 'lucide-react';
+import { ShoppingBag, LogOut, XOctagon, Wallet } from 'lucide-react';
+import NotificationBell from '../../components/NotificationBell';
 
 export default function StaffLayout() {
   const location = useLocation();
 
-  // CHÚ Ý: Menu của Staff CHỈ CÓ ĐÚNG 1 NÚT là Quản lý đơn hàng
   const menuItems = [
     { path: '/staff', icon: <ShoppingBag className="w-5 h-5" />, label: 'Quản lý Đơn hàng' },
+    { path: '/staff/cancel-requests', icon: <XOctagon className="w-5 h-5" />, label: 'Yêu cầu hủy đơn' },
+    { path: '/staff/withdraw-requests', icon: <Wallet className="w-5 h-5" />, label: 'Yêu cầu rút tiền' },
   ];
 
   return (
-    <div className="flex h-screen bg-gray-50 font-sans">
+    <div className="flex h-screen bg-gray-55 font-sans">
       {/* SIDEBAR BÊN TRÁI DÀNH RIÊNG CHO STAFF */}
       <aside className="w-64 bg-gray-900 text-white flex flex-col">
         <div className="p-6 border-b border-gray-800">
@@ -45,8 +47,16 @@ export default function StaffLayout() {
       </aside>
 
       {/* NỘI DUNG CHÍNH */}
-      <main className="flex-1 overflow-y-auto">
-        <Outlet /> 
+      <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Header trên cùng chứa chuông thông báo */}
+        <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-end px-8 shrink-0">
+          <NotificationBell />
+        </header>
+
+        {/* Màn hình nội dung */}
+        <div className="flex-1 overflow-y-auto">
+          <Outlet /> 
+        </div>
       </main>
     </div>
   );

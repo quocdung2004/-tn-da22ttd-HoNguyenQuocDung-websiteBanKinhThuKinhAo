@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, ListTree, AlignLeft } from 'lucide-react';
+import { Plus, ListTree, AlignLeft, Search } from 'lucide-react';
 
 export default function CategoryManager() {
   const [categories, setCategories] = useState([]);
   const [formData, setFormData] = useState({ name: '', description: '' });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
+  const [searchTerm, setSearchTerm] = useState('');
 
   const fetchCategories = async () => {
     try {
@@ -35,7 +36,7 @@ export default function CategoryManager() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(formData) // File này xài JSON bình thường
+        body: JSON.stringify(formData)
       });
 
       const data = await response.json();
@@ -53,6 +54,14 @@ export default function CategoryManager() {
       setLoading(false);
     }
   };
+
+  // Lọc danh sách danh mục theo từ khóa tìm kiếm (không phân biệt hoa thường, chống crash)
+  const filteredCategories = categories.filter((cat) => {
+    const name = cat.name ? cat.name.toLowerCase() : '';
+    const desc = cat.description ? cat.description.toLowerCase() : '';
+    const query = searchTerm.toLowerCase();
+    return name.includes(query) || desc.includes(query);
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
@@ -95,8 +104,31 @@ export default function CategoryManager() {
 
           {/* CỘT PHẢI: BẢNG */}
           <div className="lg:col-span-2 bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-50">
-              <h2 className="text-xl font-bold text-gray-900">Danh sách hiện tại ({categories.length})</h2>
+            <div className="p-6 border-b border-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Danh sách hiện tại ({categories.length})</h2>
+                {searchTerm && (
+                  <p className="text-xs text-gray-400 mt-1">Tìm thấy {filteredCategories.length} kết quả phù hợp</p>
+                )}
+              </div>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Tìm kiếm danh mục..."
+                  className="pl-10 pr-8 py-2.5 bg-gray-50 border border-gray-150 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition text-sm w-full sm:w-60 font-medium text-gray-700"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+                <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 font-bold text-sm"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
             
             <div className="overflow-x-auto">
@@ -109,11 +141,19 @@ export default function CategoryManager() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {categories.length === 0 ? (
-                    <tr><td colSpan="3" className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu.</td></tr>
+                  {filteredCategories.length === 0 ? (
+                    <tr>
+                      <td colSpan="3" className="px-6 py-12 text-center">
+                        <div className="flex flex-col items-center justify-center gap-2 text-gray-400">
+                          <Search className="w-10 h-10 text-gray-300" />
+                          <p className="font-bold text-sm">Không tìm thấy danh mục phù hợp</p>
+                          <p className="text-xs text-gray-400">Thử tìm kiếm với từ khóa khác xem sao nhé!</p>
+                        </div>
+                      </td>
+                    </tr>
                   ) : (
-                    categories.map((cat) => (
-                      <tr key={cat._id} className="hover:bg-gray-50 transition">
+                    filteredCategories.map((cat) => (
+                      <tr key={cat._id} className="hover:bg-gray-50/50 transition">
                         <td className="px-6 py-4 font-bold text-gray-900">{cat.name}</td>
                         <td className="px-6 py-4">
                           <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-sm font-mono">{cat.slug}</span>

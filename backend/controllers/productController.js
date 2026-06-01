@@ -1,4 +1,6 @@
 const Product = require('../models/Product');
+const { checkAndEmitLowStockNotification } = require('../utils/notificationHelper');
+const { getIO } = require('../socket');
 
 // [POST] Thêm Sản phẩm
 exports.createProduct = async (req, res) => {
@@ -77,6 +79,17 @@ exports.updateProduct = async (req, res) => {
     if (!updatedProduct) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm!' });
     }
+
+    // ================= REALTIME STOCK INTEGRATION =================
+    // Phát tín hiệu cập nhật tồn kho sỉ/lẻ từ chỉnh sửa của Admin
+    getIO().emit('product:stockUpdated', {
+      productId: updatedProduct._id.toString(),
+      stock: updatedProduct.stock,
+      reason: 'admin_edit'
+    });
+    // Kiểm tra và gửi cảnh báo tồn kho thấp (stock <= 5)
+    await checkAndEmitLowStockNotification(updatedProduct);
+    // ===============================================================
 
     res.json({ success: true, message: 'Cập nhật thành công!', product: updatedProduct });
   } catch (error) {
