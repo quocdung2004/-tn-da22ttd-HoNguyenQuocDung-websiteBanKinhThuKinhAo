@@ -1,6 +1,8 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const User = require('./models/User');
+const Conversation = require('./models/Conversation');
+const Message = require('./models/Message');
 
 let io = null;
 
@@ -64,6 +66,139 @@ const initSocket = (server) => {
       socket.join('staff');
       console.log(`👤 [Socket.IO] ${username} đã tham gia room staff.`);
     }
+
+    // ── NỘP BÀI PHASE 3: REALTIME CHAT SOCKET EVENTS ──
+
+    // Event 1: Tham gia phòng hội thoại cụ thể
+    socket.on('chat:join_conversation', async ({ conversationId }) => {
+      try {
+        if (!conversationId) return;
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation) {
+          return socket.emit('chat:error', { message: 'Không tìm thấy cuộc hội thoại!' });
+        }
+
+        // Khách hàng chỉ được vào phòng của chính mình, Staff/Admin vào được tất cả
+        if (role === 0 && conversation.customer.toString() !== id) {
+          return socket.emit('chat:error', { message: 'Từ chối tham gia! Bạn không sở hữu cuộc hội thoại này.' });
+        }
+
+        socket.join(`conversation:${conversationId}`);
+        console.log(`💬 [Socket.IO] ${username} đã tham gia phòng conversation:${conversationId}`);
+      } catch (err) {
+        console.error('Lỗi chat:join_conversation socket:', err.message);
+      }
+    });
+
+    // Event 2: Gửi tin nhắn mới (Lưu DB trước, Emit sau)
+    socket.on('chat:send_message', async ({ conversationId, content }) => {
+      try {
+        if (!conversationId || !content || !content.trim()) {
+          return socket.emit('chat:error', { message: 'Nội dung tin nhắn không được để trống!' });
+        }
+
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation) {
+          return socket.emit('chat:error', { message: 'Không tìm thấy cuộc hội thoại!' });
+        }
+
+        // Kiểm tra phân quyền truy cập
+        if (role === 0 && conversation.customer.toString() !== id) {
+          return socket.emit('chat:error', { message: 'Từ chối gửi! Bạn không thuộc cuộc hội thoại này.' });
+        }
+
+        // Kiểm tra trạng thái đóng/mở cuộc hội thoại
+        if (conversation.status === 'closed') {
+          return socket.emit('chat:error', { message: 'Cuộc hội thoại đã đóng. Hãy liên hệ Staff để mở lại.' });
+        }
+
+        // 1. Lưu tin nhắn vào MongoDB
+        const message = await Message.create({
+          conversationId,
+          sender: id,
+          senderRole: role,
+          content: content.trim()
+        });
+
+        // 2. Cập nhật Conversation tương ứng
+        conversation.lastMessage = message._id;
+        if (role === 0) {
+          conversation.unreadCountByStaff += 1;
+        } else {
+          conversation.unreadCountByCustomer += 1;
+        }
+        await conversation.save();
+
+        // 3. Populate thông tin cập nhật mới nhất của cuộc hội thoại để đồng bộ giao diện
+        const updatedConversation = await Conversation.findById(conversationId)
+          .populate('customer', 'username name email phone')
+          .populate('assignedStaff', 'username name')
+          .populate('lastMessage');
+
+        // 4. Phát tin nhắn mới vào phòng hội thoại
+        io.to(`conversation:${conversationId}`).emit('chat:new_message', message);
+
+        // 5. Phát tin tức cập nhật hội thoại cho toàn bộ Staff và Khách hàng tương ứng
+        io.to('staff').emit('conversation:updated', updatedConversation);
+        io.to(`user:${conversation.customer.toString()}`).emit('conversation:updated', updatedConversation);
+
+        console.log(`✉️ [Socket.IO] ${username} đã gửi tin nhắn vào hội thoại ${conversationId}`);
+      } catch (err) {
+        console.error('Lỗi chat:send_message socket:', err.message);
+        socket.emit('chat:error', { message: 'Lỗi máy chủ khi xử lý tin nhắn!' });
+      }
+    });
+
+    // Event 3: Báo hiệu đang gõ tin nhắn (Typing animation)
+    socket.on('chat:typing', async ({ conversationId, isTyping }) => {
+      try {
+        if (!conversationId) return;
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation) return;
+
+        // Phân quyền
+        if (role === 0 && conversation.customer.toString() !== id) return;
+
+        // Broadcast tới các thành viên khác trong phòng chat
+        socket.to(`conversation:${conversationId}`).emit('chat:typing', {
+          conversationId,
+          username,
+          name: socket.user.name || username,
+          isTyping
+        });
+      } catch (err) {
+        console.error('Lỗi chat:typing socket:', err.message);
+      }
+    });
+
+    // Event 4: Đánh dấu đã đọc hội thoại qua socket
+    socket.on('chat:mark_read', async ({ conversationId }) => {
+      try {
+        if (!conversationId) return;
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation) return;
+
+        // Phân quyền
+        if (role === 0) {
+          if (conversation.customer.toString() !== id) return;
+          conversation.unreadCountByCustomer = 0;
+        } else {
+          conversation.unreadCountByStaff = 0;
+        }
+        await conversation.save();
+
+        const updatedConversation = await Conversation.findById(conversationId)
+          .populate('customer', 'username name email phone')
+          .populate('assignedStaff', 'username name')
+          .populate('lastMessage');
+
+        // Đồng bộ tin tức
+        io.to('staff').emit('conversation:updated', updatedConversation);
+        io.to(`user:${conversation.customer.toString()}`).emit('conversation:updated', updatedConversation);
+      } catch (err) {
+        console.error('Lỗi chat:mark_read socket:', err.message);
+      }
+    });
 
     socket.on('disconnect', () => {
       console.log(`❌ [Socket.IO] Người dùng ${username} (ID: ${id}) đã ngắt kết nối.`);

@@ -20,6 +20,9 @@ const orderSchema = new mongoose.Schema({
       quantity: { type: Number, required: true, default: 1 },
       priceAtPurchase: { type: Number, required: true }, // Lưu giá tại thời điểm mua
       importPriceAtPurchase: { type: Number, default: 0 }, // Lưu giá nhập tại thời điểm mua để tính lợi nhuận chuẩn
+      originalPriceAtPurchase: { type: Number, default: 0 }, // Giá gốc của sản phẩm lúc mua
+      discountAtPurchase: { type: Number, default: 0 }, // Số tiền được giảm cho 1 sản phẩm
+      saleIdAtPurchase: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale', default: null }, // ID của chiến dịch giảm giá được áp dụng (nếu có)
       hasPrescription: { type: Boolean, default: false },
       od: { type: String }, // Độ mắt phải
       os: { type: String }  // Độ mắt trái

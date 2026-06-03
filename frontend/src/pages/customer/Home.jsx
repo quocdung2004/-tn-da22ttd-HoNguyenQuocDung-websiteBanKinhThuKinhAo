@@ -157,43 +157,63 @@ export default function Home() {
                     </button>
                   </div>
 
-                  <div className="relative aspect-square rounded-2xl overflow-hidden bg-gray-50 mb-5 p-4 flex items-center justify-center">
-                    {/* Lấy ảnh đầu tiên trong mảng images */}
-                    <img 
-                      src={product.images && product.images.length > 0 ? product.images[0] : '/placeholder.png'} 
-                      alt={product.name} 
-                      className="w-full h-full object-cover rounded-xl group-hover:scale-110 transition-transform duration-500 relative z-0 mix-blend-multiply"
-                    />
-                    
-                    {/* NẾU CÓ FILE 3D THÌ HIỆN BADGE NÀY */}
-                    {is3DReady && (
-                      <div className="absolute top-3 left-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full flex items-center shadow-lg uppercase tracking-wider z-0">
-                        <span className="w-2 h-2 bg-white rounded-full mr-2 animate-ping absolute"></span>
-                        <span className="w-2 h-2 bg-white rounded-full mr-2"></span>
-                        Hỗ trợ 3D AR
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex flex-col flex-1 relative z-0">
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mb-2 line-clamp-1">
-                      {/* Lấy tên Brand và Category từ dữ liệu populate */}
-                      {product.brand?.name || "Kính Mắt"} • {product.category?.name || "Thời Trang"}
-                    </p>
-                    <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors">
-                      {product.name}
-                    </h3>
-                    
-                    <div className="mt-auto pt-4 border-t border-gray-100 flex items-center justify-between">
-                      <span className="text-blue-600 font-black text-xl">
-                        {product.price.toLocaleString('vi-VN')} đ
-                      </span>
+                    <div className="relative aspect-square rounded-2xl overflow-hidden bg-gray-50 mb-5 p-4 flex items-center justify-center">
+                      {/* Lấy ảnh đầu tiên trong mảng images */}
+                      <img 
+                        src={product.images && product.images.length > 0 ? product.images[0] : '/placeholder.png'} 
+                        alt={product.name} 
+                        className="w-full h-full object-cover rounded-xl group-hover:scale-110 transition-transform duration-500 relative z-0 mix-blend-multiply"
+                      />
                       
-                      <div className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center text-gray-400 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                        <ShoppingBag className="w-5 h-5" />
+                      {/* NẾU CÓ FILE 3D THÌ HIỆN BADGE NÀY */}
+                      {is3DReady && (
+                        <div className="absolute top-3 left-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full flex items-center shadow-lg uppercase tracking-wider z-10">
+                          <span className="w-2 h-2 bg-white rounded-full mr-2 animate-ping absolute"></span>
+                          <span className="w-2 h-2 bg-white rounded-full mr-2"></span>
+                          Hỗ trợ 3D AR
+                        </div>
+                      )}
+
+                      {/* BADGE BÁO GIẢM GIÁ */}
+                      {product.discountPercent > 0 && (
+                        <div className="absolute top-3 right-3 bg-gradient-to-r from-red-500 to-rose-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full flex items-center shadow-lg uppercase tracking-wider z-10 animate-bounce">
+                          - {product.discountPercent}% OFF
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col flex-1 relative z-0">
+                      <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mb-2 line-clamp-1">
+                        {/* Lấy tên Brand và Category từ dữ liệu populate */}
+                        {product.brand?.name || "Kính Mắt"} • {product.category?.name || "Thời Trang"}
+                      </p>
+                      <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors">
+                        {product.name}
+                      </h3>
+                      
+                      <div className="mt-auto pt-4 border-t border-gray-100 flex items-center justify-between">
+                        <div className="flex flex-col">
+                          {product.discountPercent > 0 ? (
+                            <>
+                              <span className="text-[10px] text-gray-400 line-through font-medium leading-none mb-1">
+                                {product.originalPrice.toLocaleString('vi-VN')} đ
+                              </span>
+                              <span className="text-red-500 font-black text-xl leading-none">
+                                {product.salePrice.toLocaleString('vi-VN')} đ
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-blue-600 font-black text-xl leading-none">
+                              {product.price.toLocaleString('vi-VN')} đ
+                            </span>
+                          )}
+                        </div>
+                        
+                        <div className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center text-gray-400 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                          <ShoppingBag className="w-5 h-5" />
+                        </div>
                       </div>
                     </div>
-                  </div>
                 </div>
               );
             })}

@@ -170,8 +170,21 @@ export default function Cart() {
                     )}
 
                     <div className="mt-2 flex items-end justify-between">
-                      <div className="font-black text-blue-600 text-[15px] sm:text-lg leading-none">
-                        {item.price.toLocaleString('vi-VN')} đ
+                      <div className="flex flex-col gap-1">
+                        {item.discountPercent > 0 && item.originalPrice > item.price ? (
+                          <>
+                            <span className="text-[10px] text-gray-400 line-through leading-none">
+                              {item.originalPrice.toLocaleString('vi-VN')} đ
+                            </span>
+                            <span className="font-black text-red-500 text-[15px] sm:text-lg leading-none">
+                              {item.price.toLocaleString('vi-VN')} đ
+                            </span>
+                          </>
+                        ) : (
+                          <span className="font-black text-blue-600 text-[15px] sm:text-lg leading-none">
+                            {item.price.toLocaleString('vi-VN')} đ
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center bg-gray-100 rounded border border-gray-200">

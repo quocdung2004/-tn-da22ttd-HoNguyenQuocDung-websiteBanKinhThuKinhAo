@@ -1,6 +1,21 @@
 const Product = require('../models/Product');
 const { checkAndEmitLowStockNotification } = require('../utils/notificationHelper');
 const { getIO } = require('../socket');
+const { getActiveSales, calculateBestSaleForProduct, attachSaleInfoToProduct } = require('../utils/saleHelper');
+
+// Giữ tương thích ngược hoàn hảo cho orderController.js
+const resolveProductSalePrice = async (product) => {
+  const activeSales = await getActiveSales();
+  const res = calculateBestSaleForProduct(product, activeSales);
+  return {
+    originalPrice: product.price || 0,
+    salePrice: res.salePrice,
+    discountPercent: res.discountPercent,
+    activeSale: res.activeSale
+  };
+};
+
+exports.resolveProductSalePrice = resolveProductSalePrice;
 
 // [POST] Thêm Sản phẩm
 exports.createProduct = async (req, res) => {
@@ -44,9 +59,36 @@ exports.getProducts = async (req, res) => {
       .populate('category', 'name')
       .sort({ createdAt: -1 });
 
-    res.json({ success: true, products });
+    // Tính toán giá khuyến mãi động cho từng sản phẩm trả về sử dụng saleHelper
+    const activeSales = await getActiveSales();
+    const resolvedProducts = products.map(product => attachSaleInfoToProduct(product, activeSales));
+
+    res.json({ success: true, products: resolvedProducts });
   } catch (error) {
     console.error('Lỗi lấy Product:', error);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ!' });
+  }
+};
+
+// [GET] Lấy chi tiết một Sản phẩm
+exports.getProductById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const product = await Product.findById(id)
+      .populate('brand', 'name')
+      .populate('category', 'name');
+
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm kính mắt!' });
+    }
+
+    // Tính toán khuyến mãi động cho sản phẩm
+    const activeSales = await getActiveSales();
+    const resolvedProduct = attachSaleInfoToProduct(product, activeSales);
+
+    res.json({ success: true, product: resolvedProduct });
+  } catch (error) {
+    console.error('Lỗi lấy chi tiết Product:', error);
     res.status(500).json({ success: false, message: 'Lỗi máy chủ!' });
   }
 };

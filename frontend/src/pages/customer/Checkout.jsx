@@ -51,12 +51,10 @@ export default function Checkout() {
       items: checkoutItems.map(item => ({
         productId: item.productId,
         quantity: item.quantity,
-        priceAtPurchase: item.price,
         hasPrescription: item.hasPrescription || false,
         od: item.od || '',
         os: item.os || ''
       })),
-      total: calculateTotal(),
       paymentMethod: paymentMethod,
       status: initialStatus
     };

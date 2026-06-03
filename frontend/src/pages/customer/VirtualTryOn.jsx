@@ -100,6 +100,13 @@ export default function VirtualTryOn({
   const [showOccluderDebug, setShowOccluderDebug] = useState(false);
   const [showTempleOccluderDebug, setShowTempleOccluderDebug] = useState(false);
   const [showFullGlbTest, setShowFullGlbTest] = useState(false);
+  const [showCleanFullOccluder, setShowCleanFullOccluder] = useState(false);
+  const [showProduction2Pass, setShowProduction2Pass] = useState(false);
+  const [showPass1MeshAudit, setShowPass1MeshAudit] = useState(false);
+  const [showPass2Interference, setShowPass2Interference] = useState(false);
+  const [pass1OnlyFreeze, setPass1OnlyFreeze] = useState(false);
+  const [pass1ThenPass2NoClear, setPass1ThenPass2NoClear] = useState(false);
+  const [showOccluderWireframe, setShowOccluderWireframe] = useState(false);
 
   // MESH CLASSIFICATION DIAGNOSTIC FOR MOBILE
   const [meshDebugData, setMeshDebugData] = useState([]);
@@ -280,6 +287,41 @@ export default function VirtualTryOn({
   useEffect(() => {
     showFullGlbTestRef.current = showFullGlbTest;
   }, [showFullGlbTest]);
+
+  const showCleanFullOccluderRef = useRef(false);
+  useEffect(() => {
+    showCleanFullOccluderRef.current = showCleanFullOccluder;
+  }, [showCleanFullOccluder]);
+
+  const showProduction2PassRef = useRef(false);
+  useEffect(() => {
+    showProduction2PassRef.current = showProduction2Pass;
+  }, [showProduction2Pass]);
+
+  const showPass1MeshAuditRef = useRef(false);
+  useEffect(() => {
+    showPass1MeshAuditRef.current = showPass1MeshAudit;
+  }, [showPass1MeshAudit]);
+
+  const showPass2InterferenceRef = useRef(false);
+  useEffect(() => {
+    showPass2InterferenceRef.current = showPass2Interference;
+  }, [showPass2Interference]);
+
+  const pass1OnlyFreezeRef = useRef(false);
+  useEffect(() => {
+    pass1OnlyFreezeRef.current = pass1OnlyFreeze;
+  }, [pass1OnlyFreeze]);
+
+  const pass1ThenPass2NoClearRef = useRef(false);
+  useEffect(() => {
+    pass1ThenPass2NoClearRef.current = pass1ThenPass2NoClear;
+  }, [pass1ThenPass2NoClear]);
+
+  const showOccluderWireframeRef = useRef(false);
+  useEffect(() => {
+    showOccluderWireframeRef.current = showOccluderWireframe;
+  }, [showOccluderWireframe]);
 
   // SMOOTHING REFS
   const prevQuatRef = useRef(new THREE.Quaternion());
@@ -1040,11 +1082,16 @@ ${JSON.stringify(pass2List, null, 2)}
       const visibleHeight = 2 * Math.tan(vFov / 2) * dz;
       const visibleWidth = visibleHeight * (width / height);
 
-      const toW = (lm) => new THREE.Vector3(
-        (lm.x - 0.5) * visibleWidth,
-        -(lm.y - 0.5) * visibleHeight,
-        -lm.z * visibleWidth
-      );
+      const toW = (lm) => {
+        const xVal = (showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current)
+          ? -(lm.x - 0.5) * visibleWidth
+          : (lm.x - 0.5) * visibleWidth;
+        return new THREE.Vector3(
+          xVal,
+          -(lm.y - 0.5) * visibleHeight,
+          -lm.z * visibleWidth
+        );
+      };
 
       const noseBridgeW = toW(noseBridge);
 
@@ -1055,6 +1102,11 @@ ${JSON.stringify(pass2List, null, 2)}
           const _scale = new THREE.Vector3();
           const targetQuat = new THREE.Quaternion();
           faceMat4.decompose(_pos, targetQuat, _scale);
+
+          if (showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current) {
+            targetQuat.y = -targetQuat.y;
+            targetQuat.z = -targetQuat.z;
+          }
 
           const correction = new THREE.Quaternion();
           targetQuat.multiply(correction);
@@ -1128,7 +1180,10 @@ ${JSON.stringify(pass2List, null, 2)}
         const lm197 = landmarks[197];
         const lm168 = landmarks[168];
 
-        const anchorX = (lm197.x * 0.70 + lm168.x * 0.25 + eyeMidX * 0.05 - 0.5) * visibleWidth;
+        let anchorX = (lm197.x * 0.70 + lm168.x * 0.25 + eyeMidX * 0.05 - 0.5) * visibleWidth;
+        if (showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current) {
+          anchorX = -anchorX;
+        }
         const anchorY = -((lm197.y * 0.70 + lm168.y * 0.25 + eyeMidY * 0.05) - 0.5) * visibleHeight;
         const ANATOMICAL_BRIDGE_DROP = 0.005;
         const anchorYBeforeDrop = anchorY;
@@ -1168,21 +1223,43 @@ ${JSON.stringify(pass2List, null, 2)}
         glassesModelRef.current.position.copy(prevPositionRef.current);
 
         if (glassesModelRef.current.children[0]) {
-          glassesModelRef.current.children[0].rotation.y = yaw * 0.07;
+          glassesModelRef.current.children[0].rotation.y = ((showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current) ? -yaw : yaw) * 0.07;
         }
 
-        const leftOpacity = yaw > 0 ? 1.0 : Math.max(0.35, Math.min(1.0, 1.0 + (yaw + 0.1) * 0.8));
-        const rightOpacity = yaw < 0 ? 1.0 : Math.max(0.35, Math.min(1.0, 1.0 - (yaw - 0.1) * 0.8));
+        if (!showFullGlbTestRef.current && !showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current) {
+          const leftOpacity = yaw > 0 ? 1.0 : Math.max(0.35, Math.min(1.0, 1.0 + (yaw + 0.1) * 0.8));
+          const rightOpacity = yaw < 0 ? 1.0 : Math.max(0.35, Math.min(1.0, 1.0 - (yaw - 0.1) * 0.8));
 
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            if (child.userData.partType === 'LEFT_TEMPLE') {
-              child.material.opacity = leftOpacity;
-            } else if (child.userData.partType === 'RIGHT_TEMPLE') {
-              child.material.opacity = rightOpacity;
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              if (child.userData.partType === 'LEFT_TEMPLE') {
+                child.material.opacity = leftOpacity;
+              } else if (child.userData.partType === 'RIGHT_TEMPLE') {
+                child.material.opacity = rightOpacity;
+              }
             }
-          }
-        });
+          });
+        } else {
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh && child.material) {
+              const materials = Array.isArray(child.material) ? child.material : [child.material];
+              materials.forEach((mat) => {
+                if (mat) {
+                  const part = child.userData.partType;
+                  if (part === 'LENS') {
+                    mat.transparent = true;
+                    mat.opacity = 0.35;
+                  } else {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                  }
+                  mat.side = THREE.DoubleSide;
+                  mat.clippingPlanes = [];
+                }
+              });
+            }
+          });
+        }
 
         if (helperGroupRef.current) {
           const lm6W = toW(landmarks[6]);
@@ -1540,6 +1617,49 @@ ${JSON.stringify(pass2List, null, 2)}
         }
       }
 
+      if (fullOccluderRef.current && fullOccluderRef.current.material) {
+        if (showOccluderWireframeRef.current) {
+          fullOccluderRef.current.visible = true;
+          fullOccluderRef.current.material.colorWrite = true;
+          fullOccluderRef.current.material.depthWrite = false;
+          fullOccluderRef.current.material.depthTest = false;
+          fullOccluderRef.current.material.wireframe = true;
+          fullOccluderRef.current.material.transparent = true;
+          fullOccluderRef.current.material.opacity = 0.3;
+          fullOccluderRef.current.material.side = THREE.DoubleSide;
+          if (fullOccluderRef.current.material.color) {
+            fullOccluderRef.current.material.color.setHex(0x00ff00);
+          }
+        } else {
+          fullOccluderRef.current.material.wireframe = false;
+          fullOccluderRef.current.material.transparent = false;
+          fullOccluderRef.current.material.opacity = 1.0;
+        }
+      }
+
+      if (showOccluderWireframeRef.current && fullOccluderRef.current && glassesModelRef.current && (diagnosticFrameCountRef.current % 150 === 0)) {
+        const occPos = new THREE.Vector3();
+        fullOccluderRef.current.getWorldPosition(occPos);
+
+        const occRot = new THREE.Quaternion();
+        fullOccluderRef.current.getWorldQuaternion(occRot);
+        const occEuler = new THREE.Euler().setFromQuaternion(occRot);
+
+        const occScale = new THREE.Vector3();
+        fullOccluderRef.current.getWorldScale(occScale);
+
+        const glassPos = new THREE.Vector3();
+        glassesModelRef.current.getWorldPosition(glassPos);
+
+        const dist = occPos.distanceTo(glassPos);
+
+        addLog("--- OCCLUDER WIREFRAME AUDIT DIAGNOSTICS ---");
+        addLog(`OCCLUDER_WORLD_POSITION: x: ${occPos.x.toFixed(4)}, y: ${occPos.y.toFixed(4)}, z: ${occPos.z.toFixed(4)}`);
+        addLog(`OCCLUDER_WORLD_ROTATION (Euler): x: ${occEuler.x.toFixed(4)}, y: ${occEuler.y.toFixed(4)}, z: ${occEuler.z.toFixed(4)}`);
+        addLog(`OCCLUDER_WORLD_SCALE: x: ${occScale.x.toFixed(4)}, y: ${occScale.y.toFixed(4)}, z: ${occScale.z.toFixed(4)}`);
+        addLog(`DISTANCE_TO_GLASSES_CENTER: ${dist.toFixed(4)}`);
+      }
+
       if (!window.lastOcclusionLogTime || Date.now() - window.lastOcclusionLogTime > 4000) {
         window.lastOcclusionLogTime = Date.now();
         console.log("=== 🛡️ [AR RUNTIME OCCLUSION PASS VERIFICATION] ===");
@@ -1607,9 +1727,363 @@ ${JSON.stringify(pass2List, null, 2)}
             child.visible = true;
             child.renderOrder = 0;
             child.frustumCulled = false;
+            if (child.material) {
+              const materials = Array.isArray(child.material) ? child.material : [child.material];
+              materials.forEach((mat) => {
+                if (mat) {
+                  const part = child.userData.partType;
+                  if (part === 'LENS') {
+                    mat.transparent = true;
+                    mat.opacity = 0.35;
+                  } else {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                  }
+                  mat.side = THREE.DoubleSide;
+                  mat.clippingPlanes = [];
+                }
+              });
+            }
           }
         });
 
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+      } else if (showPass2InterferenceRef.current) {
+        // Mode: PASS2_INTERFERENCE_AUDIT
+        const autoClearVal = rendererRef.current.autoClear;
+
+        // Clear before PASS 1
+        rendererRef.current.clear();
+        const clearBeforePass1Called = true;
+
+        if (occluderRef.current) occluderRef.current.visible = false;
+        if (fullOccluderRef.current) {
+          fullOccluderRef.current.visible = true;
+          fullOccluderRef.current.material.colorWrite = false;
+          fullOccluderRef.current.material.depthWrite = true;
+          fullOccluderRef.current.material.depthTest = true;
+          fullOccluderRef.current.material.side = THREE.DoubleSide;
+        }
+
+        const pass1Visible = [];
+        glassesModelRef.current.traverse((child) => {
+          if (child.isMesh) {
+            const part = child.userData.partType;
+            if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
+              child.visible = true;
+              pass1Visible.push(child.name || "UNNAMED");
+            } else {
+              child.visible = false;
+            }
+            if (child.material) {
+              const materials = Array.isArray(child.material) ? child.material : [child.material];
+              materials.forEach((mat) => {
+                if (mat) {
+                  mat.transparent = false;
+                  mat.opacity = 1.0;
+                  mat.side = THREE.DoubleSide;
+                  mat.clippingPlanes = [];
+                }
+              });
+            }
+          }
+        });
+
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+        if (pass1OnlyFreezeRef.current) {
+          // Restore all meshes to visible for other systems
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) child.visible = true;
+          });
+          if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
+
+          if (diagnosticFrameCountRef.current % 150 === 0) {
+            addLog("--- PASS2 INTERFERENCE AUDIT (PASS1 ONLY FREEZE) ---");
+            addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(pass1Visible)}`);
+            addLog("PASS 2 was skipped (frozen after PASS 1).");
+          }
+          diagnosticFrameCountRef.current++;
+        } else {
+          // Clear depth or skip based on pass1ThenPass2NoClear
+          let clearDepthBetweenPassesCalled = false;
+          if (!pass1ThenPass2NoClearRef.current) {
+            rendererRef.current.clearDepth();
+            clearDepthBetweenPassesCalled = true;
+          }
+
+          if (fullOccluderRef.current) fullOccluderRef.current.visible = showOccluderWireframeRef.current;
+          if (occluderRef.current) occluderRef.current.visible = false;
+
+          const pass2Visible = [];
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              const part = child.userData.partType;
+              if (part === 'FRONT_FRAME' || part === 'LENS') {
+                child.visible = true;
+                
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                const matDetails = materials.map((mat) => mat ? {
+                  transparent: mat.transparent,
+                  opacity: mat.opacity,
+                  depthTest: mat.depthTest,
+                  depthWrite: mat.depthWrite,
+                  colorWrite: mat.colorWrite
+                } : null);
+
+                pass2Visible.push({
+                  name: child.name || "UNNAMED",
+                  materials: matDetails,
+                  renderOrder: child.renderOrder
+                });
+              } else {
+                child.visible = false;
+              }
+              if (child.material) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((mat) => {
+                  if (mat) {
+                    if (part === 'LENS') {
+                      mat.transparent = true;
+                      mat.opacity = 0.35;
+                    } else {
+                      mat.transparent = false;
+                      mat.opacity = 1.0;
+                    }
+                    mat.side = THREE.DoubleSide;
+                    mat.clippingPlanes = [];
+                  }
+                });
+              }
+            }
+          });
+
+          const clearOrClearColorCalledBeforePass2 = false;
+
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+          // Restore all meshes to visible for other systems
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) child.visible = true;
+          });
+          if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
+
+          if (diagnosticFrameCountRef.current % 150 === 0) {
+            addLog("--- PASS2 INTERFERENCE AUDIT ---");
+            addLog(`renderer.autoClear: ${autoClearVal}`);
+            addLog(`clearBeforePass1Called: ${clearBeforePass1Called}`);
+            addLog(`clearDepthCalledBetweenPasses: ${clearDepthBetweenPassesCalled}`);
+            addLog(`clearOrClearColorCalledBeforePass2: ${clearOrClearColorCalledBeforePass2}`);
+            addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(pass1Visible)}`);
+            addLog(`PASS2_VISIBLE_MESHES: ${JSON.stringify(pass2Visible, null, 2)}`);
+          }
+          diagnosticFrameCountRef.current++;
+        }
+      } else if (showPass1MeshAuditRef.current) {
+        // Mode: PASS1_MESH_AUDIT
+        rendererRef.current.clear();
+
+        if (occluderRef.current) occluderRef.current.visible = false;
+        if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
+
+        const auditMeshes = [];
+        const auditBounds = [];
+
+        glassesModelRef.current.traverse((child) => {
+          if (child.isMesh) {
+            const part = child.userData.partType;
+            if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
+              child.visible = true;
+
+              // Calculate bounding box in world space
+              child.geometry.computeBoundingBox();
+              const box = new THREE.Box3().copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+              const min = { x: box.min.x, y: box.min.y, z: box.min.z };
+              const max = { x: box.max.x, y: box.max.y, z: box.max.z };
+              const sizeVec = new THREE.Vector3();
+              box.getSize(sizeVec);
+              const size = { x: sizeVec.x, y: sizeVec.y, z: sizeVec.z };
+
+              auditBounds.push({
+                name: child.name || "UNNAMED",
+                min,
+                max,
+                size
+              });
+
+              // Material count
+              const materials = Array.isArray(child.material) ? child.material : [child.material];
+              materials.forEach((mat) => {
+                if (mat) {
+                  mat.transparent = false;
+                  mat.opacity = 1.0;
+                  mat.side = THREE.DoubleSide;
+                  mat.clippingPlanes = [];
+                }
+              });
+
+              auditMeshes.push({
+                name: child.name || "UNNAMED",
+                parent: child.parent ? (child.parent.name || "UNNAMED") : "NONE",
+                visible: child.visible,
+                vertexCount: child.geometry.attributes.position.count,
+                materialCount: materials.length
+              });
+            } else {
+              child.visible = false;
+            }
+          }
+        });
+
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+        glassesModelRef.current.traverse((child) => {
+          if (child.isMesh) {
+            child.visible = true;
+          }
+        });
+
+        if (diagnosticFrameCountRef.current % 150 === 0) {
+          addLog("--- PASS1 MESH AUDIT DIAGNOSTICS ---");
+          addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(auditMeshes, null, 2)}`);
+          addLog(`PASS1_WORLD_BOUNDS: ${JSON.stringify(auditBounds, null, 2)}`);
+        }
+        diagnosticFrameCountRef.current++;
+      } else if (showProduction2PassRef.current) {
+        // Mode: PRODUCTION 2-PASS
+        rendererRef.current.clear();
+
+        if (occluderRef.current) occluderRef.current.visible = false;
+        if (fullOccluderRef.current) {
+          fullOccluderRef.current.visible = true;
+          fullOccluderRef.current.material.colorWrite = false;
+          fullOccluderRef.current.material.depthWrite = true;
+          fullOccluderRef.current.material.depthTest = true;
+          fullOccluderRef.current.material.side = THREE.DoubleSide;
+        }
+
+        const pass1Visible = [];
+        glassesModelRef.current.traverse((child) => {
+          if (child.isMesh) {
+            const part = child.userData.partType;
+            if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
+              child.visible = true;
+              pass1Visible.push(child.name || "UNNAMED");
+            } else {
+              child.visible = false;
+            }
+            if (child.material) {
+              const materials = Array.isArray(child.material) ? child.material : [child.material];
+              materials.forEach((mat) => {
+                if (mat) {
+                  mat.transparent = false;
+                  mat.opacity = 1.0;
+                  mat.side = THREE.DoubleSide;
+                  mat.clippingPlanes = [];
+                }
+              });
+            }
+          }
+        });
+
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+        rendererRef.current.clearDepth();
+
+        if (fullOccluderRef.current) fullOccluderRef.current.visible = showOccluderWireframeRef.current;
+        if (occluderRef.current) occluderRef.current.visible = false;
+
+        const pass2Visible = [];
+        glassesModelRef.current.traverse((child) => {
+          if (child.isMesh) {
+            const part = child.userData.partType;
+            if (part === 'FRONT_FRAME' || part === 'LENS') {
+              child.visible = true;
+              pass2Visible.push(child.name || "UNNAMED");
+            } else {
+              child.visible = false;
+            }
+            if (child.material) {
+              const materials = Array.isArray(child.material) ? child.material : [child.material];
+              materials.forEach((mat) => {
+                if (mat) {
+                  if (part === 'LENS') {
+                    mat.transparent = true;
+                    mat.opacity = 0.35;
+                  } else {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                  }
+                  mat.side = THREE.DoubleSide;
+                  mat.clippingPlanes = [];
+                }
+              });
+            }
+          }
+        });
+
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+        glassesModelRef.current.traverse((child) => {
+          if (child.isMesh) {
+            child.visible = true;
+          }
+        });
+        if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
+
+        if (diagnosticFrameCountRef.current % 150 === 0) {
+          addLog("--- PRODUCTION 2-PASS DIAGNOSTICS ---");
+          addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(pass1Visible)}`);
+          addLog(`PASS2_VISIBLE_MESHES: ${JSON.stringify(pass2Visible)}`);
+          addLog(`clearDepthCalledBetweenPasses: true`);
+        }
+        diagnosticFrameCountRef.current++;
+      } else if (showCleanFullOccluderRef.current) {
+        // Mode B: Clean Full Face Occluder Test
+        rendererRef.current.clear();
+
+        if (occluderRef.current) occluderRef.current.visible = false;
+        if (fullOccluderRef.current) {
+          fullOccluderRef.current.visible = true;
+          fullOccluderRef.current.material.colorWrite = false;
+          fullOccluderRef.current.material.depthWrite = true;
+          fullOccluderRef.current.material.depthTest = true;
+          fullOccluderRef.current.material.side = THREE.DoubleSide;
+        }
+
+        glassesModelRef.current.traverse((child) => {
+          if (child.isMesh) {
+            child.visible = true;
+            child.renderOrder = 0;
+            child.frustumCulled = false;
+            if (child.material) {
+              const materials = Array.isArray(child.material) ? child.material : [child.material];
+              materials.forEach((mat) => {
+                if (mat) {
+                  const part = child.userData.partType;
+                  if (part === 'LENS') {
+                    mat.transparent = true;
+                    mat.opacity = 0.35;
+                  } else {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                  }
+                  mat.side = THREE.DoubleSide;
+                  mat.clippingPlanes = [];
+                }
+              });
+            }
+          }
+        });
+
+        // 1st pass: render only depth-only fullOccluder
+        glassesModelRef.current.visible = false;
+        if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+        // 2nd pass: render glasses model normally, without clearDepth()
+        glassesModelRef.current.visible = true;
+        if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
         rendererRef.current.render(sceneRef.current, cameraRef.current);
       } else if (showTempleOccluderDebugRef.current) {
         if (occluderRef.current) {
@@ -1676,7 +2150,7 @@ ${JSON.stringify(pass2List, null, 2)}
         }
       }
 
-      if (showFullGlbTestRef.current || showTempleOccluderDebugRef.current) {
+      if (showFullGlbTestRef.current || showCleanFullOccluderRef.current || showProduction2PassRef.current || showPass1MeshAuditRef.current || showPass2InterferenceRef.current || showTempleOccluderDebugRef.current) {
         // Render was already handled above
       } else if (showOccluderDebugRef.current) {
         if (occluderRef.current) {
@@ -1827,8 +2301,14 @@ ${JSON.stringify(pass2List, null, 2)}
         lCtx.translate(width, 0);
         lCtx.scale(-1, 1);
         lCtx.drawImage(videoRef.current, 0, 0, width, height);
-        lCtx.drawImage(canvasRef.current, 0, 0, width, height);
+        if (!showCleanFullOccluderRef.current) {
+          lCtx.drawImage(canvasRef.current, 0, 0, width, height);
+        }
         lCtx.restore();
+
+        if (showCleanFullOccluderRef.current) {
+          lCtx.drawImage(canvasRef.current, 0, 0, width, height);
+        }
       }
 
       if (isRecordingRef.current && recordingCanvasRef.current) {
@@ -1838,8 +2318,14 @@ ${JSON.stringify(pass2List, null, 2)}
         rCtx.translate(width, 0);
         rCtx.scale(-1, 1);
         rCtx.drawImage(videoRef.current, 0, 0, width, height);
-        rCtx.drawImage(canvasRef.current, 0, 0, width, height);
+        if (!showCleanFullOccluderRef.current) {
+          rCtx.drawImage(canvasRef.current, 0, 0, width, height);
+        }
         rCtx.restore();
+
+        if (showCleanFullOccluderRef.current) {
+          rCtx.drawImage(canvasRef.current, 0, 0, width, height);
+        }
       }
     }
 
@@ -2289,6 +2775,11 @@ ${JSON.stringify(pass2List, null, 2)}
                 <div><span className="text-gray-500">Object_7 Forced Hidden:</span> <span className="text-red-500 font-bold">false</span></div>
                 <div className="text-[6.5px] text-gray-400 mt-1 border-t border-white/5 pt-1 leading-normal">• Fade start: 10° | Full hide: 30° (visible = false / opacity = 0.05)</div>
                 <div className="text-[6.5px] text-gray-400 leading-normal">• Object_7 Local Clipping: DISABLED (using full handles length)</div>
+                <div className="pt-1.5 border-t border-white/5 mt-1 text-yellow-400 font-bold">🛠️ DEPTH CALIBRATION DETAILS:</div>
+                <div><span className="text-gray-500">Video Mirrored:</span> <span className="text-green-400 font-bold">TRUE (CSS ScaleX)</span></div>
+                <div><span className="text-gray-500">Canvas Mirrored:</span> <span className="text-green-400 font-bold">TRUE (CSS ScaleX)</span></div>
+                <div><span className="text-gray-500">Left Temple Expected:</span> <span className="text-cyan-400 font-bold">{parseFloat(anatomicalBridgeDiagnostics.yawDegrees) > 0 ? "Hidden (False)" : "Visible (True)"}</span></div>
+                <div><span className="text-gray-500">Right Temple Expected:</span> <span className="text-cyan-400 font-bold">{parseFloat(anatomicalBridgeDiagnostics.yawDegrees) > 0 ? "Visible (True)" : "Hidden (False)"}</span></div>
               </div>
             </div>
 
@@ -2434,6 +2925,11 @@ ${JSON.stringify(pass2List, null, 2)}
                   setActiveTest("NONE");
                   setShowOccluderDebug(false);
                   setShowTempleOccluderDebug(false);
+                  setShowCleanFullOccluder(false);
+                  setShowProduction2Pass(false);
+                  setShowPass1MeshAudit(false);
+                  setShowPass2Interference(false);
+                  setShowOccluderWireframe(false);
                   showToast("Kích hoạt EXPERIMENT 1!", "warning");
                 } else {
                   showToast("Đã tắt EXPERIMENT 1!", "success");
@@ -2445,8 +2941,156 @@ ${JSON.stringify(pass2List, null, 2)}
                   : "bg-white/5 text-gray-300 hover:bg-white/10"
               }`}
             >
-              GLB TEST {showFullGlbTest ? "ON" : "OFF"}
+              FULL GLB TEST: {showFullGlbTest ? "ON" : "OFF"}
             </button>
+
+            <button
+              onClick={() => {
+                const nextVal = !showCleanFullOccluder;
+                setShowCleanFullOccluder(nextVal);
+                if (nextVal) {
+                  setShowFullGlbTest(false);
+                  setShowProduction2Pass(false);
+                  setShowPass1MeshAudit(false);
+                  setShowPass2Interference(false);
+                  setShowOccluderWireframe(false);
+                  setActiveTest("NONE");
+                  setShowOccluderDebug(false);
+                  setShowTempleOccluderDebug(false);
+                  showToast("Kích hoạt CLEAN FULL OCCLUDER!", "warning");
+                } else {
+                  showToast("Đã tắt CLEAN FULL OCCLUDER!", "success");
+                }
+              }}
+              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
+                showCleanFullOccluder
+                  ? "bg-purple-600 text-white shadow-md shadow-purple-500/20"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10"
+              }`}
+            >
+              CLEAN FULL OCCLUDER: {showCleanFullOccluder ? "ON" : "OFF"}
+            </button>
+
+            <button
+              onClick={() => {
+                const nextVal = !showProduction2Pass;
+                setShowProduction2Pass(nextVal);
+                if (nextVal) {
+                  setShowCleanFullOccluder(false);
+                  setShowFullGlbTest(false);
+                  setShowPass1MeshAudit(false);
+                  setShowPass2Interference(false);
+                  setShowOccluderWireframe(false);
+                  setActiveTest("NONE");
+                  setShowOccluderDebug(false);
+                  setShowTempleOccluderDebug(false);
+                  showToast("Kích hoạt PRODUCTION 2-PASS!", "warning");
+                } else {
+                  showToast("Đã tắt PRODUCTION 2-PASS!", "success");
+                }
+              }}
+              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
+                showProduction2Pass
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10"
+              }`}
+            >
+              PRODUCTION 2-PASS: {showProduction2Pass ? "ON" : "OFF"}
+            </button>
+
+            <button
+              onClick={() => {
+                const nextVal = !showPass1MeshAudit;
+                setShowPass1MeshAudit(nextVal);
+                if (nextVal) {
+                  setShowCleanFullOccluder(false);
+                  setShowFullGlbTest(false);
+                  setShowProduction2Pass(false);
+                  setShowPass2Interference(false);
+                  setShowOccluderWireframe(false);
+                  setActiveTest("NONE");
+                  setShowOccluderDebug(false);
+                  setShowTempleOccluderDebug(false);
+                  showToast("Kích hoạt PASS 1 MESH AUDIT!", "warning");
+                } else {
+                  showToast("Đã tắt PASS 1 MESH AUDIT!", "success");
+                }
+              }}
+              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
+                showPass1MeshAudit
+                  ? "bg-cyan-600 text-white shadow-md shadow-cyan-500/20"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10"
+              }`}
+            >
+              PASS1 MESH AUDIT: {showPass1MeshAudit ? "ON" : "OFF"}
+            </button>
+
+            <button
+              onClick={() => {
+                const nextVal = !showPass2Interference;
+                setShowPass2Interference(nextVal);
+                if (nextVal) {
+                  setShowCleanFullOccluder(false);
+                  setShowFullGlbTest(false);
+                  setShowProduction2Pass(false);
+                  setShowPass1MeshAudit(false);
+                  setShowOccluderWireframe(false);
+                  setActiveTest("NONE");
+                  setShowOccluderDebug(false);
+                  setShowTempleOccluderDebug(false);
+                  showToast("Kích hoạt PASS 2 INTERFERENCE AUDIT!", "warning");
+                } else {
+                  showToast("Đã tắt PASS 2 INTERFERENCE AUDIT!", "success");
+                }
+              }}
+              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
+                showPass2Interference
+                  ? "bg-red-600 text-white shadow-md shadow-red-500/20"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10"
+              }`}
+            >
+              PASS2 INTERFERENCE: {showPass2Interference ? "ON" : "OFF"}
+            </button>
+
+            {showPass2Interference && (
+              <div className="flex flex-col gap-1 pl-2 border-l border-red-500/30">
+                <button
+                  onClick={() => {
+                    const nextVal = !pass1OnlyFreeze;
+                    setPass1OnlyFreeze(nextVal);
+                    if (nextVal) {
+                      setPass1ThenPass2NoClear(false);
+                      showToast("FREEZE PASS 1 active!", "warning");
+                    }
+                  }}
+                  className={`py-0.5 rounded text-[6px] font-bold uppercase transition-all ${
+                    pass1OnlyFreeze
+                      ? "bg-orange-600 text-white"
+                      : "bg-white/10 text-gray-400 hover:bg-white/20"
+                  }`}
+                >
+                  PASS1 FREEZE: {pass1OnlyFreeze ? "ON" : "OFF"}
+                </button>
+
+                <button
+                  onClick={() => {
+                    const nextVal = !pass1ThenPass2NoClear;
+                    setPass1ThenPass2NoClear(nextVal);
+                    if (nextVal) {
+                      setPass1OnlyFreeze(false);
+                      showToast("NO CLEAR DEPTH active!", "warning");
+                    }
+                  }}
+                  className={`py-0.5 rounded text-[6px] font-bold uppercase transition-all ${
+                    pass1ThenPass2NoClear
+                      ? "bg-yellow-600 text-white"
+                      : "bg-white/10 text-gray-400 hover:bg-white/20"
+                  }`}
+                >
+                  NO CLEAR DEPTH: {pass1ThenPass2NoClear ? "ON" : "OFF"}
+                </button>
+              </div>
+            )}
 
             <button
               onClick={() => {
@@ -2456,6 +3100,11 @@ ${JSON.stringify(pass2List, null, 2)}
                   setActiveTest("NONE");
                   setShowOccluderDebug(false);
                   setShowFullGlbTest(false);
+                  setShowCleanFullOccluder(false);
+                  setShowProduction2Pass(false);
+                  setShowPass1MeshAudit(false);
+                  setShowPass2Interference(false);
+                  setShowOccluderWireframe(false);
                   showToast("Kích hoạt thí nghiệm occluder!", "warning");
                 } else {
                   showToast("Đã tắt thí nghiệm!", "success");
@@ -2478,6 +3127,11 @@ ${JSON.stringify(pass2List, null, 2)}
                   setActiveTest("NONE");
                   setShowTempleOccluderDebug(false);
                   setShowFullGlbTest(false);
+                  setShowCleanFullOccluder(false);
+                  setShowProduction2Pass(false);
+                  setShowPass1MeshAudit(false);
+                  setShowPass2Interference(false);
+                  setShowOccluderWireframe(false);
                   showToast("Kích hoạt trực quan hóa occluder!", "warning");
                 } else {
                   showToast("Đã tắt trực quan hóa!", "success");
@@ -2490,6 +3144,27 @@ ${JSON.stringify(pass2List, null, 2)}
               }`}
             >
               SHOW OCC {showOccluderDebug ? "ON" : "OFF"}
+            </button>
+
+            <button
+              onClick={() => {
+                const nextVal = !showOccluderWireframe;
+                setShowOccluderWireframe(nextVal);
+                if (nextVal) {
+                  setShowOccluderDebug(false);
+                  setShowTempleOccluderDebug(false);
+                  showToast("Kích hoạt lưới Occluder Wireframe!", "warning");
+                } else {
+                  showToast("Đã tắt lưới Occluder Wireframe!", "success");
+                }
+              }}
+              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
+                showOccluderWireframe
+                  ? "bg-green-500 text-white shadow-md shadow-green-500/20"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10"
+              }`}
+            >
+              OCC WIREFRAME: {showOccluderWireframe ? "ON" : "OFF"}
             </button>
 
             <button

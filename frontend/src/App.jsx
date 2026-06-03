@@ -4,6 +4,7 @@ import ProtectedRoute from './components/ProtectedRoute'; // Import ProtectedRou
 
 // Import Layouts
 import Navbar from './components/Navbar';
+import ChatWidget from './components/ChatWidget';
 import AdminLayout from './pages/admin/AdminLayout';
 import StaffLayout from './pages/staff/StaffLayout'; // Layout mới cho Staff
 import Login from './pages/Login';
@@ -23,6 +24,7 @@ import Wallet from './pages/customer/Wallet';
 // Import Pages (Admin)
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminProducts from './pages/admin/ProductManager';
+import SaleManager from './pages/admin/SaleManager';
 import BrandManager from './pages/admin/BrandManager';
 import CategoryManager from './pages/admin/CategoryManager';
 import ImportManager from './pages/admin/ImportManager';
@@ -32,6 +34,7 @@ import CancelRequests from './pages/admin/CancelRequests'; // Trang quản trị
 // Import Pages (Staff)
 import OrderManagement from './pages/staff/OrderManagement';
 import WithdrawRequests from './pages/staff/WithdrawRequests';
+import ChatManagement from './pages/staff/ChatManagement';
 
 
 import { SocketProvider } from './context/SocketContext';
@@ -50,6 +53,7 @@ export default function App() {
                 <div className="pt-16 min-h-screen bg-gray-55">
                   <Outlet />
                 </div>
+                <ChatWidget />
               </>
             }>
               <Route index element={<Home />} />
@@ -101,6 +105,7 @@ export default function App() {
             }>
               <Route index element={<AdminDashboard />} />
               <Route path="products" element={<AdminProducts />} />
+              <Route path="sales" element={<SaleManager />} />
               <Route path="orders" element={<OrderManagement />} />
               <Route path="brand" element={<BrandManager />} />
               <Route path="categories" element={<CategoryManager />} />
@@ -119,6 +124,7 @@ export default function App() {
               <Route index element={<OrderManagement />} />
               <Route path="cancel-requests" element={<CancelRequests />} />
               <Route path="withdraw-requests" element={<WithdrawRequests />} />
+              <Route path="chat" element={<ChatManagement />} />
             </Route>
 
           </Routes>

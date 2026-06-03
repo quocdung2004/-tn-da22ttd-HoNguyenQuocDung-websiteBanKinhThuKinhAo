@@ -5,6 +5,7 @@ const WalletTransaction = require('../models/WalletTransaction');
 const User = require('../models/User');
 const { createNotificationAndEmit, checkAndEmitLowStockNotification } = require('../utils/notificationHelper');
 const { emitToUser, emitToStaff, emitToAdmin, getIO } = require('../socket');
+const { resolveProductSalePrice } = require('./productController');
 
 // Helper tự động lấy hoặc tạo ví mới cho khách hàng
 const getOrCreateWallet = async (userId) => {
@@ -19,7 +20,7 @@ const getOrCreateWallet = async (userId) => {
 // [POST] Tạo Đơn hàng mới
 exports.createOrder = async (req, res) => {
   try {
-    const { orderCode, username, customerInfo, items, total, paymentMethod, status } = req.body;
+    const { orderCode, username, customerInfo, items, paymentMethod, status } = req.body;
 
     // 1. Kiểm tra mã đơn hàng đã tồn tại chưa
     const existingOrder = await Order.findOne({ orderCode });
@@ -27,46 +28,86 @@ exports.createOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Mã đơn hàng này đã tồn tại!' });
     }
 
-    // 2. Lấy giá nhập (importPrice) hiện tại từ Product và trừ tồn kho
-    const enrichedItems = [];
-    for (const item of items) {
-      const product = await Product.findById(item.productId);
-      let importPriceAtPurchase = 0;
-      if (product) {
-        importPriceAtPurchase = product.importPrice || 0;
-        // Khấu trừ tồn kho của sản phẩm
-        product.stock = Math.max(0, product.stock - item.quantity);
-        await product.save();
+    if (!items || items.length === 0) {
+      return res.status(400).json({ success: false, message: 'Đơn hàng phải chứa ít nhất 1 sản phẩm!' });
+    }
 
-        // ================= REALTIME STOCK INTEGRATION =================
-        // Phát tín hiệu cập nhật tồn kho sỉ/lẻ
-        getIO().emit('product:stockUpdated', {
-          productId: product._id.toString(),
-          stock: product.stock,
-          reason: 'order_created'
-        });
-        // Kiểm tra và gửi cảnh báo tồn kho thấp (stock <= 5)
-        await checkAndEmitLowStockNotification(product);
-        // ===============================================================
+    // 2. PASS 1: Kiểm tra tính hợp lệ của toàn bộ sản phẩm và tồn kho trước khi thực hiện thay đổi
+    const productsCache = {};
+    for (const item of items) {
+      if (!item.productId) {
+        return res.status(400).json({ success: false, message: 'Thiếu thông tin ID sản phẩm!' });
       }
+      const product = await Product.findById(item.productId);
+      if (!product) {
+        return res.status(400).json({ success: false, message: `Sản phẩm với ID ${item.productId} không tồn tại trên hệ thống!` });
+      }
+      if (product.isActive === false) {
+        return res.status(400).json({ success: false, message: `Sản phẩm kính mắt "${product.name}" hiện đã ngưng kinh doanh!` });
+      }
+      if (product.stock < item.quantity) {
+        return res.status(400).json({ 
+          success: false, 
+          message: `Sản phẩm "${product.name}" đã hết hàng hoặc không đủ tồn kho (còn lại: ${product.stock}, yêu cầu: ${item.quantity})!` 
+        });
+      }
+      productsCache[item.productId.toString()] = product;
+    }
+
+    // 3. PASS 2: Tính toán giá tiền động từ server, trừ tồn kho và tạo đơn
+    const enrichedItems = [];
+    let calculatedTotal = 0;
+
+    for (const item of items) {
+      const product = productsCache[item.productId.toString()];
+      const importPriceAtPurchase = product.importPrice || 0;
+      
+      // GIẢI QUYẾT GIÁ KHUYẾN MÃI DƯỚI SERVER (Tuyệt đối không tin cậy frontend gửi lên)
+      const saleDetails = await resolveProductSalePrice(product);
+      const finalPriceAtPurchase = saleDetails.salePrice;
+      const finalOriginalPriceAtPurchase = saleDetails.originalPrice;
+      const finalDiscountAtPurchase = saleDetails.originalPrice - saleDetails.salePrice;
+      const finalSaleIdAtPurchase = saleDetails.activeSale ? saleDetails.activeSale._id : null;
+
+      // Khấu trừ tồn kho của sản phẩm
+      product.stock -= item.quantity;
+      await product.save();
+
+      // ================= REALTIME STOCK INTEGRATION =================
+      // Phát tín hiệu cập nhật tồn kho sỉ/lẻ
+      getIO().emit('product:stockUpdated', {
+        productId: product._id.toString(),
+        stock: product.stock,
+        reason: 'order_created'
+      });
+      // Kiểm tra và gửi cảnh báo tồn kho thấp (stock <= 5)
+      await checkAndEmitLowStockNotification(product);
+      // ===============================================================
+
+      // Cộng dồn tổng tiền thực tế trên server
+      calculatedTotal += finalPriceAtPurchase * item.quantity;
+
       enrichedItems.push({
         productId: item.productId,
         quantity: item.quantity,
-        priceAtPurchase: item.priceAtPurchase || item.price || 0,
+        priceAtPurchase: finalPriceAtPurchase,
         importPriceAtPurchase: importPriceAtPurchase,
+        originalPriceAtPurchase: finalOriginalPriceAtPurchase,
+        discountAtPurchase: finalDiscountAtPurchase,
+        saleIdAtPurchase: finalSaleIdAtPurchase,
         hasPrescription: item.hasPrescription || false,
         od: item.od || '',
         os: item.os || ''
       });
     }
 
-    // 3. Tạo đơn hàng mới
+    // 4. Tạo đơn hàng mới
     const newOrder = new Order({
       orderCode,
       username: username || req.user?.username || null, // Lấy username từ req.body hoặc token giải mã
       customerInfo,
       items: enrichedItems,
-      total,
+      total: calculatedTotal, // Lưu tổng tiền tuyệt đối an toàn tính toán bởi server
       paymentMethod,
       status: status || 'pending'
     });

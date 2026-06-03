@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getCartKey } from '../../utils/cartHelper';
 import {
-  Camera, ShoppingCart, ShieldCheck, ChevronLeft, Edit3, X, Loader2, Box, CheckCircle2
+  Camera, ShoppingCart, ShieldCheck, ChevronLeft, Edit3, X, Loader2, Box, CheckCircle2, Sparkles
 } from 'lucide-react';
 import VirtualTryOn from './VirtualTryOn';
 
@@ -72,7 +72,10 @@ export default function ProductDetail() {
       cartId: cartItemId,
       productId: product._id,
       name: product.name,
-      price: product.price,
+      price: product.discountPercent > 0 ? product.salePrice : product.price,
+      originalPrice: product.discountPercent > 0 ? product.originalPrice : product.price,
+      discountPercent: product.discountPercent || 0,
+      salePrice: product.discountPercent > 0 ? product.salePrice : product.price,
       image: product.images[0],
       hasPrescription, od, os, quantity: 1
     };
@@ -147,7 +150,31 @@ export default function ProductDetail() {
           {/* CỘT PHẢI */}
           <div className="md:w-1/2 flex flex-col">
             <h1 className="text-4xl font-black text-gray-900 leading-tight">{product.name}</h1>
-            <div className="text-3xl font-black text-blue-600 mt-4">{product.price.toLocaleString('vi-VN')} VNĐ</div>
+            
+            <div className="mt-4 flex items-baseline gap-3 flex-wrap">
+              {product.discountPercent > 0 ? (
+                <>
+                  <span className="text-3xl font-black text-red-600">{product.salePrice.toLocaleString('vi-VN')} VNĐ</span>
+                  <span className="text-lg text-gray-400 line-through font-medium">{product.originalPrice.toLocaleString('vi-VN')} VNĐ</span>
+                  <span className="text-[10px] bg-red-100 text-red-700 font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider ml-1 animate-pulse">Giảm {product.discountPercent}%</span>
+                </>
+              ) : (
+                <span className="text-3xl font-black text-blue-600">{product.price.toLocaleString('vi-VN')} VNĐ</span>
+              )}
+            </div>
+
+            {product.discountPercent > 0 && product.activeSale && (
+              <div className="mt-4 bg-gradient-to-r from-red-50 to-orange-50 border border-red-100/50 rounded-2xl p-4 flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center text-red-600 shrink-0">
+                  <Sparkles className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-xs text-red-800">Khuyến Mãi Đang Áp Dụng: {product.activeSale.name}</h4>
+                  <p className="text-[10px] text-red-600 mt-0.5">Giá ưu đãi đã được giảm trực tiếp vào giỏ hàng của bạn!</p>
+                </div>
+              </div>
+            )}
+
             <div className="h-px bg-gray-100 my-8"></div>
             <p className="text-gray-500 text-lg leading-relaxed mb-10">{product.description || "Gọng kính cao cấp, chất liệu siêu nhẹ mang lại cảm giác thoải mái khi đeo cả ngày."}</p>
 

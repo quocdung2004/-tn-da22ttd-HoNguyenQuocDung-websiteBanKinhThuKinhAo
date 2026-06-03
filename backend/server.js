@@ -185,6 +185,14 @@ app.use('/api/wallet', walletRoutes);
 const notificationRoutes = require('./routes/notificationRoutes');
 app.use('/api/notifications', notificationRoutes);
 
+// Đăng ký định tuyến chat (Realtime Chat System)
+const chatRoutes = require('./routes/chatRoutes');
+app.use('/api/chat', chatRoutes);
+
+// Đăng ký định tuyến khuyến mãi (Sale Promotion System)
+const saleRoutes = require('./routes/saleRoutes');
+app.use('/api/sales', saleRoutes);
+
 // Khởi tạo máy chủ HTTP tích hợp Socket.IO Realtime
 const http = require('http');
 const { initSocket } = require('./socket');

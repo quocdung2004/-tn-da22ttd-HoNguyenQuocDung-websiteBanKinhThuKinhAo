@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Package, Tag, LogOut, LayoutDashboard, ListTree, PlusCircle, Users, XOctagon, Wallet } from 'lucide-react';
+import { Package, Tag, LogOut, LayoutDashboard, ListTree, PlusCircle, Users, XOctagon, Wallet, Percent } from 'lucide-react';
 import NotificationBell from '../../components/NotificationBell';
 
 export default function AdminLayout() {
@@ -10,6 +10,7 @@ export default function AdminLayout() {
   const menuItems = [
     { path: '/admin', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Tổng quan Đơn hàng' },
     { path: '/admin/products', icon: <Package className="w-5 h-5" />, label: 'Quản lý Kính (Kho)' },
+    { path: '/admin/sales', icon: <Percent className="w-5 h-5" />, label: 'Quản lý Khuyến mãi' },
     { path: '/admin/brand', icon: <Tag className="w-5 h-5" />, label: 'Quản lý Nhãn hàng' },
     { path: '/admin/categories', icon: <ListTree className="w-5 h-5" />, label: 'Quản lý Danh mục kính' },
     { path: '/admin/imports', icon: <PlusCircle className="w-5 h-5" />, label: 'Quản lý Nhập hàng' },

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { ShoppingBag, LogOut, XOctagon, Wallet } from 'lucide-react';
+import { ShoppingBag, LogOut, XOctagon, Wallet, MessageSquare } from 'lucide-react';
 import NotificationBell from '../../components/NotificationBell';
 
 export default function StaffLayout() {
@@ -10,6 +10,7 @@ export default function StaffLayout() {
     { path: '/staff', icon: <ShoppingBag className="w-5 h-5" />, label: 'Quản lý Đơn hàng' },
     { path: '/staff/cancel-requests', icon: <XOctagon className="w-5 h-5" />, label: 'Yêu cầu hủy đơn' },
     { path: '/staff/withdraw-requests', icon: <Wallet className="w-5 h-5" />, label: 'Yêu cầu rút tiền' },
+    { path: '/staff/chat', icon: <MessageSquare className="w-5 h-5" />, label: 'Quản lý Chat' },
   ];
 
   return (
