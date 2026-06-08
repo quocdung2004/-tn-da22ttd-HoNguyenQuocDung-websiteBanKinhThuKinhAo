@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { View, ArrowRight, Sparkles, ShoppingBag, ShieldCheck, Loader2, Box } from 'lucide-react';
+import { View, ArrowRight, Sparkles, ShoppingBag, ShieldCheck, Loader2, Box, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useSocket } from '../../context/SocketContext';
 
 export default function Home() {
@@ -9,6 +9,8 @@ export default function Home() {
   
   // STATE LƯU DỮ LIỆU TỪ BACKEND
   const [products, setProducts] = useState([]);
+  const [banners, setBanners] = useState([]);
+  const [activeBannerIndex, setActiveBannerIndex] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const fetchProducts = async () => {
@@ -25,10 +27,34 @@ export default function Home() {
     }
   };
 
+  const fetchBanners = async () => {
+    try {
+      const res = await fetch('/api/banners');
+      const data = await res.json();
+      if (data.success) {
+        setBanners(data.banners || []);
+        setActiveBannerIndex(0);
+      }
+    } catch (error) {
+      console.error('Loi tai banner trang chu:', error);
+    }
+  };
+
   // GỌI API LẤY DANH SÁCH SẢN PHẨM KHI VỪA MỞ TRANG
   useEffect(() => {
     fetchProducts();
+    fetchBanners();
   }, []);
+
+  useEffect(() => {
+    if (banners.length <= 1) return undefined;
+
+    const timer = setInterval(() => {
+      setActiveBannerIndex((currentIndex) => (currentIndex + 1) % banners.length);
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [banners.length]);
 
   // LẮNG NGHE SỰ KIỆN CẬP NHẬT TỒN KHO REALTIME
   useEffect(() => {
@@ -46,8 +72,104 @@ export default function Home() {
     };
   }, [socket]);
 
+  const goToPreviousBanner = (event) => {
+    event.stopPropagation();
+    setActiveBannerIndex((currentIndex) => (
+      currentIndex === 0 ? banners.length - 1 : currentIndex - 1
+    ));
+  };
+
+  const goToNextBanner = (event) => {
+    event.stopPropagation();
+    setActiveBannerIndex((currentIndex) => (currentIndex + 1) % banners.length);
+  };
+
+  const handleBannerClick = (targetUrl) => {
+    if (!targetUrl) return;
+    if (targetUrl.startsWith('http://') || targetUrl.startsWith('https://')) {
+      window.location.href = targetUrl;
+      return;
+    }
+    navigate(targetUrl);
+  };
+
+  const activeBanner = banners[activeBannerIndex];
+
   return (
     <div className="bg-gray-50 min-h-screen pb-20">
+      {activeBanner && (
+        <section className="bg-white border-b border-gray-100">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => handleBannerClick(activeBanner.targetUrl)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') handleBannerClick(activeBanner.targetUrl);
+              }}
+              className="relative aspect-[16/8] sm:aspect-[16/6] lg:aspect-[16/5] rounded-3xl overflow-hidden bg-gray-900 shadow-xl cursor-pointer group"
+            >
+              <img
+                src={activeBanner.imageUrl}
+                alt={activeBanner.title}
+                className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-gray-950/75 via-gray-950/35 to-transparent" />
+              <div className="absolute inset-y-0 left-0 flex flex-col justify-center px-6 sm:px-10 lg:px-14 max-w-2xl">
+                <p className="text-xs sm:text-sm font-black uppercase tracking-widest text-blue-200 mb-3">
+                  Banner
+                </p>
+                <h2 className="text-2xl sm:text-4xl lg:text-5xl font-black text-white leading-tight">
+                  {activeBanner.title}
+                </h2>
+                {activeBanner.subtitle && (
+                  <p className="mt-3 text-sm sm:text-lg text-white/85 line-clamp-2 max-w-xl">
+                    {activeBanner.subtitle}
+                  </p>
+                )}
+                <div className="mt-5 inline-flex w-fit items-center gap-2 bg-white text-gray-900 px-5 py-3 rounded-2xl font-black text-sm shadow-lg">
+                  Kham pha ngay <ArrowRight className="w-4 h-4" />
+                </div>
+              </div>
+
+              {banners.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={goToPreviousBanner}
+                    className="absolute left-3 sm:left-5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/85 text-gray-900 flex items-center justify-center shadow-lg hover:bg-white transition"
+                    aria-label="Banner truoc"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goToNextBanner}
+                    className="absolute right-3 sm:right-5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/85 text-gray-900 flex items-center justify-center shadow-lg hover:bg-white transition"
+                    aria-label="Banner tiep theo"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2">
+                    {banners.map((banner, index) => (
+                      <button
+                        key={banner._id}
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setActiveBannerIndex(index);
+                        }}
+                        className={`h-2 rounded-full transition-all ${index === activeBannerIndex ? 'w-8 bg-white' : 'w-2 bg-white/50 hover:bg-white/80'}`}
+                        aria-label={`Chuyen den banner ${index + 1}`}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
       
       {/* ================= HERO BANNER (CHIA 2 CỘT) ================= */}
       <div className="bg-white border-b border-gray-100 overflow-hidden relative">
@@ -176,8 +298,11 @@ export default function Home() {
 
                       {/* BADGE BÁO GIẢM GIÁ */}
                       {product.discountPercent > 0 && (
-                        <div className="absolute top-3 right-3 bg-gradient-to-r from-red-500 to-rose-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full flex items-center shadow-lg uppercase tracking-wider z-10 animate-bounce">
-                          - {product.discountPercent}% OFF
+                        <div className="absolute top-3 right-3 bg-gradient-to-r from-red-500 to-rose-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full flex flex-col items-center shadow-lg uppercase tracking-wider z-10 animate-bounce">
+                          <div>- {product.discountPercent}% OFF</div>
+                          {product.remainingSaleQuantity !== null && product.remainingSaleQuantity > 0 && (
+                            <div className="text-[8px] opacity-90 mt-0.5 lowercase font-medium">Còn {product.remainingSaleQuantity} suất</div>
+                          )}
                         </div>
                       )}
                     </div>

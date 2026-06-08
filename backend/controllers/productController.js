@@ -3,15 +3,17 @@ const { checkAndEmitLowStockNotification } = require('../utils/notificationHelpe
 const { getIO } = require('../socket');
 const { getActiveSales, calculateBestSaleForProduct, attachSaleInfoToProduct } = require('../utils/saleHelper');
 
-// Giữ tương thích ngược hoàn hảo cho orderController.js
-const resolveProductSalePrice = async (product) => {
-  const activeSales = await getActiveSales();
-  const res = calculateBestSaleForProduct(product, activeSales);
+// Giữ tương thích ngược hoàn hảo cho orderController.js (hỗ trợ cache activeSales)
+const resolveProductSalePrice = async (product, activeSales) => {
+  const sales = activeSales || await getActiveSales();
+  const res = calculateBestSaleForProduct(product, sales);
   return {
     originalPrice: product.price || 0,
     salePrice: res.salePrice,
     discountPercent: res.discountPercent,
-    activeSale: res.activeSale
+    activeSale: res.activeSale,
+    remainingSaleQuantity: res.remainingSaleQuantity,
+    saleQuotaStatus: res.saleQuotaStatus
   };
 };
 

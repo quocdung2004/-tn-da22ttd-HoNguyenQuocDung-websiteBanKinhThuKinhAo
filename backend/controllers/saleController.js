@@ -6,7 +6,7 @@ const mongoose = require('mongoose');
 // [POST] /api/sales - Tạo mới chiến dịch khuyến mãi (Admin)
 exports.createSale = async (req, res) => {
   try {
-    const { name, description, discountType, discountValue, startDate, endDate, applicableProducts, applicableCategories } = req.body;
+    const { name, description, discountType, discountValue, startDate, endDate, applicableProducts, applicableCategories, usageLimitType, usageLimit } = req.body;
 
     // 1. Validation dữ liệu cơ bản
     if (!name || !discountType || !discountValue || !startDate || !endDate) {
@@ -27,6 +27,12 @@ exports.createSale = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Ngày kết thúc phải diễn ra sau ngày bắt đầu!' });
     }
 
+    if (usageLimitType === 'limited') {
+      if (usageLimit === undefined || usageLimit === null || Number(usageLimit) <= 0) {
+        return res.status(400).json({ success: false, message: 'Số lượng giới hạn sử dụng phải lớn hơn 0!' });
+      }
+    }
+
     const newSale = new Sale({
       name,
       description,
@@ -36,6 +42,9 @@ exports.createSale = async (req, res) => {
       endDate: end,
       applicableProducts: applicableProducts || [],
       applicableCategories: applicableCategories || [],
+      usageLimitType: usageLimitType || 'unlimited',
+      usageLimit: usageLimitType === 'limited' ? Number(usageLimit) : null,
+      usedCount: 0,
       createdBy: req.user?.id || null
     });
 
@@ -94,7 +103,7 @@ exports.updateSale = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Định dạng ID Sale không hợp lệ!' });
     }
 
-    const { name, description, discountType, discountValue, startDate, endDate, isActive, applicableProducts, applicableCategories } = req.body;
+    const { name, description, discountType, discountValue, startDate, endDate, isActive, applicableProducts, applicableCategories, usageLimitType, usageLimit } = req.body;
 
     const sale = await Sale.findById(id);
     if (!sale) {
@@ -128,6 +137,24 @@ exports.updateSale = async (req, res) => {
 
     if (isActive !== undefined) {
       sale.isActive = isActive === true || isActive === 'true';
+    }
+
+    if (usageLimitType !== undefined) {
+      sale.usageLimitType = usageLimitType;
+    }
+
+    if (sale.usageLimitType === 'limited') {
+      if (usageLimit !== undefined) {
+        if (usageLimit === null || Number(usageLimit) <= 0) {
+          return res.status(400).json({ success: false, message: 'Số lượng giới hạn sử dụng phải lớn hơn 0!' });
+        }
+        sale.usageLimit = Number(usageLimit);
+      } else if (!sale.usageLimit || sale.usageLimit <= 0) {
+        // Nếu chuyển từ unlimited sang limited nhưng không truyền usageLimit mới, cần báo lỗi
+        return res.status(400).json({ success: false, message: 'Vui lòng cung cấp số lượng giới hạn sử dụng hợp lệ!' });
+      }
+    } else {
+      sale.usageLimit = null;
     }
 
     if (applicableProducts) sale.applicableProducts = applicableProducts;

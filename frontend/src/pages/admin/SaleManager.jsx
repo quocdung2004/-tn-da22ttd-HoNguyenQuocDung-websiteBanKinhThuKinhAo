@@ -19,7 +19,9 @@ export default function SaleManager() {
     endDate: '',
     isActive: true,
     applicableProducts: [],
-    applicableCategories: []
+    applicableCategories: [],
+    usageLimitType: 'unlimited',
+    usageLimit: ''
   });
 
   const [editingId, setEditingId] = useState(null);
@@ -146,7 +148,9 @@ export default function SaleManager() {
       endDate: '',
       isActive: true,
       applicableProducts: [],
-      applicableCategories: []
+      applicableCategories: [],
+      usageLimitType: 'unlimited',
+      usageLimit: ''
     });
     setEditingId(null);
     setMessage({ text: '', type: '' });
@@ -167,7 +171,9 @@ export default function SaleManager() {
       endDate: new Date(sale.endDate).toISOString().split('T')[0],
       isActive: sale.isActive,
       applicableProducts: sale.applicableProducts ? sale.applicableProducts.map(p => p._id || p) : [],
-      applicableCategories: sale.applicableCategories ? sale.applicableCategories.map(c => c._id || c) : []
+      applicableCategories: sale.applicableCategories ? sale.applicableCategories.map(c => c._id || c) : [],
+      usageLimitType: sale.usageLimitType || 'unlimited',
+      usageLimit: sale.usageLimit || ''
     });
     setMessage({ text: '', type: '' });
     setIsProductDropdownOpen(false);
@@ -192,6 +198,16 @@ export default function SaleManager() {
       setMessage({ text: 'Phần trăm giảm giá không được vượt quá 100%!', type: 'error' });
       setLoading(false);
       return;
+    }
+
+    // 2.5. Kiểm tra quota giới hạn số lượng
+    if (formData.usageLimitType === 'limited') {
+      const limitVal = Number(formData.usageLimit);
+      if (isNaN(limitVal) || limitVal <= 0) {
+        setMessage({ text: 'Số lượng giới hạn sử dụng phải lớn hơn 0!', type: 'error' });
+        setLoading(false);
+        return;
+      }
     }
 
     // 3. KIỂM TRA NGÀY TRONG QUÁ KHỨ (Bắt buộc không được ở quá khứ so với hôm nay)
@@ -239,13 +255,18 @@ export default function SaleManager() {
       const url = editingId ? `/api/sales/${editingId}` : '/api/sales';
       const method = editingId ? 'PUT' : 'POST';
 
+      const payload = {
+        ...formData,
+        usageLimit: formData.usageLimitType === 'limited' ? Number(formData.usageLimit) : null
+      };
+
       const response = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       });
 
       const data = await response.json();
@@ -434,6 +455,32 @@ export default function SaleManager() {
                   <input type="checkbox" checked={formData.isActive} onChange={e => setFormData({...formData, isActive: e.target.checked})} className="sr-only peer" />
                   <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                 </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 bg-gray-50 p-3.5 rounded-xl border border-gray-150/40">
+                <div>
+                  <label className="block text-xs font-black text-gray-700 uppercase tracking-wider mb-2">Giới hạn số lượng</label>
+                  <select 
+                    value={formData.usageLimitType} 
+                    onChange={e => setFormData({...formData, usageLimitType: e.target.value, usageLimit: e.target.value === 'unlimited' ? '' : formData.usageLimit})} 
+                    className="w-full px-3 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none text-sm font-bold bg-white"
+                  >
+                    <option value="unlimited">Không giới hạn</option>
+                    <option value="limited">Giới hạn số lượng</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-gray-700 uppercase tracking-wider mb-2">Số lượng tối đa</label>
+                  <input 
+                    type="number" 
+                    min="1"
+                    disabled={formData.usageLimitType === 'unlimited'} 
+                    placeholder={formData.usageLimitType === 'unlimited' ? 'Vô hạn' : 'VD: 20'} 
+                    value={formData.usageLimit} 
+                    onChange={e => setFormData({...formData, usageLimit: e.target.value})} 
+                    className={`w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none text-sm font-bold bg-white ${formData.usageLimitType === 'unlimited' ? 'opacity-50 cursor-not-allowed bg-gray-100' : ''}`} 
+                  />
+                </div>
               </div>
 
               {/* SEARCHABLE MULTI-SELECT DROPDOWN: CHỌN SẢN PHẨM KÍNH */}
@@ -675,7 +722,15 @@ export default function SaleManager() {
                       <div key={sale._id} className="bg-gray-50/50 hover:bg-gray-50 border border-gray-100 rounded-2xl p-5 flex flex-col justify-between transition-all hover:shadow-md">
                         <div>
                           <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                            {getCampaignStatusBadge(sale)}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {getCampaignStatusBadge(sale)}
+                              {sale.usageLimitType === 'limited' && sale.usedCount >= sale.usageLimit && (
+                                <span className="bg-red-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">Hết suất</span>
+                              )}
+                              {sale.usageLimitType === 'limited' && sale.usedCount < sale.usageLimit && (sale.usedCount / sale.usageLimit) >= 0.8 && (
+                                <span className="bg-orange-500 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">Sắp hết</span>
+                              )}
+                            </div>
                             <span className="text-sm font-black text-red-500 bg-red-50 border border-red-100 rounded-lg px-2 py-0.5">
                               {sale.discountType === 'percent' ? `Giảm ${sale.discountValue}%` : `Giảm -${sale.discountValue.toLocaleString('vi-VN')} đ`}
                             </span>
@@ -698,6 +753,27 @@ export default function SaleManager() {
                           <div className="mt-3 flex items-center text-[10px] text-gray-400 font-medium gap-1.5">
                             <Calendar className="w-3.5 h-3.5 text-gray-400" />
                             <span>Hiệu lực: <strong className="text-gray-600">{startStr}</strong> tới <strong className="text-gray-600">{endStr}</strong></span>
+                          </div>
+
+                          <div className="mt-2 text-[10px] font-bold text-gray-400 space-y-1">
+                            <div>
+                              <span>Đã sử dụng: </span>
+                              <span className="text-gray-700">
+                                {sale.usageLimitType === 'limited' ? (
+                                  <span>{sale.usedCount || 0} / {sale.usageLimit} suất</span>
+                                ) : (
+                                  <span>Không giới hạn số lượng</span>
+                                )}
+                              </span>
+                            </div>
+                            {sale.usageLimitType === 'limited' && (
+                              <div>
+                                <span>Còn lại (remainingSaleQuantity): </span>
+                                <span className="text-gray-700 font-extrabold">
+                                  {Math.max(0, sale.usageLimit - (sale.usedCount || 0))} suất
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
 

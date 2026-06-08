@@ -156,14 +156,33 @@ export default function Cart() {
                       </button>
                     </div>
 
-                    {item.hasPrescription ? (
-                      <div className="mt-1 flex flex-wrap gap-1 sm:gap-2">
-                        <span className="bg-blue-50 text-blue-700 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-blue-100" translate="no">
-                          OD: {item.od || '0.00'}
-                        </span>
-                        <span className="bg-blue-50 text-blue-700 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-blue-100" translate="no">
-                          OS: {item.os || '0.00'}
-                        </span>
+                     {item.hasPrescription ? (
+                      <div className="mt-1 space-y-1">
+                        {item.od_sph !== undefined && item.od_sph !== null ? (
+                          <>
+                            <div className="flex flex-wrap gap-1.5">
+                              <span className="bg-blue-50 text-blue-700 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-blue-100" translate="no">
+                                Phải (OD): SPH {item.od_sph} | CYL {item.od_cyl ?? 0} | AXIS {item.od_axis ?? 0}
+                              </span>
+                              <span className="bg-blue-50 text-blue-700 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-blue-100" translate="no">
+                                Trái (OS): SPH {item.os_sph} | CYL {item.os_cyl ?? 0} | AXIS {item.os_axis ?? 0}
+                              </span>
+                            </div>
+                            <div className="flex gap-2 text-[10px] text-gray-500 font-bold">
+                              <span>PD: {item.pd ? `${item.pd} mm` : 'N/A'}</span>
+                              {item.rxDate && <span>• Ngày đo: {new Date(item.rxDate).toLocaleDateString('vi-VN')}</span>}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-wrap gap-1 sm:gap-2">
+                            <span className="bg-blue-50 text-blue-700 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-blue-100" translate="no">
+                              OD: {item.od || '0.00'}
+                            </span>
+                            <span className="bg-blue-50 text-blue-700 text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded border border-blue-100" translate="no">
+                              OS: {item.os || '0.00'}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <p className="text-[11px] sm:text-sm text-gray-500 mt-1">Mắt thường</p>

@@ -1,6 +1,61 @@
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const User = require('../models/User');
+const Sale = require('../models/Sale');
+
+const REVENUE_STATUSES = ['paid', 'processing', 'shipping', 'shipped', 'completed'];
+const LOW_STOCK_THRESHOLD = 5;
+
+const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+const startOfMonth = (date) => new Date(date.getFullYear(), date.getMonth(), 1);
+const startOfYear = (date) => new Date(date.getFullYear(), 0, 1);
+
+const toNumber = (value) => Number(value || 0);
+const toId = (value) => value?._id?.toString?.() || value?.toString?.() || '';
+
+const getItemPrice = (item) => toNumber(item.priceAtPurchase || item.price);
+
+const getDashboardItemCost = (item, productInfo) => {
+  if (toNumber(item.importPriceAtPurchase) > 0) {
+    return toNumber(item.importPriceAtPurchase);
+  }
+  if (toNumber(productInfo?.importPrice) > 0) {
+    return toNumber(productInfo.importPrice);
+  }
+  return 0;
+};
+
+const compactProduct = (product) => ({
+  _id: toId(product),
+  name: product?.name || 'San pham khong xac dinh',
+  images: product?.images || [],
+  price: toNumber(product?.price),
+  stock: toNumber(product?.stock),
+  importPrice: toNumber(product?.importPrice),
+  inventoryValue: toNumber(product?.stock) * toNumber(product?.importPrice),
+  brand: product?.brand || null,
+  category: product?.category || null
+});
+
+const addEntityMetric = (map, key, name, revenue, quantity) => {
+  const safeKey = key || name || 'unknown';
+  const current = map.get(safeKey) || {
+    _id: safeKey,
+    name: name || 'Khong xac dinh',
+    revenue: 0,
+    quantitySold: 0
+  };
+
+  current.revenue += revenue;
+  current.quantitySold += quantity;
+  map.set(safeKey, current);
+};
+
+const sortedMetrics = (map, sortKey, limit = 10) => (
+  Array.from(map.values())
+    .sort((a, b) => toNumber(b[sortKey]) - toNumber(a[sortKey]))
+    .slice(0, limit)
+);
 
 // [GET] Tải dữ liệu thống kê tổng quan (Dashboard)
 exports.getDashboardData = async (req, res) => {
@@ -179,6 +234,352 @@ exports.getDashboardData = async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: 'Có lỗi xảy ra trong quá trình tổng hợp báo cáo kinh doanh!' 
+    });
+  }
+};
+
+// [GET] Dashboard V2 - operational KPIs for admin dashboard tabs.
+exports.getDashboardV2Data = async (req, res) => {
+  try {
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const monthStart = startOfMonth(now);
+    const yearStart = startOfYear(now);
+
+    const [
+      allProducts,
+      validOrders,
+      totalOrders,
+      totalCustomers,
+      orderStatusAggregation,
+      pendingItemsAggregation,
+      inventoryAggregation,
+      recentOrders,
+      saleCampaigns
+    ] = await Promise.all([
+      Product.find().populate('brand category').lean(),
+      Order.find({ status: { $in: REVENUE_STATUSES } }).lean(),
+      Order.countDocuments(),
+      User.countDocuments({ role: 0 }),
+      Order.aggregate([
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ]),
+      Order.aggregate([
+        { $match: { status: 'pending' } },
+        { $unwind: '$items' },
+        {
+          $group: {
+            _id: null,
+            totalPendingItems: { $sum: { $ifNull: ['$items.quantity', 0] } }
+          }
+        }
+      ]),
+      Product.aggregate([
+        { $match: { isActive: { $ne: false } } },
+        {
+          $group: {
+            _id: null,
+            totalSKU: { $sum: 1 },
+            totalStockQuantity: { $sum: { $ifNull: ['$stock', 0] } },
+            inventoryValue: {
+              $sum: {
+                $multiply: [
+                  { $ifNull: ['$stock', 0] },
+                  { $ifNull: ['$importPrice', 0] }
+                ]
+              }
+            },
+            outOfStockCount: {
+              $sum: {
+                $cond: [
+                  { $eq: [{ $ifNull: ['$stock', 0] }, 0] },
+                  1,
+                  0
+                ]
+              }
+            },
+            negativeStockCount: {
+              $sum: {
+                $cond: [
+                  { $lt: [{ $ifNull: ['$stock', 0] }, 0] },
+                  1,
+                  0
+                ]
+              }
+            },
+            lowStockCount: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $gt: [{ $ifNull: ['$stock', 0] }, 0] },
+                      { $lte: [{ $ifNull: ['$stock', 0] }, LOW_STOCK_THRESHOLD] }
+                    ]
+                  },
+                  1,
+                  0
+                ]
+              }
+            }
+          }
+        }
+      ]),
+      Order.find().sort({ createdAt: -1 }).limit(5).lean(),
+      Sale.find().sort({ createdAt: -1 }).lean()
+    ]);
+
+    const productMap = new Map(allProducts.map((product) => [toId(product), product]));
+    const activeProducts = allProducts.filter((product) => product.isActive !== false);
+    const outOfStockProducts = activeProducts
+      .filter((product) => toNumber(product.stock) === 0)
+      .map(compactProduct)
+      .sort((a, b) => a.stock - b.stock);
+    const lowStockOnlyProducts = activeProducts
+      .filter((product) => toNumber(product.stock) > 0 && toNumber(product.stock) <= LOW_STOCK_THRESHOLD)
+      .map(compactProduct)
+      .sort((a, b) => a.stock - b.stock);
+    const legacyLowStockProducts = activeProducts
+      .filter((product) => toNumber(product.stock) <= LOW_STOCK_THRESHOLD)
+      .map(compactProduct)
+      .sort((a, b) => a.stock - b.stock);
+
+    const rawStatusCounts = orderStatusAggregation.reduce((acc, item) => {
+      acc[item._id || 'unknown'] = item.count || 0;
+      return acc;
+    }, {});
+
+    const orderStatusCounts = {
+      pending: rawStatusCounts.pending || 0,
+      processing: rawStatusCounts.processing || 0,
+      shipping: (rawStatusCounts.shipping || 0) + (rawStatusCounts.shipped || 0),
+      shipped: rawStatusCounts.shipped || 0,
+      completed: rawStatusCounts.completed || 0,
+      cancelled: rawStatusCounts.cancelled || 0,
+      paid: rawStatusCounts.paid || 0,
+      cancelRequested: rawStatusCounts.cancel_requested || 0,
+      total: totalOrders
+    };
+
+    const productSales = new Map();
+    const categoryMetrics = new Map();
+    const brandMetrics = new Map();
+    const productCountByCategoryMap = new Map();
+    const saleMetrics = new Map(
+      saleCampaigns.map((sale) => [toId(sale), {
+        _id: toId(sale),
+        name: sale.name,
+        discountType: sale.discountType,
+        discountValue: toNumber(sale.discountValue),
+        startDate: sale.startDate,
+        endDate: sale.endDate,
+        isActive: sale.isActive !== false,
+        usageLimitType: sale.usageLimitType,
+        usageLimit: sale.usageLimit,
+        usedCount: toNumber(sale.usedCount),
+        ordersGeneratedSet: new Set(),
+        revenueGenerated: 0
+      }])
+    );
+
+    activeProducts.forEach((product) => {
+      const categoryName = product.category?.name || 'Chua phan loai';
+      const current = productCountByCategoryMap.get(categoryName) || 0;
+      productCountByCategoryMap.set(categoryName, current + 1);
+    });
+
+    let totalRevenue = 0;
+    let totalProfit = 0;
+    let totalItemsSold = 0;
+    let revenueToday = 0;
+    let revenueThisMonth = 0;
+    let revenueThisYear = 0;
+    let profitThisMonth = 0;
+    let profitThisYear = 0;
+
+    validOrders.forEach((order) => {
+      const orderCreatedAt = order.createdAt ? new Date(order.createdAt) : null;
+      const orderId = toId(order);
+
+      order.items.forEach((item) => {
+        const productId = toId(item.productId);
+        const productInfo = productMap.get(productId);
+        const quantity = toNumber(item.quantity);
+        const price = getItemPrice(item);
+        const cost = getDashboardItemCost(item, productInfo);
+        const itemRevenue = price * quantity;
+        const itemProfit = (price - cost) * quantity;
+
+        totalRevenue += itemRevenue;
+        totalProfit += itemProfit;
+        totalItemsSold += quantity;
+
+        if (orderCreatedAt && orderCreatedAt >= todayStart) {
+          revenueToday += itemRevenue;
+        }
+        if (orderCreatedAt && orderCreatedAt >= monthStart) {
+          revenueThisMonth += itemRevenue;
+          profitThisMonth += itemProfit;
+        }
+        if (orderCreatedAt && orderCreatedAt >= yearStart) {
+          revenueThisYear += itemRevenue;
+          profitThisYear += itemProfit;
+        }
+
+        if (productId) {
+          const currentProduct = productSales.get(productId) || {
+            ...(productInfo ? compactProduct(productInfo) : {
+              _id: productId,
+              name: 'San pham da an/xoa',
+              images: [],
+              price: 0,
+              stock: 0,
+              importPrice: 0,
+              brand: null,
+              category: null
+            }),
+            sold: 0,
+            revenue: 0,
+            profit: 0
+          };
+
+          currentProduct.sold += quantity;
+          currentProduct.revenue += itemRevenue;
+          currentProduct.profit += itemProfit;
+          productSales.set(productId, currentProduct);
+        }
+
+        const category = productInfo?.category;
+        addEntityMetric(
+          categoryMetrics,
+          toId(category) || 'uncategorized',
+          category?.name || 'Chua phan loai',
+          itemRevenue,
+          quantity
+        );
+
+        const brand = productInfo?.brand;
+        addEntityMetric(
+          brandMetrics,
+          toId(brand) || 'unknown-brand',
+          brand?.name || 'Khong xac dinh',
+          itemRevenue,
+          quantity
+        );
+
+        const saleId = toId(item.saleIdAtPurchase);
+        if (saleId) {
+          const saleMetric = saleMetrics.get(saleId);
+          if (saleMetric) {
+            saleMetric.ordersGeneratedSet.add(orderId);
+            saleMetric.revenueGenerated += itemRevenue;
+          }
+        }
+      });
+    });
+
+    const bestSellingProducts = Array.from(productSales.values())
+      .sort((a, b) => b.sold - a.sold)
+      .slice(0, 5);
+
+    const topCategoriesByRevenue = sortedMetrics(categoryMetrics, 'revenue');
+    const topCategoriesByQuantity = sortedMetrics(categoryMetrics, 'quantitySold');
+    const topBrandsByRevenue = sortedMetrics(brandMetrics, 'revenue');
+    const topBrandsByQuantity = sortedMetrics(brandMetrics, 'quantitySold');
+
+    const brandStats = topBrandsByRevenue.map((brand) => ({
+      brand: brand.name,
+      revenue: brand.revenue,
+      percent: totalRevenue > 0 ? (brand.revenue / totalRevenue) * 100 : 0
+    }));
+
+    const saleCampaignAnalytics = Array.from(saleMetrics.values())
+      .map((sale) => {
+        const remainingCount = sale.usageLimitType === 'limited'
+          ? Math.max(toNumber(sale.usageLimit) - sale.usedCount, 0)
+          : null;
+
+        return {
+          _id: sale._id,
+          name: sale.name,
+          discountType: sale.discountType,
+          discountValue: sale.discountValue,
+          startDate: sale.startDate,
+          endDate: sale.endDate,
+          isActive: sale.isActive,
+          usageLimitType: sale.usageLimitType,
+          usageLimit: sale.usageLimit,
+          usedCount: sale.usedCount,
+          remainingCount,
+          ordersGenerated: sale.ordersGeneratedSet.size,
+          revenueGenerated: sale.revenueGenerated
+        };
+      })
+      .sort((a, b) => b.revenueGenerated - a.revenueGenerated);
+
+    const inventoryRaw = inventoryAggregation[0] || {};
+    const inventory = {
+      totalProducts: allProducts.length,
+      totalSKU: toNumber(inventoryRaw.totalSKU),
+      totalStockQuantity: toNumber(inventoryRaw.totalStockQuantity),
+      outOfStockCount: toNumber(inventoryRaw.outOfStockCount),
+      negativeStockCount: toNumber(inventoryRaw.negativeStockCount),
+      lowStockCount: toNumber(inventoryRaw.lowStockCount),
+      inventoryValue: toNumber(inventoryRaw.inventoryValue),
+      outOfStockProducts,
+      lowStockProducts: lowStockOnlyProducts
+    };
+
+    const productCountByCategory = Array.from(productCountByCategoryMap.entries())
+      .map(([categoryName, count]) => ({ categoryName, count }))
+      .sort((a, b) => b.count - a.count);
+
+    res.json({
+      success: true,
+      generatedAt: now,
+
+      revenue: {
+        today: revenueToday,
+        thisMonth: revenueThisMonth,
+        thisYear: revenueThisYear,
+        lifetime: totalRevenue
+      },
+      profit: {
+        thisMonth: profitThisMonth,
+        thisYear: profitThisYear,
+        lifetime: totalProfit
+      },
+      orders: orderStatusCounts,
+      inventory,
+      topProducts: bestSellingProducts,
+      bestSellingProducts,
+      topCategories: {
+        byRevenue: topCategoriesByRevenue,
+        byQuantity: topCategoriesByQuantity
+      },
+      topBrands: {
+        byRevenue: topBrandsByRevenue,
+        byQuantity: topBrandsByQuantity
+      },
+      saleCampaignAnalytics,
+
+      totalRevenue,
+      totalProfit,
+      totalOrders,
+      totalItemsSold,
+      totalProducts: allProducts.length,
+      totalCustomers,
+      totalPendingOrders: orderStatusCounts.pending,
+      totalPendingItems: toNumber(pendingItemsAggregation[0]?.totalPendingItems),
+      lowStockProducts: legacyLowStockProducts,
+      recentOrders,
+      brandStats,
+      productCountByCategory
+    });
+  } catch (error) {
+    console.error('Dashboard V2 aggregation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Khong the tong hop du lieu Dashboard V2.'
     });
   }
 };

@@ -18,6 +18,7 @@ export default function Checkout() {
   const [showQR, setShowQR] = useState(false);
   const [qrData, setQrData] = useState(null); // Lưu thông tin QR PayOS trả về
   const [activeOrderCode, setActiveOrderCode] = useState(null);
+  const [paymentCancelToken, setPaymentCancelToken] = useState(null);
 
   // Dùng Ref để dọn dẹp interval khi rời trang
   const pollingIntervalRef = useRef(null);
@@ -44,7 +45,7 @@ export default function Checkout() {
   };
 
   // --- HÀM HỖ TRỢ: TẠO ĐƠN HÀNG TRÊN MONGODB TRƯỚC ---
-  const createPendingOrder = async (finalOrderCode, initialStatus = 'pending') => {
+  const createPendingOrder = async (finalOrderCode) => {
     const dbOrder = {
       orderCode: `DH${finalOrderCode}`,
       customerInfo: customerInfo,
@@ -53,10 +54,19 @@ export default function Checkout() {
         quantity: item.quantity,
         hasPrescription: item.hasPrescription || false,
         od: item.od || '',
-        os: item.os || ''
+        os: item.os || '',
+        od_sph: item.od_sph,
+        od_cyl: item.od_cyl,
+        od_axis: item.od_axis,
+        os_sph: item.os_sph,
+        os_cyl: item.os_cyl,
+        os_axis: item.os_axis,
+        pd: item.pd,
+        rxDate: item.rxDate,
+        rxNote: item.rxNote,
+        prescriptionMode: item.prescriptionMode || 'none'
       })),
-      paymentMethod: paymentMethod,
-      status: initialStatus
+      paymentMethod: paymentMethod
     };
 
     try {
@@ -72,10 +82,13 @@ export default function Checkout() {
         body: JSON.stringify(dbOrder)
       });
       const resData = await response.json();
-      return resData.success;
+      return {
+        success: resData.success,
+        paymentCancelToken: resData.paymentCancelToken || null
+      };
     } catch (err) {
       console.error('Lỗi kết nối API lưu đơn hàng:', err);
-      return false;
+      return { success: false, paymentCancelToken: null };
     }
   };
 
@@ -126,23 +139,29 @@ export default function Checkout() {
       setIsProcessing(true);
       
       // A. Tạo đơn hàng PENDING trên MongoDB trước để tránh thất thoát dữ liệu
-      const dbSaved = await createPendingOrder(finalOrderCode, 'pending');
-      if (!dbSaved) {
+      const dbResult = await createPendingOrder(finalOrderCode);
+      if (!dbResult.success) {
         alert("Không thể khởi tạo đơn hàng trên hệ thống. Vui lòng thử lại!");
         setIsProcessing(false);
         return;
       }
+      setPaymentCancelToken(dbResult.paymentCancelToken);
 
       try {
         // B. Gọi Backend khởi tạo link PayOS sử dụng mã đơn hàng đã đồng bộ
         console.log(`🔌 [Frontend-Checkout] Gửi yêu cầu tạo link thanh toán cho mã đơn: ${finalOrderCode}`);
+        const paymentHeaders = { 'Content-Type': 'application/json' };
+        const token = localStorage.getItem('glassesToken');
+        if (token) {
+          paymentHeaders['Authorization'] = `Bearer ${token}`;
+        }
+
         const response = await fetch('/api/create-payment-link', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: paymentHeaders,
           body: JSON.stringify({
-            orderCode: finalOrderCode, // Gửi mã đơn hàng duy nhất lên backend
-            amount: calculateTotal(),
-            description: `KinhMat ${finalOrderCode}`
+            orderCode: finalOrderCode,
+            orderAccessToken: dbResult.paymentCancelToken
           })
         });
 
@@ -172,10 +191,10 @@ export default function Checkout() {
     } else {
       // LUỒNG THANH TOÁN COD
       setIsProcessing(true);
-      const dbSaved = await createPendingOrder(finalOrderCode, 'pending');
+      const dbResult = await createPendingOrder(finalOrderCode);
       setIsProcessing(false);
       
-      if (dbSaved) {
+      if (dbResult.success) {
         finalizeOrderClientSide(finalOrderCode, 'Thanh toán khi nhận hàng (COD)', 'pending');
       } else {
         alert("Không thể tạo đơn hàng COD. Vui lòng thử lại!");
@@ -196,6 +215,10 @@ export default function Checkout() {
         if (data.status === 'PAID') {
           clearInterval(pollingIntervalRef.current); // Tắt lính canh
           finalizeOrderClientSide(orderCode, 'Đã thanh toán tự động qua QR', 'paid');
+        } else if (data.status === 'CANCELLED') {
+          clearInterval(pollingIntervalRef.current); // Tắt lính canh
+          alert("Giao dịch thanh toán đã bị hủy hoặc hết hạn.");
+          setShowQR(false);
         }
       } catch (error) {
         console.log("Đang chờ thanh toán...");
@@ -324,7 +347,21 @@ export default function Checkout() {
                       Hệ thống đang chờ nhận tiền...
                     </div>
 
-                    <button onClick={() => { setShowQR(false); clearInterval(pollingIntervalRef.current); }} className="mt-4 text-sm text-gray-400 hover:text-red-500 font-medium transition">
+                    <button 
+                      onClick={async () => { 
+                        setShowQR(false); 
+                        clearInterval(pollingIntervalRef.current); 
+                        if (activeOrderCode && paymentCancelToken) {
+                          try {
+                            await fetch(`/api/check-payment/${activeOrderCode}?cancel=true&cancelToken=${encodeURIComponent(paymentCancelToken)}`);
+                            setPaymentCancelToken(null);
+                          } catch (err) {
+                            console.error("Lỗi khi hủy giao dịch thanh toán:", err);
+                          }
+                        }
+                      }} 
+                      className="mt-4 text-sm text-gray-400 hover:text-red-500 font-medium transition"
+                    >
                       Hủy giao dịch
                     </button>
                   </div>

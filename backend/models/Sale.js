@@ -10,6 +10,9 @@ const saleSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
   applicableProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
   applicableCategories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }],
+  usageLimitType: { type: String, enum: ['unlimited', 'limited'], default: 'unlimited' },
+  usageLimit: { type: Number, default: null },
+  usedCount: { type: Number, default: 0 },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true });
 

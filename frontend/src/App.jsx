@@ -29,12 +29,16 @@ import BrandManager from './pages/admin/BrandManager';
 import CategoryManager from './pages/admin/CategoryManager';
 import ImportManager from './pages/admin/ImportManager';
 import UserManager from './pages/admin/UserManager';
+import BannerManager from './pages/admin/BannerManager';
 import CancelRequests from './pages/admin/CancelRequests'; // Trang quản trị duyệt hủy đơn hàng (PHASE 2)
 
 // Import Pages (Staff)
 import OrderManagement from './pages/staff/OrderManagement';
 import WithdrawRequests from './pages/staff/WithdrawRequests';
 import ChatManagement from './pages/staff/ChatManagement';
+
+// Import Pages (Review Manager)
+import ReviewManager from './pages/admin/ReviewManager';
 
 
 import { SocketProvider } from './context/SocketContext';
@@ -66,7 +70,7 @@ export default function App() {
                   <Checkout />
                 </ProtectedRoute>
               } />
-              <Route path="/prescription" element={
+              <Route path="/my-prescription" element={
                 <ProtectedRoute allowedRoles={[0, 1, 2]}>
                   <MyPrescription />
                 </ProtectedRoute>
@@ -111,6 +115,8 @@ export default function App() {
               <Route path="categories" element={<CategoryManager />} />
               <Route path="imports" element={<ImportManager />} />
               <Route path="users" element={<UserManager />} />
+              <Route path="reviews" element={<ReviewManager />} />
+              <Route path="banners" element={<BannerManager />} />
               <Route path="cancel-requests" element={<CancelRequests />} />
               <Route path="withdraw-requests" element={<WithdrawRequests />} />
             </Route>
@@ -122,6 +128,7 @@ export default function App() {
               </ProtectedRoute>
             }>
               <Route index element={<OrderManagement />} />
+              <Route path="reviews" element={<ReviewManager />} />
               <Route path="cancel-requests" element={<CancelRequests />} />
               <Route path="withdraw-requests" element={<WithdrawRequests />} />
               <Route path="chat" element={<ChatManagement />} />

@@ -50,7 +50,17 @@ export default function OrderManagement() {
             price: item.priceAtPurchase,
             od: item.od || '',
             os: item.os || '',
-            hasPrescription: item.hasPrescription || false
+            hasPrescription: item.hasPrescription || false,
+            od_sph: item.od_sph,
+            od_cyl: item.od_cyl,
+            od_axis: item.od_axis,
+            os_sph: item.os_sph,
+            os_cyl: item.os_cyl,
+            os_axis: item.os_axis,
+            pd: item.pd,
+            rxDate: item.rxDate,
+            rxNote: item.rxNote,
+            prescriptionMode: item.prescriptionMode || 'none'
           })),
           total: order.total,
           paymentMethod: order.paymentMethod,
@@ -500,15 +510,63 @@ export default function OrderManagement() {
                         
                         {/* Thông số độ cận (Prescription Specs) */}
                         {item.hasPrescription ? (
-                          <div className="mt-3 bg-blue-50/50 p-2.5 rounded-xl border border-blue-100/30 grid grid-cols-2 gap-2 text-xs">
-                            <div>
-                              <span className="text-gray-400 font-bold block uppercase text-[10px]">Mắt Phải (OD):</span>
-                              <span className="text-blue-700 font-bold">{item.od || 'Không có'}</span>
+                          <div className="mt-3 bg-blue-50/50 p-3 rounded-xl border border-blue-100/30 text-xs space-y-2">
+                            {/* Prescription Mode Indicator */}
+                            {item.prescriptionMode && item.prescriptionMode !== 'none' && (
+                              <div className="inline-block text-[10px] text-blue-700 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
+                                Kiểu toa: {item.prescriptionMode === 'saved' ? 'Hồ sơ đã lưu' : 'Tự nhập mới'}
+                              </div>
+                            )}
+
+                            {/* Warning Banner */}
+                            <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100/50 p-2 rounded-lg font-bold flex items-start gap-1">
+                              <span>⚠️</span>
+                              <span>Thông tin độ cận do khách hàng tự cung cấp. Vui lòng kiểm tra kỹ trước khi đặt kính.</span>
                             </div>
-                            <div>
-                              <span className="text-gray-400 font-bold block uppercase text-[10px]">Mắt Trái (OS):</span>
-                              <span className="text-blue-700 font-bold">{item.os || 'Không có'}</span>
-                            </div>
+
+                            {/* Detailed Fields */}
+                            {item.od_sph !== undefined && item.od_sph !== null ? (
+                              <div className="space-y-1">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="bg-white p-2 rounded-lg border border-gray-100">
+                                    <span className="text-gray-400 font-bold block uppercase text-[9px]">Mắt Phải (OD):</span>
+                                    <span className="text-blue-700 font-bold block">SPH: {item.od_sph} | CYL: {item.od_cyl ?? 0} | AXIS: {item.od_axis ?? 0}</span>
+                                  </div>
+                                  <div className="bg-white p-2 rounded-lg border border-gray-100">
+                                    <span className="text-gray-400 font-bold block uppercase text-[9px]">Mắt Trái (OS):</span>
+                                    <span className="text-blue-700 font-bold block">SPH: {item.os_sph} | CYL: {item.os_cyl ?? 0} | AXIS: {item.os_axis ?? 0}</span>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 mt-1">
+                                  <div className="bg-white p-2 rounded-lg border border-gray-100">
+                                    <span className="text-gray-400 font-bold block uppercase text-[9px]">PD (Khoảng cách đồng tử):</span>
+                                    <span className="text-gray-700 font-bold">{item.pd ? `${item.pd} mm` : 'Không có'}</span>
+                                  </div>
+                                  <div className="bg-white p-2 rounded-lg border border-gray-100">
+                                    <span className="text-gray-400 font-bold block uppercase text-[9px]">Ngày đo:</span>
+                                    <span className="text-gray-700 font-bold">{item.rxDate ? new Date(item.rxDate).toLocaleDateString('vi-VN') : 'Không có'}</span>
+                                  </div>
+                                </div>
+                                {item.rxNote && (
+                                  <div className="bg-white p-2 rounded-lg border border-gray-100 mt-1">
+                                    <span className="text-gray-400 font-bold block uppercase text-[9px]">Ghi chú:</span>
+                                    <span className="text-gray-600 font-medium">{item.rxNote}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              /* Old style string fallback */
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <span className="text-gray-400 font-bold block uppercase text-[10px]">Mắt Phải (OD):</span>
+                                  <span className="text-blue-700 font-bold">{item.od || 'Không có'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400 font-bold block uppercase text-[10px]">Mắt Trái (OS):</span>
+                                  <span className="text-blue-700 font-bold">{item.os || 'Không có'}</span>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <span className="text-[10px] text-gray-400 bg-gray-50 px-2 py-0.5 rounded mt-2 inline-block font-bold">Kính không độ / Thời trang</span>

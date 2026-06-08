@@ -15,20 +15,23 @@ async function getActiveSales() {
 
 /**
  * Tính toán chiến dịch khuyến mãi tốt nhất áp dụng cho 1 sản phẩm cụ thể
- * (Chọn chiến dịch giảm được nhiều tiền nhất)
+ * (Chọn chiến dịch giảm được nhiều tiền nhất, có kiểm tra quota số lượng)
  */
 function calculateBestSaleForProduct(product, activeSales) {
   const originalPrice = product.price || 0;
-  let bestDiscountAmount = 0;
-  let bestSalePrice = originalPrice;
-  let bestDiscountPercent = 0;
-  let appliedSale = null;
+  let bestValidDiscountAmount = 0;
+  let bestValidSale = null;
+
+  let bestOverallDiscountAmount = 0;
+  let bestOverallSale = null;
 
   if (!activeSales || activeSales.length === 0) {
     return {
       salePrice: originalPrice,
       discountPercent: 0,
-      activeSale: null
+      activeSale: null,
+      remainingSaleQuantity: null,
+      saleQuotaStatus: 'unlimited'
     };
   }
 
@@ -58,29 +61,63 @@ function calculateBestSaleForProduct(product, activeSales) {
       // Giới hạn số tiền giảm tối đa không vượt quá giá gốc của sản phẩm
       discountAmount = Math.min(originalPrice, discountAmount);
 
-      // Nếu chiến dịch này giảm được nhiều tiền nhất thì lưu lại
-      if (discountAmount > bestDiscountAmount) {
-        bestDiscountAmount = discountAmount;
-        appliedSale = sale;
+      // Theo dõi overall sale tốt nhất (bất kể quota) để có thể xác định trạng thái sold_out sau này
+      if (discountAmount > bestOverallDiscountAmount) {
+        bestOverallDiscountAmount = discountAmount;
+        bestOverallSale = sale;
+      }
+
+      // Kiểm tra quota còn hay không
+      const isSoldOut = sale.usageLimitType === 'limited' && sale.usedCount >= sale.usageLimit;
+      if (!isSoldOut) {
+        if (discountAmount > bestValidDiscountAmount) {
+          bestValidDiscountAmount = discountAmount;
+          bestValidSale = sale;
+        }
       }
     }
   }
 
-  if (appliedSale) {
-    bestSalePrice = Math.max(0, originalPrice - bestDiscountAmount);
-    bestDiscountPercent = originalPrice > 0 ? Math.round(((originalPrice - bestSalePrice) / originalPrice) * 100) : 0;
+  if (bestValidSale) {
+    const bestSalePrice = Math.max(0, originalPrice - bestValidDiscountAmount);
+    let bestDiscountPercent = originalPrice > 0 ? Math.round(((originalPrice - bestSalePrice) / originalPrice) * 100) : 0;
     bestDiscountPercent = Math.min(100, Math.max(0, bestDiscountPercent));
+
+    return {
+      salePrice: Math.round(bestSalePrice),
+      discountPercent: bestDiscountPercent,
+      activeSale: {
+        _id: bestValidSale._id,
+        name: bestValidSale.name,
+        discountType: bestValidSale.discountType,
+        discountValue: bestValidSale.discountValue,
+        usageLimitType: bestValidSale.usageLimitType,
+        usageLimit: bestValidSale.usageLimit,
+        usedCount: bestValidSale.usedCount
+      },
+      remainingSaleQuantity: bestValidSale.usageLimitType === 'limited' ? Math.max(0, bestValidSale.usageLimit - bestValidSale.usedCount) : null,
+      saleQuotaStatus: bestValidSale.usageLimitType === 'limited' ? 'available' : 'unlimited'
+    };
   }
 
+  // Nếu không có sale hợp lệ nào nhưng có sale khớp bị sold_out
+  if (bestOverallSale) {
+    return {
+      salePrice: originalPrice,
+      discountPercent: 0,
+      activeSale: null,
+      remainingSaleQuantity: 0,
+      saleQuotaStatus: 'sold_out'
+    };
+  }
+
+  // Không có sale nào khớp
   return {
-    salePrice: Math.round(bestSalePrice),
-    discountPercent: bestDiscountPercent,
-    activeSale: appliedSale ? {
-      _id: appliedSale._id,
-      name: appliedSale.name,
-      discountType: appliedSale.discountType,
-      discountValue: appliedSale.discountValue
-    } : null
+    salePrice: originalPrice,
+    discountPercent: 0,
+    activeSale: null,
+    remainingSaleQuantity: null,
+    saleQuotaStatus: 'unlimited'
   };
 }
 
@@ -97,7 +134,9 @@ function attachSaleInfoToProduct(product, activeSales) {
     originalPrice: productObj.price || 0,
     salePrice: saleInfo.salePrice,
     discountPercent: saleInfo.discountPercent,
-    activeSale: saleInfo.activeSale
+    activeSale: saleInfo.activeSale,
+    remainingSaleQuantity: saleInfo.remainingSaleQuantity,
+    saleQuotaStatus: saleInfo.saleQuotaStatus
   };
 }
 

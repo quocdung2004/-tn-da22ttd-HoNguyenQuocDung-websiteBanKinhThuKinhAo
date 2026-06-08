@@ -8,6 +8,8 @@ const productSchema = new mongoose.Schema({
   arUrl: { type: String }, // Lưu link file AR/Video dùng để try-on
   stock: { type: Number, default: 0 }, // Số lượng tồn kho
   importPrice: { type: Number, default: 0 }, // Giá nhập hàng
+  averageRating: { type: Number, default: 0 }, // Điểm đánh giá trung bình
+  totalReviews: { type: Number, default: 0 }, // Tổng số đánh giá
 
   // Liên kết khóa ngoại (Foreign Key)
   brand: { type: mongoose.Schema.Types.ObjectId, ref: 'Brand', required: true },

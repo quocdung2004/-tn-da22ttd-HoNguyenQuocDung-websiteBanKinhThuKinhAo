@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getCartKey } from '../../utils/cartHelper';
 import {
-  Camera, ShoppingCart, ShieldCheck, ChevronLeft, Edit3, X, Loader2, Box, CheckCircle2, Sparkles
+  Camera, ShoppingCart, ShieldCheck, ChevronLeft, Edit3, X, Loader2, Box, CheckCircle2, Sparkles, Star
 } from 'lucide-react';
 import VirtualTryOn from './VirtualTryOn';
 
@@ -15,9 +15,15 @@ export default function ProductDetail() {
   const [product, setProduct] = useState(null);
   const [allArProducts, setAllArProducts] = useState([]);
 
-  const [hasPrescription, setHasPrescription] = useState(false);
-  const [od, setOd] = useState('');
-  const [os, setOs] = useState('');
+  const [prescriptionOption, setPrescriptionOption] = useState('none'); // 'none' | 'saved' | 'custom'
+  const [savedPrescription, setSavedPrescription] = useState(null);
+  const [prescriptionForm, setPrescriptionForm] = useState({
+    rightEye: { sphere: '', cylinder: '', axis: '' },
+    leftEye: { sphere: '', cylinder: '', axis: '' },
+    pd: '',
+    issuedDate: '',
+    note: ''
+  });
   const [isAdded, setIsAdded] = useState(false);
 
   const [isAROpen, setIsAROpen] = useState(false);
@@ -25,33 +31,151 @@ export default function ProductDetail() {
   const [showPrescriptionSheet, setShowPrescriptionSheet] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
 
-  // ==========================================
-  // 2. GỌI API LẤY DỮ LIỆU SẢN PHẨM
-  // ==========================================
-  useEffect(() => {
-    const fetchProductData = async () => {
-      try {
-        const res = await fetch(`/api/products`);
-        const data = await res.json();
-        if (data.success) {
-          const currentProd = data.products.find(p => p._id === id);
-          setProduct(currentProd);
-          setActiveARProduct(currentProd);
+  // Reviews System states
+  const [reviews, setReviews] = useState([]);
+  const [isEligible, setIsEligible] = useState(false);
+  const [userReview, setUserReview] = useState(null);
+  const [ratingInput, setRatingInput] = useState(5);
+  const [commentInput, setCommentInput] = useState('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
-          const arAvailable = data.products.filter(p => p.arUrl && p.arUrl.trim() !== '');
-          setAllArProducts(arAvailable);
-        }
-      } catch (error) {
-        console.error("❌ Lỗi tải dữ liệu sản phẩm:", error);
+  // ==========================================
+  // 2. GỌI API LẤY DỮ LIỆU SẢN PHẨM & HỒ SƠ ĐỘ CẬN
+  // ==========================================
+  const fetchProductData = async () => {
+    try {
+      const res = await fetch(`/api/products`);
+      const data = await res.json();
+      if (data.success) {
+        const currentProd = data.products.find(p => p._id === id);
+        setProduct(currentProd);
+        setActiveARProduct(currentProd);
+
+        const arAvailable = data.products.filter(p => p.arUrl && p.arUrl.trim() !== '');
+        setAllArProducts(arAvailable);
       }
-    };
-    fetchProductData();
-
-    const saved = JSON.parse(localStorage.getItem('userPrescription'));
-    if (saved) {
-      setOd(saved.od || ''); setOs(saved.os || '');
-      if (saved.od || saved.os) setHasPrescription(true);
+    } catch (error) {
+      console.error("❌ Lỗi tải dữ liệu sản phẩm:", error);
     }
+  };
+  
+  const fetchSavedPrescription = async () => {
+    const token = localStorage.getItem('glassesToken');
+    if (!token) return;
+    try {
+      const res = await fetch('/api/prescription', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success && data.prescription) {
+        setSavedPrescription(data.prescription);
+        setPrescriptionOption('saved');
+        const rx = data.prescription;
+        setPrescriptionForm({
+          rightEye: {
+            sphere: rx.rightEye?.sphere ?? '',
+            cylinder: rx.rightEye?.cylinder ?? '',
+            axis: rx.rightEye?.axis ?? ''
+          },
+          leftEye: {
+            sphere: rx.leftEye?.sphere ?? '',
+            cylinder: rx.leftEye?.cylinder ?? '',
+            axis: rx.leftEye?.axis ?? ''
+          },
+          pd: rx.pd ?? '',
+          issuedDate: rx.issuedDate ? new Date(rx.issuedDate).toISOString().split('T')[0] : '',
+          note: rx.note ?? ''
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching prescription:', err);
+    }
+  };
+
+  const fetchReviews = async () => {
+    try {
+      const res = await fetch(`/api/reviews/product/${id}`);
+      const data = await res.json();
+      if (data.success) {
+        setReviews(data.reviews);
+      }
+    } catch (err) {
+      console.error('Lỗi tải đánh giá sản phẩm:', err);
+    }
+  };
+
+  const checkReviewEligibility = async () => {
+    const token = localStorage.getItem('glassesToken');
+    if (!token) {
+      setIsEligible(false);
+      setUserReview(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/reviews/eligible/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsEligible(data.eligible);
+        if (data.existingReview) {
+          setUserReview(data.existingReview);
+          setRatingInput(data.existingReview.rating);
+          setCommentInput(data.existingReview.comment || '');
+        } else {
+          setUserReview(null);
+          setRatingInput(5);
+          setCommentInput('');
+        }
+      }
+    } catch (err) {
+      console.error('Lỗi kiểm tra quyền đánh giá:', err);
+    }
+  };
+
+  const handleSaveReview = async (e) => {
+    e.preventDefault();
+    const token = localStorage.getItem('glassesToken');
+    if (!token) {
+      showToast('Vui lòng đăng nhập để thực hiện đánh giá!', 'error');
+      return;
+    }
+    setIsSubmittingReview(true);
+    try {
+      const res = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          productId: id,
+          rating: ratingInput,
+          comment: commentInput
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, 'success');
+        await fetchProductData();
+        await fetchReviews();
+        await checkReviewEligibility();
+      } else {
+        showToast(data.message, 'error');
+      }
+    } catch (err) {
+      console.error('Lỗi lưu đánh giá:', err);
+      showToast('Lỗi kết nối máy chủ.', 'error');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProductData();
+    fetchSavedPrescription();
+    fetchReviews();
+    checkReviewEligibility();
   }, [id]);
 
   const showToast = (message, type = 'success') => {
@@ -59,15 +183,55 @@ export default function ProductDetail() {
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
   };
 
+  const hasPrescription = prescriptionOption !== 'none';
+  
+  const getActivePrescription = () => {
+    if (prescriptionOption === 'saved' && savedPrescription) {
+      return {
+        rightEye: {
+          sphere: savedPrescription.rightEye?.sphere ?? '',
+          cylinder: savedPrescription.rightEye?.cylinder ?? '',
+          axis: savedPrescription.rightEye?.axis ?? ''
+        },
+        leftEye: {
+          sphere: savedPrescription.leftEye?.sphere ?? '',
+          cylinder: savedPrescription.leftEye?.cylinder ?? '',
+          axis: savedPrescription.leftEye?.axis ?? ''
+        },
+        pd: savedPrescription.pd ?? '',
+        issuedDate: savedPrescription.issuedDate ? new Date(savedPrescription.issuedDate).toISOString().split('T')[0] : '',
+        note: savedPrescription.note ?? ''
+      };
+    }
+    return prescriptionForm;
+  };
+
+  const getPrescriptionSummary = () => {
+    if (prescriptionOption === 'none') return "Không cần độ cận (Kính thời trang)";
+    const rx = getActivePrescription();
+    return `Phải (OD): SPH ${rx.rightEye.sphere || '0.00'}/CYL ${rx.rightEye.cylinder || '0.00'} | Trái (OS): SPH ${rx.leftEye.sphere || '0.00'}/CYL ${rx.leftEye.cylinder || '0.00'}`;
+  };
+
   // ==========================================
   // 3. THÊM VÀO GIỎ HÀNG
   // ==========================================
   const handleAddToCart = () => {
-    if (hasPrescription && !od && !os) {
-      showToast('Vui lòng nhập độ cận!', 'error');
+    const rx = getActivePrescription();
+    if (prescriptionOption === 'custom') {
+      if (rx.rightEye.sphere === '' && rx.leftEye.sphere === '') {
+        showToast('Vui lòng nhập thông số độ cận (SPH)!', 'error');
+        return;
+      }
+    } else if (prescriptionOption === 'saved' && !savedPrescription) {
+      showToast('Bạn chưa lưu hồ sơ độ cận. Vui lòng chọn Nhập mới hoặc Không cần độ cận!', 'error');
       return;
     }
-    const cartItemId = hasPrescription ? `${product._id}_rx_${od}_${os}` : `${product._id}_std`;
+
+    const isRx = prescriptionOption !== 'none';
+    const cartItemId = isRx 
+      ? `${product._id}_rx_${rx.rightEye.sphere || 0}_${rx.leftEye.sphere || 0}_${rx.rightEye.cylinder || 0}_${rx.leftEye.cylinder || 0}`
+      : `${product._id}_std`;
+
     const newItem = {
       cartId: cartItemId,
       productId: product._id,
@@ -77,8 +241,22 @@ export default function ProductDetail() {
       discountPercent: product.discountPercent || 0,
       salePrice: product.discountPercent > 0 ? product.salePrice : product.price,
       image: product.images[0],
-      hasPrescription, od, os, quantity: 1
+      hasPrescription: isRx,
+      od: isRx ? `SPH: ${rx.rightEye.sphere || '0.00'} | CYL: ${rx.rightEye.cylinder || '0.00'} | AXIS: ${rx.rightEye.axis || '0'}` : '',
+      os: isRx ? `SPH: ${rx.leftEye.sphere || '0.00'} | CYL: ${rx.leftEye.cylinder || '0.00'} | AXIS: ${rx.leftEye.axis || '0'}` : '',
+      od_sph: isRx && rx.rightEye.sphere !== '' ? Number(rx.rightEye.sphere) : null,
+      od_cyl: isRx && rx.rightEye.cylinder !== '' ? Number(rx.rightEye.cylinder) : null,
+      od_axis: isRx && rx.rightEye.axis !== '' ? Number(rx.rightEye.axis) : null,
+      os_sph: isRx && rx.leftEye.sphere !== '' ? Number(rx.leftEye.sphere) : null,
+      os_cyl: isRx && rx.leftEye.cylinder !== '' ? Number(rx.leftEye.cylinder) : null,
+      os_axis: isRx && rx.leftEye.axis !== '' ? Number(rx.leftEye.axis) : null,
+      pd: isRx && rx.pd !== '' ? Number(rx.pd) : null,
+      rxDate: isRx && rx.issuedDate ? rx.issuedDate : null,
+      rxNote: isRx ? rx.note || '' : '',
+      prescriptionMode: prescriptionOption,
+      quantity: 1
     };
+
     const cartKey = getCartKey();
     const cart = JSON.parse(localStorage.getItem(cartKey)) || [];
     const existIdx = cart.findIndex(item => item.cartId === newItem.cartId);
@@ -90,7 +268,6 @@ export default function ProductDetail() {
 
     setIsAdded(true);
     showToast('Đã thêm vào giỏ hàng', 'success');
-    setTimeout(() => setIsAdded(false), 2000);
   };
 
   if (!product) {
@@ -150,6 +327,27 @@ export default function ProductDetail() {
           {/* CỘT PHẢI */}
           <div className="md:w-1/2 flex flex-col">
             <h1 className="text-4xl font-black text-gray-900 leading-tight">{product.name}</h1>
+
+            {/* Average Rating Stars Indicator */}
+            <div className="flex items-center gap-1.5 mt-2">
+              <div className="flex items-center text-amber-400">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Star
+                    key={star}
+                    className={`w-4 h-4 ${
+                      star <= (product.averageRating || 0)
+                        ? 'fill-amber-400 text-amber-400'
+                        : star - 0.5 <= (product.averageRating || 0)
+                        ? 'fill-amber-400/50 text-amber-400'
+                        : 'text-gray-200'
+                    }`}
+                  />
+                ))}
+              </div>
+              <span className="text-xs font-black text-gray-600">
+                {product.averageRating ? product.averageRating.toFixed(1) : '0.0'} ({product.totalReviews || 0} đánh giá)
+              </span>
+            </div>
             
             <div className="mt-4 flex items-baseline gap-3 flex-wrap">
               {product.discountPercent > 0 ? (
@@ -170,7 +368,12 @@ export default function ProductDetail() {
                 </div>
                 <div>
                   <h4 className="font-bold text-xs text-red-800">Khuyến Mãi Đang Áp Dụng: {product.activeSale.name}</h4>
-                  <p className="text-[10px] text-red-600 mt-0.5">Giá ưu đãi đã được giảm trực tiếp vào giỏ hàng của bạn!</p>
+                  <p className="text-[10px] text-red-600 mt-0.5">
+                    {product.remainingSaleQuantity !== null && product.remainingSaleQuantity > 0 ? (
+                      <span className="font-black text-red-700 bg-red-100/80 px-2 py-0.5 rounded mr-1">Chỉ còn {product.remainingSaleQuantity} suất ưu đãi!</span>
+                    ) : ''}
+                    Giá ưu đãi đã được giảm trực tiếp vào giỏ hàng của bạn!
+                  </p>
                 </div>
               </div>
             )}
@@ -182,7 +385,7 @@ export default function ProductDetail() {
               <div>
                 <h3 className="font-bold text-gray-900 text-lg">Thông số thị lực</h3>
                 <p className="text-sm text-gray-400 mt-0.5 font-medium">
-                  {hasPrescription ? `Phải (OD): ${od} | Trái (OS): ${os}` : "Bấm nút bên phải để áp dụng độ cận"}
+                  {getPrescriptionSummary()}
                 </p>
               </div>
               <button onClick={() => setShowPrescriptionSheet(true)} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 text-blue-600 hover:bg-blue-50 transition-all active:scale-90">
@@ -195,6 +398,117 @@ export default function ProductDetail() {
             </button>
           </div>
         </div>
+
+        {/* ===================== HỆ THỐNG ĐÁNH GIÁ & NHẬN XÉT ===================== */}
+        <div className="mt-16 border-t border-gray-100 pt-16">
+          <div className="flex flex-col lg:flex-row gap-12">
+            {/* Cột trái: Form đánh giá */}
+            <div className="lg:w-1/3">
+              <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tight mb-2">Đánh giá sản phẩm</h3>
+              <p className="text-gray-500 text-sm mb-6">Ý kiến của khách hàng là động lực cải tiến chất lượng phục vụ của chúng tôi.</p>
+              
+              {isEligible ? (
+                <form onSubmit={handleSaveReview} className="bg-gray-50 p-6 rounded-[32px] border border-gray-100 shadow-sm space-y-4">
+                  <div className="text-xs font-black text-blue-600 uppercase tracking-wider">
+                    {userReview ? 'Chỉnh sửa đánh giá của bạn' : 'Gửi đánh giá của bạn'}
+                  </div>
+                  
+                  {/* Chọn sao */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 mb-1.5">Số sao đánh giá:</label>
+                    <div className="flex gap-2">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setRatingInput(star)}
+                          className="text-amber-400 hover:scale-110 transition active:scale-95"
+                        >
+                          <Star
+                            className={`w-8 h-8 ${
+                              star <= ratingInput ? 'fill-amber-400 text-amber-400' : 'text-gray-300'
+                            }`}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Comment */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 mb-1.5">Nội dung nhận xét:</label>
+                    <textarea
+                      rows="4"
+                      value={commentInput}
+                      onChange={(e) => setCommentInput(e.target.value)}
+                      placeholder="Hãy chia sẻ trải nghiệm thực tế của bạn về sản phẩm này..."
+                      className="w-full p-4 rounded-2xl border border-gray-200 bg-white font-bold text-sm outline-none focus:ring-2 focus:ring-blue-600 resize-none transition"
+                      required
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmittingReview}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl text-sm transition-all active:scale-[0.98] shadow-lg shadow-blue-100 flex items-center justify-center gap-2"
+                  >
+                    {isSubmittingReview ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Đang lưu...
+                      </>
+                    ) : (
+                      userReview ? 'CẬP NHẬT ĐÁNH GIÁ' : 'GỬI ĐÁNH GIÁ THỰC TẾ'
+                    )}
+                  </button>
+                </form>
+              ) : (
+                <div className="bg-amber-50/50 border border-amber-100 p-5 rounded-2xl text-xs text-amber-800 font-bold leading-relaxed">
+                  🔒 Chỉ những khách hàng đã mua và hoàn tất nhận đơn hàng chứa sản phẩm này mới có thể viết đánh giá & chấm sao.
+                </div>
+              )}
+            </div>
+
+            {/* Cột phải: Danh sách đánh giá */}
+            <div className="lg:w-2/3">
+              <div className="flex items-center justify-between mb-6">
+                <h4 className="text-lg font-black text-gray-900 uppercase">Đánh giá từ khách hàng ({reviews.length})</h4>
+              </div>
+
+              {reviews.length === 0 ? (
+                <div className="bg-gray-50 border border-dashed rounded-[32px] p-12 text-center text-gray-400 font-medium">
+                  Sản phẩm chưa có lượt đánh giá nào. Hãy là người đầu tiên mua kính và chia sẻ cảm nhận!
+                </div>
+              ) : (
+                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                  {reviews.map((r, index) => (
+                    <div key={index} className="bg-white border border-gray-100 rounded-3xl p-5 hover:shadow-sm transition">
+                      <div className="flex justify-between items-start gap-4 mb-2">
+                        <div>
+                          <span className="font-extrabold text-gray-900 block" translate="no">{r.userDisplayName}</span>
+                          <div className="flex items-center text-amber-400 mt-1">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <Star
+                                key={star}
+                                className={`w-3.5 h-3.5 ${
+                                  star <= r.rating ? 'fill-amber-400 text-amber-400' : 'text-gray-200'
+                                }`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-gray-400 font-bold">
+                          {new Date(r.createdAt).toLocaleDateString('vi-VN')}
+                        </span>
+                      </div>
+                      <p className="text-gray-600 text-sm font-medium leading-relaxed mt-2" translate="no">“{r.comment}”</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ---------------- NGĂN KÉO NHẬP ĐỘ CẬN (TRANG CHÍNH) ---------------- */}
@@ -202,25 +516,117 @@ export default function ProductDetail() {
         <div className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-500 ${showPrescriptionSheet ? 'opacity-100' : 'opacity-0'}`} onClick={() => setShowPrescriptionSheet(false)}></div>
         <div className={`absolute bottom-0 w-full bg-white rounded-t-[40px] p-10 transition-transform duration-500 ease-out shadow-2xl ${showPrescriptionSheet ? 'translate-y-0' : 'translate-y-full'}`}>
           <div className="max-w-md mx-auto">
-            <div className="flex justify-between items-center mb-8">
+            <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-black text-gray-900 uppercase">Cài đặt độ cận</h2>
               <button onClick={() => setShowPrescriptionSheet(false)} className="bg-gray-100 p-2 rounded-full text-gray-400 hover:bg-gray-200"><X className="w-6 h-6" /></button>
             </div>
-            <div className="flex items-center justify-between p-5 bg-blue-50 rounded-2xl mb-8 border border-blue-100">
-              <span className="font-bold text-blue-900">Sử dụng kính thuốc</span>
-              <input type="checkbox" checked={hasPrescription} onChange={() => setHasPrescription(!hasPrescription)} className="w-6 h-6 accent-blue-600 cursor-pointer" />
+
+            {/* Warning Banner */}
+            <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl text-xs text-amber-800 font-bold mb-6 flex items-start gap-2">
+              <span className="shrink-0">⚠️</span>
+              <span>Thông tin độ cận do khách hàng tự cung cấp. Vui lòng kiểm tra kỹ trước khi đặt kính.</span>
             </div>
-            <div className={`grid grid-cols-2 gap-4 transition-all duration-300 ${hasPrescription ? 'opacity-100' : 'opacity-20 pointer-events-none'}`}>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-2">Mắt phải (OD)</label>
-                <input type="number" value={od} onChange={(e) => setOd(e.target.value)} step="0.25" placeholder="-1.50" className="w-full p-5 rounded-2xl bg-gray-50 border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold text-lg" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-2">Mắt trái (OS)</label>
-                <input type="number" value={os} onChange={(e) => setOs(e.target.value)} step="0.25" placeholder="-1.25" className="w-full p-5 rounded-2xl bg-gray-50 border-none outline-none focus:ring-2 focus:ring-blue-500 font-bold text-lg" />
-              </div>
+
+            {/* Select Options */}
+            <div className="space-y-3 mb-6">
+              {/* Option 1: None */}
+              <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-100 bg-gray-50 hover:bg-gray-100/50 cursor-pointer transition">
+                <input type="radio" name="prescriptionOption" value="none" checked={prescriptionOption === 'none'} onChange={() => setPrescriptionOption('none')} className="w-5 h-5 accent-blue-600 cursor-pointer" />
+                <div className="flex-1">
+                  <span className="font-extrabold text-sm text-gray-800 block">Không cần độ cận</span>
+                  <span className="text-xs text-gray-400 font-medium">Mua kính thời trang, không độ</span>
+                </div>
+              </label>
+
+              {/* Option 2: Saved Profile */}
+              <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-100 bg-gray-50 hover:bg-gray-100/50 cursor-pointer transition">
+                <input type="radio" name="prescriptionOption" value="saved" checked={prescriptionOption === 'saved'} onChange={() => setPrescriptionOption('saved')} className="w-5 h-5 accent-blue-600 cursor-pointer" />
+                <div className="flex-1">
+                  <span className="font-extrabold text-sm text-gray-800 block">Sử dụng hồ sơ đã lưu</span>
+                  {savedPrescription ? (
+                    <span className="text-xs text-blue-600 font-bold block mt-0.5">
+                      OD: SPH {savedPrescription.rightEye?.sphere ?? '0.00'}/CYL {savedPrescription.rightEye?.cylinder ?? '0.00'} | OS: SPH {savedPrescription.leftEye?.sphere ?? '0.00'}/CYL {savedPrescription.leftEye?.cylinder ?? '0.00'}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-red-500 font-medium block mt-0.5">
+                      Bạn chưa lưu hồ sơ độ cận. <Link to="/my-prescription" className="text-blue-600 underline font-bold">Bấm vào đây để tạo mới</Link>
+                    </span>
+                  )}
+                </div>
+              </label>
+
+              {/* Option 3: Custom Input */}
+              <label className="flex items-center gap-3 p-4 rounded-2xl border border-gray-100 bg-gray-50 hover:bg-gray-100/50 cursor-pointer transition">
+                <input type="radio" name="prescriptionOption" value="custom" checked={prescriptionOption === 'custom'} onChange={() => setPrescriptionOption('custom')} className="w-5 h-5 accent-blue-600 cursor-pointer" />
+                <div className="flex-1">
+                  <span className="font-extrabold text-sm text-gray-800 block">Nhập độ cận mới cho đơn này</span>
+                  <span className="text-xs text-gray-400 font-medium">Tự điền thông số độ cận thủ công bên dưới</span>
+                </div>
+              </label>
             </div>
-            <button onClick={() => setShowPrescriptionSheet(false)} className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black text-lg mt-10 shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95">XÁC NHẬN & LƯU</button>
+
+            {/* Custom Input Fields (Visible when custom is selected) */}
+            {prescriptionOption === 'custom' && (
+              <div className="space-y-4 max-h-[200px] overflow-y-auto pr-2 mb-6 border-t pt-4">
+                {/* OD */}
+                <div className="p-4 rounded-2xl bg-blue-50/30 border border-blue-100/30">
+                  <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest block mb-2">Mắt phải (OD)</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400">SPH</label>
+                      <input type="number" step="0.25" placeholder="-0.00" value={prescriptionForm.rightEye.sphere} onChange={e => setPrescriptionForm(p => ({ ...p, rightEye: { ...p.rightEye, sphere: e.target.value } }))} className="w-full p-2.5 rounded-xl border border-gray-200 bg-white font-bold text-sm outline-none focus:ring-2 focus:ring-blue-600" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400">CYL</label>
+                      <input type="number" step="0.25" placeholder="-0.00" value={prescriptionForm.rightEye.cylinder} onChange={e => setPrescriptionForm(p => ({ ...p, rightEye: { ...p.rightEye, cylinder: e.target.value } }))} className="w-full p-2.5 rounded-xl border border-gray-200 bg-white font-bold text-sm outline-none focus:ring-2 focus:ring-blue-600" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400">AXIS</label>
+                      <input type="number" min="0" max="180" placeholder="0" value={prescriptionForm.rightEye.axis} onChange={e => setPrescriptionForm(p => ({ ...p, rightEye: { ...p.rightEye, axis: e.target.value } }))} className="w-full p-2.5 rounded-xl border border-gray-200 bg-white font-bold text-sm outline-none focus:ring-2 focus:ring-blue-600" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* OS */}
+                <div className="p-4 rounded-2xl bg-indigo-50/30 border border-indigo-100/30">
+                  <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block mb-2">Mắt trái (OS)</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400">SPH</label>
+                      <input type="number" step="0.25" placeholder="-0.00" value={prescriptionForm.leftEye.sphere} onChange={e => setPrescriptionForm(p => ({ ...p, leftEye: { ...p.leftEye, sphere: e.target.value } }))} className="w-full p-2.5 rounded-xl border border-gray-200 bg-white font-bold text-sm outline-none focus:ring-2 focus:ring-blue-600" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400">CYL</label>
+                      <input type="number" step="0.25" placeholder="-0.00" value={prescriptionForm.leftEye.cylinder} onChange={e => setPrescriptionForm(p => ({ ...p, leftEye: { ...p.leftEye, cylinder: e.target.value } }))} className="w-full p-2.5 rounded-xl border border-gray-200 bg-white font-bold text-sm outline-none focus:ring-2 focus:ring-blue-600" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400">AXIS</label>
+                      <input type="number" min="0" max="180" placeholder="0" value={prescriptionForm.leftEye.axis} onChange={e => setPrescriptionForm(p => ({ ...p, leftEye: { ...p.leftEye, axis: e.target.value } }))} className="w-full p-2.5 rounded-xl border border-gray-200 bg-white font-bold text-sm outline-none focus:ring-2 focus:ring-blue-600" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* PD & Date */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400">Khoảng cách đồng tử (PD)</label>
+                    <input type="number" placeholder="mm" value={prescriptionForm.pd} onChange={e => setPrescriptionForm(p => ({ ...p, pd: e.target.value }))} className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-sm outline-none focus:ring-2 focus:ring-blue-600" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400">Ngày đo khám</label>
+                    <input type="date" value={prescriptionForm.issuedDate} onChange={e => setPrescriptionForm(p => ({ ...p, issuedDate: e.target.value }))} className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-sm outline-none focus:ring-2 focus:ring-blue-600" />
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400">Ghi chú</label>
+                  <textarea rows="2" placeholder="Ghi chú thêm..." value={prescriptionForm.note} onChange={e => setPrescriptionForm(p => ({ ...p, note: e.target.value }))} className="w-full p-3 rounded-xl border border-gray-200 bg-white font-bold text-sm outline-none focus:ring-2 focus:ring-blue-600 resize-none" />
+                </div>
+              </div>
+            )}
+
+            <button onClick={() => setShowPrescriptionSheet(false)} className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95">XÁC NHẬN & LƯU</button>
           </div>
         </div>
       </div>

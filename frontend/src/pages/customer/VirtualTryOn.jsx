@@ -70,6 +70,119 @@ const countConnectedComponents = (geometry) => {
   return componentsCount;
 };
 
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const AR_FIT_CONFIG = {
+  ipdWidthRatio: 2.15,
+  faceWidthRatio: 0.88,
+  templeWidthRatio: 0.96,
+  minFaceSpan: 0.34,
+  edgePadding: 0.035,
+  faceBlendWeight: 0.55,
+  minScaleRatioFromIpd: 0.92,
+  maxScaleRatioFromIpd: 1.22,
+  templeYawThreshold: 0.08,
+  templeDepthScaleBase: 1.35,
+  templeDepthScaleYawBoost: 0.45,
+  maxTempleDepthScale: 1.8
+};
+
+const isTemplePart = (part) =>
+  part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES';
+
+const getVisibleTempleSide = (yaw) => {
+  if (yaw > AR_FIT_CONFIG.templeYawThreshold) return 'RIGHT_TEMPLE';
+  if (yaw < -AR_FIT_CONFIG.templeYawThreshold) return 'LEFT_TEMPLE';
+  return 'CENTER';
+};
+
+const shouldRenderTempleInPass = (part, visibleTempleSide, pass) => {
+  if (!isTemplePart(part)) return false;
+  if (visibleTempleSide === 'CENTER') return pass === 1;
+  if (part === 'BOTH_TEMPLES') return pass === 2;
+  return pass === 2 ? part === visibleTempleSide : part !== visibleTempleSide;
+};
+
+const splitMergedTempleMesh = (mesh) => {
+  const sourceGeometry = mesh.geometry;
+  const positionAttr = sourceGeometry?.attributes?.position;
+  if (!positionAttr) return null;
+
+  const indexArray = sourceGeometry.index ? sourceGeometry.index.array : null;
+  const triangleCount = indexArray ? indexArray.length / 3 : Math.floor(positionAttr.count / 3);
+  const attributeNames = Object.keys(sourceGeometry.attributes);
+  const buckets = {
+    LEFT_TEMPLE: Object.fromEntries(attributeNames.map((name) => [name, []])),
+    RIGHT_TEMPLE: Object.fromEntries(attributeNames.map((name) => [name, []]))
+  };
+
+  const pushVertex = (bucket, vertexIndex) => {
+    attributeNames.forEach((name) => {
+      const attr = sourceGeometry.attributes[name];
+      for (let item = 0; item < attr.itemSize; item++) {
+        buckets[bucket][name].push(attr.array[vertexIndex * attr.itemSize + item]);
+      }
+    });
+  };
+
+  for (let tri = 0; tri < triangleCount; tri++) {
+    const ia = indexArray ? indexArray[tri * 3] : tri * 3;
+    const ib = indexArray ? indexArray[tri * 3 + 1] : tri * 3 + 1;
+    const ic = indexArray ? indexArray[tri * 3 + 2] : tri * 3 + 2;
+    const centerX = (positionAttr.getX(ia) + positionAttr.getX(ib) + positionAttr.getX(ic)) / 3;
+    const bucket = centerX < 0 ? 'LEFT_TEMPLE' : 'RIGHT_TEMPLE';
+    pushVertex(bucket, ia);
+    pushVertex(bucket, ib);
+    pushVertex(bucket, ic);
+  }
+
+  return ['LEFT_TEMPLE', 'RIGHT_TEMPLE'].map((part) => {
+    const geometry = new THREE.BufferGeometry();
+    attributeNames.forEach((name) => {
+      const attr = sourceGeometry.attributes[name];
+      const values = buckets[part][name];
+      const TypedArray = attr.array.constructor;
+      geometry.setAttribute(name, new THREE.BufferAttribute(new TypedArray(values), attr.itemSize, attr.normalized));
+    });
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+
+    const clone = mesh.clone(false);
+    clone.name = `${mesh.name || 'MergedTemple'}_${part === 'LEFT_TEMPLE' ? 'Left' : 'Right'}`;
+    clone.geometry = geometry;
+    clone.material = Array.isArray(mesh.material)
+      ? mesh.material.map((mat) => mat.clone())
+      : mesh.material.clone();
+    clone.userData = { ...mesh.userData, partType: part, splitFromMergedTemple: mesh.name || 'UNNAMED' };
+    clone.frustumCulled = false;
+    return clone;
+  });
+};
+
+const applyTempleDepthFit = (mesh, depthScale) => {
+  if (!mesh?.geometry) return;
+  if (!mesh.userData.originalTempleTransform) {
+    mesh.geometry.computeBoundingBox();
+    mesh.userData.originalTempleTransform = {
+      position: mesh.position.clone(),
+      scale: mesh.scale.clone(),
+      frontZ: mesh.geometry.boundingBox ? mesh.geometry.boundingBox.max.z : 0
+    };
+  }
+
+  const original = mesh.userData.originalTempleTransform;
+  mesh.scale.set(
+    original.scale.x,
+    original.scale.y,
+    original.scale.z * depthScale
+  );
+  mesh.position.set(
+    original.position.x,
+    original.position.y,
+    original.position.z + original.scale.z * original.frontZ * (1 - depthScale)
+  );
+};
+
 export default function VirtualTryOn({
   product,
   allArProducts,
@@ -92,6 +205,7 @@ export default function VirtualTryOn({
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+  const [faceFitHint, setFaceFitHint] = useState('');
 
   // IN-APP DEBUGGER
   const [debugLogs, setDebugLogs] = useState([]);
@@ -268,6 +382,7 @@ export default function VirtualTryOn({
   const recordedVideoUrlRef = useRef(null);
   const activeARProductRef = useRef(null);
   const activeTestRef = useRef("NONE");
+  const faceFitHintRef = useRef('');
 
   useEffect(() => {
     activeTestRef.current = activeTest;
@@ -344,6 +459,12 @@ export default function VirtualTryOn({
   const showToast = (message, type = 'success') => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
+  };
+
+  const updateFaceFitHint = (hint) => {
+    if (faceFitHintRef.current === hint) return;
+    faceFitHintRef.current = hint;
+    setFaceFitHint(hint);
   };
 
   const handleCopyCalibration = () => {
@@ -689,6 +810,7 @@ ${JSON.stringify(pass2List, null, 2)}
         console.log('====== [AR DIAGNOSTIC] BẮT ĐẦU ĐỌC CẤU TRÚC MODEL GLTF ======');
         let meshIndex = 0;
         const diagList = [];
+        const mergedTempleSplitCandidates = [];
 
         model.traverse((child) => {
           if (child.isMesh) {
@@ -793,6 +915,9 @@ ${JSON.stringify(pass2List, null, 2)}
             if (isHandlesMerged && hasBothSides) {
               setGltfWarning("WARNING: Handles mesh contains merged geometry. Independent LEFT_TEMPLE / RIGHT_TEMPLE articulation impossible.");
             }
+            if (child.userData.partType === 'BOTH_TEMPLES' && hasBothSides) {
+              mergedTempleSplitCandidates.push(child);
+            }
 
             let targetKey = null;
             if (meshName.includes("object_5")) targetKey = "Object_5";
@@ -820,6 +945,34 @@ ${JSON.stringify(pass2List, null, 2)}
               child.userData.localCentroid = centroid;
             }
           }
+        });
+
+        mergedTempleSplitCandidates.forEach((child) => {
+          const splitMeshes = splitMergedTempleMesh(child);
+          if (!splitMeshes || splitMeshes.length !== 2 || !child.parent) return;
+
+          child.visible = false;
+          child.userData.partType = 'MERGED_TEMPLE_SOURCE';
+          child.userData.skipProductionRender = true;
+
+          splitMeshes.forEach((splitMesh) => {
+            splitMesh.renderOrder = child.renderOrder;
+            if (splitMesh.material) {
+              const materials = Array.isArray(splitMesh.material) ? splitMesh.material : [splitMesh.material];
+              materials.forEach((mat) => {
+                if (mat) {
+                  mat.transparent = true;
+                  mat.opacity = 1.0;
+                  mat.depthWrite = true;
+                  mat.depthTest = true;
+                  mat.side = THREE.DoubleSide;
+                }
+              });
+            }
+            child.parent.add(splitMesh);
+          });
+
+          setGltfWarning("INFO: Object_7 was split into LEFT_TEMPLE and RIGHT_TEMPLE for side-aware AR rendering.");
         });
 
         const buildGLTFTree = (node, prefix = '') => {
@@ -1129,7 +1282,7 @@ ${JSON.stringify(pass2List, null, 2)}
 
         const yawAbsRad = Math.abs(yaw);
         const yawDegreesVal = yawAbsRad * 180 / Math.PI;
-        debugYawDegrees = yawDegreesVal;
+        debugYawDegrees = yaw * 180 / Math.PI;
 
         let activeFadeFactor = 0.0;
         let activeOpacity = 1.0;
@@ -1154,20 +1307,73 @@ ${JSON.stringify(pass2List, null, 2)}
         const leftPupil = landmarks[468] || landmarks[159];
         const rightPupil = landmarks[473] || landmarks[386];
 
-        const pupilX = (rightPupil.x - leftPupil.x) * visibleWidth;
-        const pupilY = (rightPupil.y - leftPupil.y) * visibleHeight;
-        const pupilZ = (rightPupil.z - leftPupil.z) * visibleWidth;
-        const ipd3D = Math.sqrt(pupilX * pupilX + pupilY * pupilY + pupilZ * pupilZ);
+        const leftPupilW = toW(leftPupil);
+        const rightPupilW = toW(rightPupil);
+        const leftTempleW = toW(leftTemple);
+        const rightTempleW = toW(rightTemple);
+        const faceLeftW = toW(faceLeft);
+        const faceRightW = toW(faceRight);
 
-        const IPD_RATIO = 2.15;
-        const targetWidth = ipd3D * IPD_RATIO;
+        const ipd3D = leftPupilW.distanceTo(rightPupilW);
+        const faceWidth3D = faceLeftW.distanceTo(faceRightW);
+        const templeWidth3D = leftTempleW.distanceTo(rightTempleW);
+
+        const ipdTargetWidth = ipd3D * AR_FIT_CONFIG.ipdWidthRatio;
+        const faceTargetWidth = faceWidth3D * AR_FIT_CONFIG.faceWidthRatio;
+        const templeTargetWidth = templeWidth3D * AR_FIT_CONFIG.templeWidthRatio;
+        const anatomyTargetWidth = Math.max(ipdTargetWidth, faceTargetWidth, templeTargetWidth);
+        const constrainedAnatomyWidth = clamp(
+          anatomyTargetWidth,
+          ipdTargetWidth * AR_FIT_CONFIG.minScaleRatioFromIpd,
+          ipdTargetWidth * AR_FIT_CONFIG.maxScaleRatioFromIpd
+        );
+        const targetWidth =
+          ipdTargetWidth * (1 - AR_FIT_CONFIG.faceBlendWeight) +
+          constrainedAnatomyWidth * AR_FIT_CONFIG.faceBlendWeight;
         const targetScale = targetWidth / (glassesModelRef.current.userData.originalWidth || 2.0);
+
+        if (diagnosticFrameCountRef.current % 15 === 0) {
+          const faceSpan = Math.abs(faceRight.x - faceLeft.x);
+          const faceMinX = Math.min(faceLeft.x, faceRight.x);
+          const faceMaxX = Math.max(faceLeft.x, faceRight.x);
+          const faceIsCropped =
+            faceMinX < AR_FIT_CONFIG.edgePadding ||
+            faceMaxX > 1 - AR_FIT_CONFIG.edgePadding ||
+            forehead.y < AR_FIT_CONFIG.edgePadding ||
+            chin.y > 1 - AR_FIT_CONFIG.edgePadding;
+
+          if (faceIsCropped) {
+            updateFaceFitHint('Lui camera mot chut de thay du tran, cam va hai ben mat.');
+          } else if (faceSpan < AR_FIT_CONFIG.minFaceSpan) {
+            updateFaceFitHint('Dua mat gan camera hon de quet ro hai ben thai duong.');
+          } else {
+            updateFaceFitHint('');
+          }
+        }
 
         const deltaScale = Math.abs(targetScale - prevScaleRef.current);
         const LERP_SCALE = Math.min(0.6, Math.max(0.15, deltaScale * 8.0));
         prevScaleRef.current += (targetScale - prevScaleRef.current) * LERP_SCALE;
         s = prevScaleRef.current;
         glassesModelRef.current.scale.set(s, s, s);
+
+        const anatomyScalePressure = ipdTargetWidth > 0
+          ? clamp((constrainedAnatomyWidth / ipdTargetWidth) - 1, 0, 0.3)
+          : 0;
+        const templeDepthScale = clamp(
+          AR_FIT_CONFIG.templeDepthScaleBase + anatomyScalePressure * 1.1 + yawFactor * AR_FIT_CONFIG.templeDepthScaleYawBoost,
+          AR_FIT_CONFIG.templeDepthScaleBase,
+          AR_FIT_CONFIG.maxTempleDepthScale
+        );
+        const visibleTempleSide = getVisibleTempleSide(yaw);
+        glassesModelRef.current.userData.visibleTempleSide = visibleTempleSide;
+        glassesModelRef.current.userData.templeDepthScale = templeDepthScale;
+
+        glassesModelRef.current.traverse((child) => {
+          if (child.isMesh && isTemplePart(child.userData.partType)) {
+            applyTempleDepthFit(child, templeDepthScale);
+          }
+        });
 
         const leftEyeInner = landmarks[133];
         const rightEyeInner = landmarks[362];
@@ -1227,15 +1433,18 @@ ${JSON.stringify(pass2List, null, 2)}
         }
 
         if (!showFullGlbTestRef.current && !showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current) {
-          const leftOpacity = yaw > 0 ? 1.0 : Math.max(0.35, Math.min(1.0, 1.0 + (yaw + 0.1) * 0.8));
-          const rightOpacity = yaw < 0 ? 1.0 : Math.max(0.35, Math.min(1.0, 1.0 - (yaw - 0.1) * 0.8));
-
           glassesModelRef.current.traverse((child) => {
             if (child.isMesh) {
-              if (child.userData.partType === 'LEFT_TEMPLE') {
-                child.material.opacity = leftOpacity;
-              } else if (child.userData.partType === 'RIGHT_TEMPLE') {
-                child.material.opacity = rightOpacity;
+              const part = child.userData.partType;
+              if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE') {
+                const isVisibleSide = visibleTempleSide === 'CENTER' || part === visibleTempleSide;
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((mat) => {
+                  if (mat) {
+                    mat.transparent = true;
+                    mat.opacity = isVisibleSide ? 1.0 : activeOpacity;
+                  }
+                });
               }
             }
           });
@@ -1403,6 +1612,17 @@ ${JSON.stringify(pass2List, null, 2)}
           let dist168After = 0;
           let dist197Before = 0;
           let dist197After = 0;
+
+          setFittingDiagnostics({
+            faceWidth: faceWidth3D.toFixed(4),
+            glassesWidth: targetWidth.toFixed(4),
+            finalScale: s.toFixed(4),
+            finalPos: `${pos.x.toFixed(4)}, ${pos.y.toFixed(4)}, ${pos.z.toFixed(4)}`,
+            finalRot: rotDeg,
+            fittingBoxType: "IPD + face/temple width blend",
+            rawModelSize: rawSizeStr,
+            rawSizeExcludingTemples: rawExclStr
+          });
 
           if (modelNode) {
             bridgeOffsetYOld = modelNode.userData.bridgeOffsetYOld;
@@ -2223,10 +2443,12 @@ ${JSON.stringify(pass2List, null, 2)}
           fullOccluderRef.current.material.opacity = 1.0;
         }
 
+        const visibleTempleSide = glassesModelRef.current.userData.visibleTempleSide || 'CENTER';
+
         glassesModelRef.current.traverse((child) => {
           if (child.isMesh) {
             const part = child.userData.partType;
-            if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
+            if (!child.userData.skipProductionRender && shouldRenderTempleInPass(part, visibleTempleSide, 1)) {
               child.visible = true;
             } else {
               child.visible = false;
@@ -2243,7 +2465,10 @@ ${JSON.stringify(pass2List, null, 2)}
         glassesModelRef.current.traverse((child) => {
           if (child.isMesh) {
             const part = child.userData.partType;
-            if (part === 'FRONT_FRAME' || part === 'LENS') {
+            if (
+              !child.userData.skipProductionRender &&
+              (part === 'FRONT_FRAME' || part === 'LENS' || shouldRenderTempleInPass(part, visibleTempleSide, 2))
+            ) {
               child.visible = true;
             } else {
               child.visible = false;
@@ -2272,6 +2497,7 @@ ${JSON.stringify(pass2List, null, 2)}
         if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
       }
     } else {
+      if (faceFitHintRef.current) updateFaceFitHint('');
       rendererRef.current.render(sceneRef.current, cameraRef.current);
     }
   };
@@ -2812,6 +3038,12 @@ ${JSON.stringify(pass2List, null, 2)}
         <canvas ref={canvasRef} style={{ display: 'none' }} />
         {/* liveCanvas: Hiển thị giao diện thực tế (Composite của video + 3D, lật gương) */}
         <canvas ref={liveCanvasRef} className="w-full h-full object-cover select-none" />
+
+        {faceFitHint && !capturedImage && !recordedVideoUrl && !isAiLoading && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 max-w-[82vw] rounded-full bg-black/70 px-4 py-2 text-center text-[11px] font-black uppercase tracking-wide text-white shadow-xl border border-white/15 backdrop-blur-md">
+            {faceFitHint}
+          </div>
+        )}
 
         {/* THANH TRẠNG THÁI LOADING MODEL BAN ĐẦU */}
         {isAiLoading && (

@@ -25,7 +25,19 @@ const orderSchema = new mongoose.Schema({
       saleIdAtPurchase: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale', default: null }, // ID của chiến dịch giảm giá được áp dụng (nếu có)
       hasPrescription: { type: Boolean, default: false },
       od: { type: String }, // Độ mắt phải
-      os: { type: String }  // Độ mắt trái
+      os: { type: String },  // Độ mắt trái
+      
+       // Thông số độ cận chi tiết (Prescription Profile Fields)
+      prescriptionMode: { type: String, enum: ['none', 'saved', 'custom'], default: 'none' },
+      od_sph: { type: Number },
+      od_cyl: { type: Number },
+      od_axis: { type: Number },
+      os_sph: { type: Number },
+      os_cyl: { type: Number },
+      os_axis: { type: Number },
+      pd: { type: Number },
+      rxDate: { type: Date },
+      rxNote: { type: String }
     }
   ],
   
@@ -51,6 +63,7 @@ const orderSchema = new mongoose.Schema({
   refundHandledAt: { type: Date },
   processingStartedAt: { type: Date },
   stockRestored: { type: Boolean, default: false }, // Biến cờ bảo vệ chống hoàn stock trùng lặp
+  quotaRestored: { type: Boolean, default: false }, // Biến cờ bảo vệ chống hoàn quota sale trùng lặp
 
   createdAt: { type: Date, default: Date.now }
 });

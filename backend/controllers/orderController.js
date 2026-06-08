@@ -3,9 +3,11 @@ const Product = require('../models/Product');
 const Wallet = require('../models/Wallet');
 const WalletTransaction = require('../models/WalletTransaction');
 const User = require('../models/User');
+const Sale = require('../models/Sale');
 const { createNotificationAndEmit, checkAndEmitLowStockNotification } = require('../utils/notificationHelper');
 const { emitToUser, emitToStaff, emitToAdmin, getIO } = require('../socket');
 const { resolveProductSalePrice } = require('./productController');
+const { buildPaymentCancelToken } = require('../utils/paymentCancelToken');
 
 // Helper tự động lấy hoặc tạo ví mới cho khách hàng
 const getOrCreateWallet = async (userId) => {
@@ -17,10 +19,71 @@ const getOrCreateWallet = async (userId) => {
   return wallet;
 };
 
+// Helper hoàn trả quota khuyến mãi an toàn khi hủy/thất bại đơn hàng
+const restoreSaleQuotaForOrder = async (order) => {
+  if (order.quotaRestored) return;
+  for (const item of order.items) {
+    if (item.saleIdAtPurchase) {
+      await Sale.findOneAndUpdate(
+        { _id: item.saleIdAtPurchase, usageLimitType: 'limited' },
+        { $inc: { usedCount: -item.quantity } }
+      );
+    }
+  }
+  order.quotaRestored = true;
+};
+
 // [POST] Tạo Đơn hàng mới
 exports.createOrder = async (req, res) => {
+  const reservedStocks = [];
+  const reservedSaleQuotas = [];
+  let orderPersisted = false;
+
+  const rollbackOrderCreateReservations = async () => {
+    if (reservedStocks.length === 0 && reservedSaleQuotas.length === 0) return;
+
+    console.warn('[ORDER_CREATE_ROLLBACK_START]', {
+      reservedStocks: reservedStocks.length,
+      reservedSaleQuotas: reservedSaleQuotas.length
+    });
+
+    for (const reservedStock of reservedStocks) {
+      try {
+        console.warn('[ORDER_CREATE_STOCK_ROLLBACK]', reservedStock);
+        await Product.findByIdAndUpdate(reservedStock.productId, {
+          $inc: { stock: reservedStock.quantity }
+        });
+      } catch (rollbackError) {
+        console.error('[ORDER_CREATE_STOCK_ROLLBACK_FAILED]', {
+          productId: reservedStock.productId,
+          quantity: reservedStock.quantity,
+          error: rollbackError.message
+        });
+      }
+    }
+
+    for (const reservedSaleQuota of reservedSaleQuotas) {
+      try {
+        console.warn('[ORDER_CREATE_SALE_ROLLBACK]', reservedSaleQuota);
+        await Sale.findByIdAndUpdate(reservedSaleQuota.saleId, {
+          $inc: { usedCount: -reservedSaleQuota.quantity }
+        });
+      } catch (rollbackError) {
+        console.error('[ORDER_CREATE_SALE_ROLLBACK_FAILED]', {
+          saleId: reservedSaleQuota.saleId,
+          quantity: reservedSaleQuota.quantity,
+          error: rollbackError.message
+        });
+      }
+    }
+
+    reservedStocks.length = 0;
+    reservedSaleQuotas.length = 0;
+    console.warn('[ORDER_CREATE_ROLLBACK_DONE]');
+  };
+
   try {
-    const { orderCode, username, customerInfo, items, paymentMethod, status } = req.body;
+    const { orderCode, customerInfo, items, paymentMethod } = req.body;
 
     // 1. Kiểm tra mã đơn hàng đã tồn tại chưa
     const existingOrder = await Order.findOne({ orderCode });
@@ -58,31 +121,33 @@ exports.createOrder = async (req, res) => {
     const enrichedItems = [];
     let calculatedTotal = 0;
 
+    const { getActiveSales } = require('../utils/saleHelper');
+    const Sale = require('../models/Sale');
+    
+    // Tải danh sách chiến dịch khuyến mãi đang hiệu lực để tính toán và chia sẻ quota nội bộ đơn hàng
+    const activeSales = await getActiveSales();
+    const saleUsageIncrements = {};
+
     for (const item of items) {
       const product = productsCache[item.productId.toString()];
       const importPriceAtPurchase = product.importPrice || 0;
       
-      // GIẢI QUYẾT GIÁ KHUYẾN MÃI DƯỚI SERVER (Tuyệt đối không tin cậy frontend gửi lên)
-      const saleDetails = await resolveProductSalePrice(product);
+      // GIẢI QUYẾT GIÁ KHUYẾN MÃI DƯỚI SERVER (Tuyệt đối không tin cậy frontend gửi lên, truyền activeSales cache)
+      const saleDetails = await resolveProductSalePrice(product, activeSales);
       const finalPriceAtPurchase = saleDetails.salePrice;
       const finalOriginalPriceAtPurchase = saleDetails.originalPrice;
       const finalDiscountAtPurchase = saleDetails.originalPrice - saleDetails.salePrice;
       const finalSaleIdAtPurchase = saleDetails.activeSale ? saleDetails.activeSale._id : null;
 
-      // Khấu trừ tồn kho của sản phẩm
-      product.stock -= item.quantity;
-      await product.save();
-
-      // ================= REALTIME STOCK INTEGRATION =================
-      // Phát tín hiệu cập nhật tồn kho sỉ/lẻ
-      getIO().emit('product:stockUpdated', {
-        productId: product._id.toString(),
-        stock: product.stock,
-        reason: 'order_created'
-      });
-      // Kiểm tra và gửi cảnh báo tồn kho thấp (stock <= 5)
-      await checkAndEmitLowStockNotification(product);
-      // ===============================================================
+      // Cập nhật quota ảo nội bộ trong bản sao activeSales để các item tiếp theo cùng sale nhận biết đúng
+      if (finalSaleIdAtPurchase) {
+        const saleIdStr = finalSaleIdAtPurchase.toString();
+        const localSale = activeSales.find(s => s._id.toString() === saleIdStr);
+        if (localSale) {
+          localSale.usedCount = (localSale.usedCount || 0) + item.quantity;
+        }
+        saleUsageIncrements[saleIdStr] = (saleUsageIncrements[saleIdStr] || 0) + item.quantity;
+      }
 
       // Cộng dồn tổng tiền thực tế trên server
       calculatedTotal += finalPriceAtPurchase * item.quantity;
@@ -97,25 +162,121 @@ exports.createOrder = async (req, res) => {
         saleIdAtPurchase: finalSaleIdAtPurchase,
         hasPrescription: item.hasPrescription || false,
         od: item.od || '',
-        os: item.os || ''
+        os: item.os || '',
+        od_sph: item.od_sph !== undefined ? Number(item.od_sph) : null,
+        od_cyl: item.od_cyl !== undefined ? Number(item.od_cyl) : null,
+        od_axis: item.od_axis !== undefined ? Number(item.od_axis) : null,
+        os_sph: item.os_sph !== undefined ? Number(item.os_sph) : null,
+        os_cyl: item.os_cyl !== undefined ? Number(item.os_cyl) : null,
+        os_axis: item.os_axis !== undefined ? Number(item.os_axis) : null,
+        pd: item.pd !== undefined ? Number(item.pd) : null,
+        rxDate: item.rxDate ? new Date(item.rxDate) : null,
+        rxNote: item.rxNote || '',
+        prescriptionMode: item.prescriptionMode || 'none'
+      });
+    }
+
+    // 3.5. Kiểm tra và giữ quota atomically
+    try {
+      for (const [saleId, qty] of Object.entries(saleUsageIncrements)) {
+        const saleDoc = await Sale.findById(saleId);
+        if (!saleDoc) continue;
+
+        if (saleDoc.usageLimitType === 'limited') {
+          const updatedSale = await Sale.findOneAndUpdate(
+            {
+              _id: saleId,
+              usageLimitType: 'limited',
+              $expr: { $lte: [ { $add: [ "$usedCount", qty ] }, "$usageLimit" ] }
+            },
+            { $inc: { usedCount: qty } },
+            { new: true }
+          );
+
+          if (!updatedSale) {
+            const err = new Error(`Rất tiếc, chiến dịch khuyến mãi "${saleDoc.name}" vừa hết lượt sử dụng (đã bán hết)!`);
+            err.saleName = saleDoc.name;
+            throw err;
+          }
+          reservedSaleQuotas.push({ saleId, quantity: qty });
+        } else {
+          // Unlimited
+          await Sale.findByIdAndUpdate(saleId, { $inc: { usedCount: qty } });
+          reservedSaleQuotas.push({ saleId, quantity: qty, isUnlimited: true });
+        }
+      }
+    } catch (error) {
+      // Hoàn lại quota cho các sale đã giữ thành công trước đó
+      await rollbackOrderCreateReservations();
+      return res.status(400).json({ 
+        success: false, 
+        message: error.message || 'Lỗi kiểm tra giới hạn sử dụng khuyến mãi.' 
+      });
+    }
+
+    // 3.6. Quota giữ thành công, tiến hành lưu tồn kho của các sản phẩm atomically
+    try {
+      for (const item of items) {
+        const product = productsCache[item.productId.toString()];
+        const qty = Number(item.quantity);
+
+        console.log(`[STOCK_RESERVED] Đang giữ tồn kho cho sản phẩm ${product.name} (ID: ${product._id}), số lượng: ${qty}`);
+        const updatedProduct = await Product.findOneAndUpdate(
+          {
+            _id: product._id,
+            stock: { $gte: qty }
+          },
+          {
+            $inc: { stock: -qty }
+          },
+          {
+            new: true
+          }
+        );
+
+        if (!updatedProduct) {
+          const err = new Error(`Sản phẩm "${product.name}" đã hết hàng hoặc không đủ tồn kho!`);
+          err.productName = product.name;
+          throw err;
+        }
+
+        reservedStocks.push({ productId: product._id, quantity: qty, name: product.name });
+
+        // ================= REALTIME STOCK INTEGRATION =================
+        getIO().emit('product:stockUpdated', {
+          productId: product._id.toString(),
+          stock: updatedProduct.stock,
+          reason: 'order_created'
+        });
+        await checkAndEmitLowStockNotification(updatedProduct);
+        // ===============================================================
+      }
+    } catch (stockError) {
+      console.warn(`[STOCK_ROLLBACK] Lỗi thiếu tồn kho. Tiến hành rollback toàn bộ tồn kho đã giữ...`);
+      await rollbackOrderCreateReservations();
+
+      return res.status(400).json({ 
+        success: false, 
+        message: stockError.message || 'Lỗi không đủ tồn kho sản phẩm.' 
       });
     }
 
     // 4. Tạo đơn hàng mới
     const newOrder = new Order({
       orderCode,
-      username: username || req.user?.username || null, // Lấy username từ req.body hoặc token giải mã
+      username: req.user?.username || null,
       customerInfo,
       items: enrichedItems,
       total: calculatedTotal, // Lưu tổng tiền tuyệt đối an toàn tính toán bởi server
       paymentMethod,
-      status: status || 'pending'
+      status: 'pending'
     });
 
     await newOrder.save();
+    orderPersisted = true;
 
     // ================= REALTIME INTEGRATION (PHASE 4) =================
-    const customerName = customerInfo?.name || username || 'Khách vãng lai';
+    const customerName = customerInfo?.name || req.user?.username || 'Khách vãng lai';
     
     // Gửi thông báo DB + Socket cho nhóm Staff và Admin quản trị đơn
     await createNotificationAndEmit({
@@ -139,9 +300,16 @@ exports.createOrder = async (req, res) => {
     emitToAdmin('order:new', { id: newOrder._id, orderCode });
     // ==================================================================
 
-    res.status(201).json({ success: true, message: 'Đơn hàng đã được ghi nhận thành công!', order: newOrder });
+    const paymentCancelToken = paymentMethod === 'banking'
+      ? buildPaymentCancelToken(orderCode)
+      : null;
+
+    res.status(201).json({ success: true, message: 'Đơn hàng đã được ghi nhận thành công!', order: newOrder, paymentCancelToken });
 
   } catch (error) {
+    if (!orderPersisted) {
+      await rollbackOrderCreateReservations();
+    }
     console.error('Lỗi tạo Đơn hàng:', error);
     res.status(500).json({ success: false, message: 'Lỗi máy chủ khi tạo đơn hàng!' });
   }
@@ -314,6 +482,7 @@ exports.updateOrderStatus = async (req, res) => {
         for (const item of order.items) {
           const product = await Product.findById(item.productId);
           if (product) {
+            console.log(`[STOCK_RESTORED] Hoàn lại tồn kho cho sản phẩm ${product.name} (ID: ${product._id}) từ đơn hàng bị hủy, số lượng: ${item.quantity}`);
             product.stock = (product.stock || 0) + item.quantity;
             await product.save();
 
@@ -329,6 +498,8 @@ exports.updateOrderStatus = async (req, res) => {
         }
         order.stockRestored = true;
       }
+      // Hoàn trả quota khuyến mãi
+      await restoreSaleQuotaForOrder(order);
     }
 
     // 4. Lưu lại trạng thái mới
@@ -430,6 +601,7 @@ exports.requestOrderCancel = async (req, res) => {
           for (const item of order.items) {
             const product = await Product.findById(item.productId);
             if (product) {
+              console.log(`[STOCK_RESTORED] Hoàn lại tồn kho cho sản phẩm ${product.name} (ID: ${product._id}) từ đơn hàng bị hủy, số lượng: ${item.quantity}`);
               product.stock = (product.stock || 0) + item.quantity;
               await product.save();
 
@@ -445,6 +617,9 @@ exports.requestOrderCancel = async (req, res) => {
           }
           order.stockRestored = true;
         }
+
+        // Hoàn trả quota khuyến mãi
+        await restoreSaleQuotaForOrder(order);
 
         await order.save();
 
@@ -584,6 +759,7 @@ exports.handleOrderCancel = async (req, res) => {
         for (const item of order.items) {
           const product = await Product.findById(item.productId);
           if (product) {
+            console.log(`[STOCK_RESTORED] Hoàn lại tồn kho cho sản phẩm ${product.name} (ID: ${product._id}) từ đơn hàng bị hủy, số lượng: ${item.quantity}`);
             product.stock = (product.stock || 0) + item.quantity;
             await product.save();
 
@@ -599,6 +775,9 @@ exports.handleOrderCancel = async (req, res) => {
         }
         order.stockRestored = true;
       }
+
+      // Hoàn trả quota khuyến mãi
+      await restoreSaleQuotaForOrder(order);
 
       // 2. Kiểm tra hoàn tiền cho đơn đã đóng tiền Banking
       const isPaidBefore = ['paid', 'processing'].includes(order.previousStatusBeforeCancelRequest) || order.status === 'paid';
