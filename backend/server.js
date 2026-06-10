@@ -295,6 +295,8 @@ const categoryRoutes = require('./routes/categoryRoutes');
 app.use('/api/categories', categoryRoutes);
 const bannerRoutes = require('./routes/bannerRoutes');
 app.use('/api/banners', bannerRoutes);
+const wishlistRoutes = require('./routes/wishlistRoutes');
+app.use('/api/wishlist', wishlistRoutes);
 const productRoutes = require('./routes/productRoutes');
 app.use('/api/products', productRoutes);
 const orderRoutes = require('./routes/orderRoutes');

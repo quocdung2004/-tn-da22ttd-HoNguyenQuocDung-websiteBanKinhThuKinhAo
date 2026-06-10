@@ -84,7 +84,93 @@ const AR_FIT_CONFIG = {
   templeYawThreshold: 0.08,
   templeDepthScaleBase: 1.35,
   templeDepthScaleYawBoost: 0.45,
-  maxTempleDepthScale: 1.8
+  maxTempleDepthScale: 1.8,
+  templeAnchorSideOffsetRatio: 0.10,
+  templeAnchorBackOffsetRatio: 0.28
+};
+
+const ENABLE_LEGACY_TEMPLE_FADE = false;
+const YAW_SIDE_THRESHOLD_DEG = 8;
+
+const OCCLUDER_MODE = {
+  FULL_FACE: 'FULL_FACE',
+  SIDE_FACE: 'SIDE_FACE',
+  NARROW_SIDE: 'NARROW_SIDE'
+};
+
+const NARROW_LEFT_OCCLUDER_LANDMARKS = [
+  127, 234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152,
+  162, 21, 54, 103
+];
+
+const NARROW_RIGHT_OCCLUDER_LANDMARKS = [
+  356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152,
+  389, 251, 284, 332
+];
+
+const NARROW_OCCLUDER_EXCLUDED_LANDMARKS = new Set([
+  1, 2, 4, 5, 6, 9, 10, 33, 61, 76, 78, 80, 81, 82, 84, 85, 86, 87, 88, 89,
+  90, 91, 92, 133, 145, 159, 168, 197, 200, 263, 291, 306, 308, 310, 311,
+  312, 314, 315, 316, 317, 318, 319, 320, 321, 362, 374, 386, 468, 473
+]);
+
+const buildNarrowOccluderTriangles = (seedLandmarks) => {
+  const seedSet = new Set(seedLandmarks);
+  const expandedSet = new Set(seedLandmarks);
+
+  for (let i = 0; i < TRIANGULATION.length; i += 3) {
+    const tri = [TRIANGULATION[i], TRIANGULATION[i + 1], TRIANGULATION[i + 2]];
+    if (tri.some((idx) => seedSet.has(idx))) {
+      tri.forEach((idx) => {
+        if (!NARROW_OCCLUDER_EXCLUDED_LANDMARKS.has(idx)) {
+          expandedSet.add(idx);
+        }
+      });
+    }
+  }
+
+  const triangles = [];
+  for (let i = 0; i < TRIANGULATION.length; i += 3) {
+    const a = TRIANGULATION[i];
+    const b = TRIANGULATION[i + 1];
+    const c = TRIANGULATION[i + 2];
+    if (
+      expandedSet.has(a) &&
+      expandedSet.has(b) &&
+      expandedSet.has(c) &&
+      !NARROW_OCCLUDER_EXCLUDED_LANDMARKS.has(a) &&
+      !NARROW_OCCLUDER_EXCLUDED_LANDMARKS.has(b) &&
+      !NARROW_OCCLUDER_EXCLUDED_LANDMARKS.has(c)
+    ) {
+      triangles.push(a, b, c);
+    }
+  }
+
+  return triangles;
+};
+
+const getYawVisibilityState = (yawDegrees) => {
+  if (yawDegrees > YAW_SIDE_THRESHOLD_DEG) {
+    return { nearSide: 'LEFT', farSide: 'RIGHT' };
+  }
+  if (yawDegrees < -YAW_SIDE_THRESHOLD_DEG) {
+    return { nearSide: 'RIGHT', farSide: 'LEFT' };
+  }
+  return { nearSide: 'BOTH', farSide: 'NONE' };
+};
+
+const estimateTempleVisibleLengths = (yawDegrees, nearSide, farSide) => {
+  const yawAbs = Math.abs(yawDegrees);
+  const nearLength = clamp(1 - yawAbs / 100, 0.42, 1);
+  const farLength = clamp(1 - Math.max(0, yawAbs - YAW_SIDE_THRESHOLD_DEG) / 42, 0, 1);
+
+  if (farSide === 'LEFT') {
+    return { left: farLength, right: nearLength };
+  }
+  if (farSide === 'RIGHT') {
+    return { left: nearLength, right: farLength };
+  }
+  return { left: 1, right: 1 };
 };
 
 const isTemplePart = (part) =>
@@ -221,10 +307,14 @@ export default function VirtualTryOn({
   const [pass1OnlyFreeze, setPass1OnlyFreeze] = useState(false);
   const [pass1ThenPass2NoClear, setPass1ThenPass2NoClear] = useState(false);
   const [showOccluderWireframe, setShowOccluderWireframe] = useState(false);
+  const [showTempleAnchorDebug, setShowTempleAnchorDebug] = useState(false);
+  const [showFullOccluderDebug, setShowFullOccluderDebug] = useState(false);
+  const [showSideOccluderDebug, setShowSideOccluderDebug] = useState(false);
+  const [showNarrowOccluderDebug, setShowNarrowOccluderDebug] = useState(false);
 
   // MESH CLASSIFICATION DIAGNOSTIC FOR MOBILE
   const [meshDebugData, setMeshDebugData] = useState([]);
-  const [showMeshDebug, setShowMeshDebug] = useState(true);
+  const [showMeshDebug, setShowMeshDebug] = useState(false);
   const [gltfTree, setGltfTree] = useState("");
   const [gltfWarning, setGltfWarning] = useState("");
 
@@ -342,7 +432,20 @@ export default function VirtualTryOn({
     yawDegrees: "0.0000",
     templeFadeFactor: "0.0000",
     object7Opacity: "1.0000",
-    object7ForcedHidden: "true"
+    object7ForcedHidden: "true",
+    occluderMode: OCCLUDER_MODE.NARROW_SIDE,
+    nearSide: "BOTH",
+    farSide: "NONE",
+    visibleTempleLengthLeft: "1.0000",
+    visibleTempleLengthRight: "1.0000"
+  });
+  const [templeAnchorDiagnostics, setTempleAnchorDiagnostics] = useState({
+    faceWidth: "0.0000",
+    yawDegrees: "0.0000",
+    leftTempleApprox: "0.0000, 0.0000, 0.0000",
+    rightTempleApprox: "0.0000, 0.0000, 0.0000",
+    sideOffset: "0.0000",
+    backOffset: "0.0000"
   });
 
   // ==========================================
@@ -368,6 +471,7 @@ export default function VirtualTryOn({
   const glassesModelRef = useRef(null);
   const occluderRef = useRef(null);
   const fullOccluderRef = useRef(null);
+  const narrowOccluderRef = useRef(null);
   const reflectionLightRef = useRef(null);
   const helperGroupRef = useRef(null);
   const meshRefs = useRef({
@@ -437,6 +541,31 @@ export default function VirtualTryOn({
   useEffect(() => {
     showOccluderWireframeRef.current = showOccluderWireframe;
   }, [showOccluderWireframe]);
+
+  const showTempleAnchorDebugRef = useRef(false);
+  useEffect(() => {
+    showTempleAnchorDebugRef.current = showTempleAnchorDebug;
+  }, [showTempleAnchorDebug]);
+
+  const showFullOccluderDebugRef = useRef(false);
+  useEffect(() => {
+    showFullOccluderDebugRef.current = showFullOccluderDebug;
+  }, [showFullOccluderDebug]);
+
+  const showSideOccluderDebugRef = useRef(false);
+  useEffect(() => {
+    showSideOccluderDebugRef.current = showSideOccluderDebug;
+  }, [showSideOccluderDebug]);
+
+  const showNarrowOccluderDebugRef = useRef(false);
+  useEffect(() => {
+    showNarrowOccluderDebugRef.current = showNarrowOccluderDebug;
+  }, [showNarrowOccluderDebug]);
+
+  const showMeshDebugRef = useRef(false);
+  useEffect(() => {
+    showMeshDebugRef.current = showMeshDebug;
+  }, [showMeshDebug]);
 
   // SMOOTHING REFS
   const prevQuatRef = useRef(new THREE.Quaternion());
@@ -686,7 +815,7 @@ ${JSON.stringify(pass2List, null, 2)}
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.sortObjects = true;
     renderer.autoClear = false;
-    renderer.localClippingEnabled = true;
+    renderer.localClippingEnabled = false;
     rendererRef.current = renderer;
 
     const scene = new THREE.Scene();
@@ -735,6 +864,10 @@ ${JSON.stringify(pass2List, null, 2)}
       }
     }
 
+    const narrowLeftTriangles = buildNarrowOccluderTriangles(NARROW_LEFT_OCCLUDER_LANDMARKS);
+    const narrowRightTriangles = buildNarrowOccluderTriangles(NARROW_RIGHT_OCCLUDER_LANDMARKS);
+    const narrowBothTriangles = [...narrowLeftTriangles, ...narrowRightTriangles];
+
     const occluderGeo = new THREE.BufferGeometry();
     occluderGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(478 * 3), 3));
     occluderGeo.setIndex(sideFaceTriangles);
@@ -754,6 +887,34 @@ ${JSON.stringify(pass2List, null, 2)}
     occluder.visible = false;
     scene.add(occluder);
     occluderRef.current = occluder;
+
+    const narrowOccluderGeo = new THREE.BufferGeometry();
+    narrowOccluderGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(478 * 3), 3));
+    narrowOccluderGeo.setIndex(narrowBothTriangles);
+
+    const narrowOccluderMat = new THREE.MeshBasicMaterial({
+      color: 0x00ff66,
+      colorWrite: false,
+      depthWrite: true,
+      depthTest: true,
+      side: THREE.DoubleSide
+    });
+    const narrowOccluder = new THREE.Mesh(narrowOccluderGeo, narrowOccluderMat);
+    narrowOccluder.renderOrder = -10;
+    narrowOccluder.material.depthWrite = true;
+    narrowOccluder.material.depthTest = true;
+    narrowOccluder.material.colorWrite = false;
+    narrowOccluder.frustumCulled = false;
+    narrowOccluder.visible = false;
+    narrowOccluder.userData = {
+      mode: OCCLUDER_MODE.NARROW_SIDE,
+      activeSide: 'BOTH',
+      leftIndices: narrowLeftTriangles,
+      rightIndices: narrowRightTriangles,
+      bothIndices: narrowBothTriangles
+    };
+    scene.add(narrowOccluder);
+    narrowOccluderRef.current = narrowOccluder;
 
     const fullOccluderGeo = new THREE.BufferGeometry();
     fullOccluderGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(478 * 3), 3));
@@ -1012,6 +1173,7 @@ ${JSON.stringify(pass2List, null, 2)}
         const redSphere = new THREE.Mesh(redGeo, redMat);
         redSphere.name = "redSphere";
         redSphere.renderOrder = 999;
+        redSphere.visible = false;
         helperGroup.add(redSphere);
 
         const greenGeo = new THREE.SphereGeometry(0.08, 16, 16);
@@ -1019,6 +1181,7 @@ ${JSON.stringify(pass2List, null, 2)}
         const greenSphere = new THREE.Mesh(greenGeo, greenMat);
         greenSphere.name = "greenSphere";
         greenSphere.renderOrder = 999;
+        greenSphere.visible = false;
         helperGroup.add(greenSphere);
 
         const blueGeo = new THREE.SphereGeometry(0.08, 16, 16);
@@ -1026,6 +1189,7 @@ ${JSON.stringify(pass2List, null, 2)}
         const blueSphere = new THREE.Mesh(blueGeo, blueMat);
         blueSphere.name = "blueSphere";
         blueSphere.renderOrder = 999;
+        blueSphere.visible = false;
         helperGroup.add(blueSphere);
 
         const yellowGeo = new THREE.SphereGeometry(0.08, 16, 16);
@@ -1033,6 +1197,7 @@ ${JSON.stringify(pass2List, null, 2)}
         const yellowSphere = new THREE.Mesh(yellowGeo, yellowMat);
         yellowSphere.name = "yellowSphere";
         yellowSphere.renderOrder = 999;
+        yellowSphere.visible = false;
         helperGroup.add(yellowSphere);
 
         const purpleGeo = new THREE.SphereGeometry(0.08, 16, 16);
@@ -1040,6 +1205,7 @@ ${JSON.stringify(pass2List, null, 2)}
         const purpleSphere = new THREE.Mesh(purpleGeo, purpleMat);
         purpleSphere.name = "purpleSphere";
         purpleSphere.renderOrder = 999;
+        purpleSphere.visible = false;
         helperGroup.add(purpleSphere);
 
         const whiteGeo = new THREE.SphereGeometry(0.08, 16, 16);
@@ -1047,6 +1213,7 @@ ${JSON.stringify(pass2List, null, 2)}
         const whiteSphere = new THREE.Mesh(whiteGeo, whiteMat);
         whiteSphere.name = "whiteSphere";
         whiteSphere.renderOrder = 999;
+        whiteSphere.visible = false;
         helperGroup.add(whiteSphere);
 
         const orangeGeo = new THREE.SphereGeometry(0.08, 16, 16);
@@ -1054,6 +1221,7 @@ ${JSON.stringify(pass2List, null, 2)}
         const orangeSphere = new THREE.Mesh(orangeGeo, orangeMat);
         orangeSphere.name = "orangeSphere";
         orangeSphere.renderOrder = 999;
+        orangeSphere.visible = false;
         helperGroup.add(orangeSphere);
 
         const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff00, depthTest: false, depthWrite: false, transparent: false, opacity: 1.0, toneMapped: false });
@@ -1061,7 +1229,40 @@ ${JSON.stringify(pass2List, null, 2)}
         const connectionLine = new THREE.Line(lineGeo, lineMat);
         connectionLine.name = "connectionLine";
         connectionLine.renderOrder = 999;
+        connectionLine.visible = false;
         helperGroup.add(connectionLine);
+
+        const leftTempleAnchorGeo = new THREE.SphereGeometry(0.065, 16, 16);
+        const leftTempleAnchorMat = new THREE.MeshBasicMaterial({ color: 0xff0000, depthTest: false, depthWrite: false, transparent: false, opacity: 1.0, toneMapped: false });
+        const leftTempleAnchorSphere = new THREE.Mesh(leftTempleAnchorGeo, leftTempleAnchorMat);
+        leftTempleAnchorSphere.name = "leftTempleApproxSphere";
+        leftTempleAnchorSphere.renderOrder = 1000;
+        leftTempleAnchorSphere.visible = false;
+        helperGroup.add(leftTempleAnchorSphere);
+
+        const rightTempleAnchorGeo = new THREE.SphereGeometry(0.065, 16, 16);
+        const rightTempleAnchorMat = new THREE.MeshBasicMaterial({ color: 0x008cff, depthTest: false, depthWrite: false, transparent: false, opacity: 1.0, toneMapped: false });
+        const rightTempleAnchorSphere = new THREE.Mesh(rightTempleAnchorGeo, rightTempleAnchorMat);
+        rightTempleAnchorSphere.name = "rightTempleApproxSphere";
+        rightTempleAnchorSphere.renderOrder = 1000;
+        rightTempleAnchorSphere.visible = false;
+        helperGroup.add(rightTempleAnchorSphere);
+
+        const leftTempleLineMat = new THREE.LineBasicMaterial({ color: 0xff0000, depthTest: false, depthWrite: false, transparent: false, opacity: 1.0, toneMapped: false });
+        const leftTempleLineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+        const leftTempleApproxLine = new THREE.Line(leftTempleLineGeo, leftTempleLineMat);
+        leftTempleApproxLine.name = "leftTempleApproxLine";
+        leftTempleApproxLine.renderOrder = 1000;
+        leftTempleApproxLine.visible = false;
+        helperGroup.add(leftTempleApproxLine);
+
+        const rightTempleLineMat = new THREE.LineBasicMaterial({ color: 0x008cff, depthTest: false, depthWrite: false, transparent: false, opacity: 1.0, toneMapped: false });
+        const rightTempleLineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+        const rightTempleApproxLine = new THREE.Line(rightTempleLineGeo, rightTempleLineMat);
+        rightTempleApproxLine.name = "rightTempleApproxLine";
+        rightTempleApproxLine.renderOrder = 1000;
+        rightTempleApproxLine.visible = false;
+        helperGroup.add(rightTempleApproxLine);
 
         setHelperStatus({
           redOrigin: 'CREATED',
@@ -1070,7 +1271,7 @@ ${JSON.stringify(pass2List, null, 2)}
           yellowBbox: 'CREATED',
           axes: 'NOT_CREATED'
         });
-        setTotalHelpers(8);
+        setTotalHelpers(12);
 
         let sizeObj5 = "N/A";
         let sizeObj7 = "N/A";
@@ -1219,8 +1420,6 @@ ${JSON.stringify(pass2List, null, 2)}
       const rightEyeBot = landmarks[374];
       const leftEyeOut = landmarks[33];
       const rightEyeOut = landmarks[263];
-      const leftTemple = landmarks[127];
-      const rightTemple = landmarks[356];
       const faceLeft = landmarks[234];
       const faceRight = landmarks[454];
       const chin = landmarks[152];
@@ -1283,6 +1482,40 @@ ${JSON.stringify(pass2List, null, 2)}
         const yawAbsRad = Math.abs(yaw);
         const yawDegreesVal = yawAbsRad * 180 / Math.PI;
         debugYawDegrees = yaw * 180 / Math.PI;
+        const yawVisibilityState = getYawVisibilityState(debugYawDegrees);
+        const templeVisibleLengths = estimateTempleVisibleLengths(
+          debugYawDegrees,
+          yawVisibilityState.nearSide,
+          yawVisibilityState.farSide
+        );
+
+        glassesModelRef.current.userData.occlusionMode = OCCLUDER_MODE.NARROW_SIDE;
+        glassesModelRef.current.userData.occlusionSideState = {
+          yawDegrees: debugYawDegrees,
+          nearSide: yawVisibilityState.nearSide,
+          farSide: yawVisibilityState.farSide,
+          visibleTempleLengthLeft: templeVisibleLengths.left,
+          visibleTempleLengthRight: templeVisibleLengths.right
+        };
+
+        if (narrowOccluderRef.current) {
+          const activeSide = yawVisibilityState.farSide === 'LEFT'
+            ? 'LEFT'
+            : yawVisibilityState.farSide === 'RIGHT'
+              ? 'RIGHT'
+              : 'BOTH';
+
+          if (narrowOccluderRef.current.userData.activeSide !== activeSide) {
+            const indices = activeSide === 'LEFT'
+              ? narrowOccluderRef.current.userData.leftIndices
+              : activeSide === 'RIGHT'
+                ? narrowOccluderRef.current.userData.rightIndices
+                : narrowOccluderRef.current.userData.bothIndices;
+            narrowOccluderRef.current.geometry.setIndex(indices);
+            narrowOccluderRef.current.geometry.computeBoundingSphere();
+            narrowOccluderRef.current.userData.activeSide = activeSide;
+          }
+        }
 
         let activeFadeFactor = 0.0;
         let activeOpacity = 1.0;
@@ -1309,19 +1542,39 @@ ${JSON.stringify(pass2List, null, 2)}
 
         const leftPupilW = toW(leftPupil);
         const rightPupilW = toW(rightPupil);
-        const leftTempleW = toW(leftTemple);
-        const rightTempleW = toW(rightTemple);
         const faceLeftW = toW(faceLeft);
         const faceRightW = toW(faceRight);
+        const eyeOuterMidW = toW(leftEyeOut).add(toW(rightEyeOut)).multiplyScalar(0.5);
+        const lm168HeadW = toW(landmarks[168]);
+        const lm197HeadW = toW(landmarks[197]);
+        const headCenter = lm168HeadW.clone()
+          .add(lm197HeadW)
+          .add(eyeOuterMidW)
+          .multiplyScalar(1 / 3);
 
         const ipd3D = leftPupilW.distanceTo(rightPupilW);
         const faceWidth3D = faceLeftW.distanceTo(faceRightW);
-        const templeWidth3D = leftTempleW.distanceTo(rightTempleW);
+        const headRightVector = new THREE.Vector3(1, 0, 0).applyQuaternion(prevQuatRef.current).normalize();
+        const headBackVector = new THREE.Vector3(0, 0, -1).applyQuaternion(prevQuatRef.current).normalize();
+        const templeSideOffset = faceWidth3D * AR_FIT_CONFIG.templeAnchorSideOffsetRatio;
+        const templeBackOffset = faceWidth3D * AR_FIT_CONFIG.templeAnchorBackOffsetRatio;
+        const leftTempleApprox = faceLeftW.clone()
+          .addScaledVector(headRightVector, -templeSideOffset)
+          .addScaledVector(headBackVector, templeBackOffset);
+        const rightTempleApprox = faceRightW.clone()
+          .addScaledVector(headRightVector, templeSideOffset)
+          .addScaledVector(headBackVector, templeBackOffset);
+        glassesModelRef.current.userData.templeAnchorApprox = {
+          headCenter,
+          leftTempleApprox,
+          rightTempleApprox,
+          sideOffset: templeSideOffset,
+          backOffset: templeBackOffset
+        };
 
         const ipdTargetWidth = ipd3D * AR_FIT_CONFIG.ipdWidthRatio;
         const faceTargetWidth = faceWidth3D * AR_FIT_CONFIG.faceWidthRatio;
-        const templeTargetWidth = templeWidth3D * AR_FIT_CONFIG.templeWidthRatio;
-        const anatomyTargetWidth = Math.max(ipdTargetWidth, faceTargetWidth, templeTargetWidth);
+        const anatomyTargetWidth = Math.max(ipdTargetWidth, faceTargetWidth);
         const constrainedAnatomyWidth = clamp(
           anatomyTargetWidth,
           ipdTargetWidth * AR_FIT_CONFIG.minScaleRatioFromIpd,
@@ -1432,7 +1685,7 @@ ${JSON.stringify(pass2List, null, 2)}
           glassesModelRef.current.children[0].rotation.y = ((showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current) ? -yaw : yaw) * 0.07;
         }
 
-        if (!showFullGlbTestRef.current && !showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current) {
+        if (ENABLE_LEGACY_TEMPLE_FADE && !showFullGlbTestRef.current && !showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current) {
           glassesModelRef.current.traverse((child) => {
             if (child.isMesh) {
               const part = child.userData.partType;
@@ -1475,37 +1728,93 @@ ${JSON.stringify(pass2List, null, 2)}
           const lm168W = toW(landmarks[168]);
           const lm197W = toW(landmarks[197]);
           const actualRoot = glassesModelRef.current.position;
+          const classicHelperVisible = showMeshDebugRef.current;
 
           const redSphere = helperGroupRef.current.getObjectByName("redSphere");
-          if (redSphere) redSphere.position.copy(lm6W);
+          if (redSphere) {
+            redSphere.visible = classicHelperVisible;
+            if (classicHelperVisible) redSphere.position.copy(lm6W);
+          }
 
           const greenSphere = helperGroupRef.current.getObjectByName("greenSphere");
-          if (greenSphere) greenSphere.position.copy(lm168W);
+          if (greenSphere) {
+            greenSphere.visible = classicHelperVisible;
+            if (classicHelperVisible) greenSphere.position.copy(lm168W);
+          }
 
           const blueSphere = helperGroupRef.current.getObjectByName("blueSphere");
-          if (blueSphere) blueSphere.position.copy(lm197W);
+          if (blueSphere) {
+            blueSphere.visible = classicHelperVisible;
+            if (classicHelperVisible) blueSphere.position.copy(lm197W);
+          }
 
           const yellowSphere = helperGroupRef.current.getObjectByName("yellowSphere");
-          if (yellowSphere) yellowSphere.position.copy(actualRoot);
+          if (yellowSphere) {
+            yellowSphere.visible = classicHelperVisible;
+            if (classicHelperVisible) yellowSphere.position.copy(actualRoot);
+          }
 
           const purpleSphere = helperGroupRef.current.getObjectByName("purpleSphere");
-          if (purpleSphere) purpleSphere.position.copy(lm168W);
+          if (purpleSphere) {
+            purpleSphere.visible = classicHelperVisible;
+            if (classicHelperVisible) purpleSphere.position.copy(lm168W);
+          }
 
           const whiteSphere = helperGroupRef.current.getObjectByName("whiteSphere");
-          if (whiteSphere) whiteSphere.position.copy(lm197W);
+          if (whiteSphere) {
+            whiteSphere.visible = classicHelperVisible;
+            if (classicHelperVisible) whiteSphere.position.copy(lm197W);
+          }
 
           const orangeSphere = helperGroupRef.current.getObjectByName("orangeSphere");
           if (orangeSphere && glassesModelRef.current) {
+            orangeSphere.visible = classicHelperVisible;
             const localBridgeCenter = glassesModelRef.current.userData.localBridgeCenter || new THREE.Vector3();
             const worldBridgeCenter = localBridgeCenter.clone().applyMatrix4(glassesModelRef.current.matrixWorld);
-            orangeSphere.position.copy(worldBridgeCenter);
+            if (classicHelperVisible) orangeSphere.position.copy(worldBridgeCenter);
 
             const connectionLine = helperGroupRef.current.getObjectByName("connectionLine");
             if (connectionLine) {
-              const posAttr = connectionLine.geometry.attributes.position;
-              posAttr.setXYZ(0, actualRoot.x, actualRoot.y, actualRoot.z);
-              posAttr.setXYZ(1, worldBridgeCenter.x, worldBridgeCenter.y, worldBridgeCenter.z);
-              posAttr.needsUpdate = true;
+              connectionLine.visible = classicHelperVisible;
+              if (classicHelperVisible) {
+                const posAttr = connectionLine.geometry.attributes.position;
+                posAttr.setXYZ(0, actualRoot.x, actualRoot.y, actualRoot.z);
+                posAttr.setXYZ(1, worldBridgeCenter.x, worldBridgeCenter.y, worldBridgeCenter.z);
+                posAttr.needsUpdate = true;
+              }
+            }
+          }
+
+          const templeAnchorVisible = showTempleAnchorDebugRef.current;
+          const leftTempleAnchorSphere = helperGroupRef.current.getObjectByName("leftTempleApproxSphere");
+          const rightTempleAnchorSphere = helperGroupRef.current.getObjectByName("rightTempleApproxSphere");
+          const leftTempleApproxLine = helperGroupRef.current.getObjectByName("leftTempleApproxLine");
+          const rightTempleApproxLine = helperGroupRef.current.getObjectByName("rightTempleApproxLine");
+
+          if (leftTempleAnchorSphere) {
+            leftTempleAnchorSphere.visible = templeAnchorVisible;
+            if (templeAnchorVisible) leftTempleAnchorSphere.position.copy(leftTempleApprox);
+          }
+          if (rightTempleAnchorSphere) {
+            rightTempleAnchorSphere.visible = templeAnchorVisible;
+            if (templeAnchorVisible) rightTempleAnchorSphere.position.copy(rightTempleApprox);
+          }
+          if (leftTempleApproxLine) {
+            leftTempleApproxLine.visible = templeAnchorVisible;
+            if (templeAnchorVisible) {
+              const linePos = leftTempleApproxLine.geometry.attributes.position;
+              linePos.setXYZ(0, faceLeftW.x, faceLeftW.y, faceLeftW.z);
+              linePos.setXYZ(1, leftTempleApprox.x, leftTempleApprox.y, leftTempleApprox.z);
+              linePos.needsUpdate = true;
+            }
+          }
+          if (rightTempleApproxLine) {
+            rightTempleApproxLine.visible = templeAnchorVisible;
+            if (templeAnchorVisible) {
+              const linePos = rightTempleApproxLine.geometry.attributes.position;
+              linePos.setXYZ(0, faceRightW.x, faceRightW.y, faceRightW.z);
+              linePos.setXYZ(1, rightTempleApprox.x, rightTempleApprox.y, rightTempleApprox.z);
+              linePos.needsUpdate = true;
             }
           }
         }
@@ -1619,10 +1928,35 @@ ${JSON.stringify(pass2List, null, 2)}
             finalScale: s.toFixed(4),
             finalPos: `${pos.x.toFixed(4)}, ${pos.y.toFixed(4)}, ${pos.z.toFixed(4)}`,
             finalRot: rotDeg,
-            fittingBoxType: "IPD + face/temple width blend",
+            fittingBoxType: "IPD + face width blend",
             rawModelSize: rawSizeStr,
             rawSizeExcludingTemples: rawExclStr
           });
+
+          const templeAnchorSnapshot = {
+            faceWidth: faceWidth3D.toFixed(4),
+            yawDegrees: debugYawDegrees.toFixed(4),
+            leftTempleApprox: `${leftTempleApprox.x.toFixed(4)}, ${leftTempleApprox.y.toFixed(4)}, ${leftTempleApprox.z.toFixed(4)}`,
+            rightTempleApprox: `${rightTempleApprox.x.toFixed(4)}, ${rightTempleApprox.y.toFixed(4)}, ${rightTempleApprox.z.toFixed(4)}`,
+            sideOffset: templeSideOffset.toFixed(4),
+            backOffset: templeBackOffset.toFixed(4)
+          };
+          setTempleAnchorDiagnostics(templeAnchorSnapshot);
+
+          if (showTempleAnchorDebugRef.current && diagnosticFrameCountRef.current % 60 === 0) {
+            console.log('TEMPLE_ANCHOR_DEBUG', templeAnchorSnapshot);
+          }
+
+          if (diagnosticFrameCountRef.current % 60 === 0) {
+            console.log('AR_OCCLUDER_SIDE_STATE', {
+              yawDegrees: debugYawDegrees.toFixed(4),
+              nearSide: yawVisibilityState.nearSide,
+              farSide: yawVisibilityState.farSide,
+              visibleTempleLengthLeft: templeVisibleLengths.left.toFixed(4),
+              visibleTempleLengthRight: templeVisibleLengths.right.toFixed(4),
+              occluderMode: OCCLUDER_MODE.NARROW_SIDE
+            });
+          }
 
           if (modelNode) {
             bridgeOffsetYOld = modelNode.userData.bridgeOffsetYOld;
@@ -1770,7 +2104,12 @@ ${JSON.stringify(pass2List, null, 2)}
             yawDegrees: debugYawDegrees.toFixed(4),
             templeFadeFactor: debugTempleFadeFactor.toFixed(4),
             object7Opacity: debugObject7Opacity.toFixed(4),
-            object7ForcedHidden: "true"
+            object7ForcedHidden: "true",
+            occluderMode: glassesModelRef.current.userData.occlusionMode || OCCLUDER_MODE.NARROW_SIDE,
+            nearSide: yawVisibilityState.nearSide,
+            farSide: yawVisibilityState.farSide,
+            visibleTempleLengthLeft: templeVisibleLengths.left.toFixed(4),
+            visibleTempleLengthRight: templeVisibleLengths.right.toFixed(4)
           });
         }
 
@@ -1818,11 +2157,13 @@ ${JSON.stringify(pass2List, null, 2)}
       if (landmarks && landmarks.length >= 468) {
         const posAttr = occluderRef.current ? occluderRef.current.geometry.attributes.position : null;
         const fullPosAttr = fullOccluderRef.current ? fullOccluderRef.current.geometry.attributes.position : null;
+        const narrowPosAttr = narrowOccluderRef.current ? narrowOccluderRef.current.geometry.attributes.position : null;
 
         for (let i = 0; i < Math.min(landmarks.length, 478); i++) {
           const w = toW(landmarks[i]);
           if (posAttr) posAttr.setXYZ(i, w.x, w.y, w.z);
           if (fullPosAttr) fullPosAttr.setXYZ(i, w.x, w.y, w.z);
+          if (narrowPosAttr) narrowPosAttr.setXYZ(i, w.x, w.y, w.z);
         }
 
         if (posAttr) {
@@ -1834,6 +2175,11 @@ ${JSON.stringify(pass2List, null, 2)}
           fullPosAttr.needsUpdate = true;
           fullOccluderRef.current.geometry.computeBoundingSphere();
           fullOccluderRef.current.position.set(0, 0, 0);
+        }
+        if (narrowPosAttr) {
+          narrowPosAttr.needsUpdate = true;
+          narrowOccluderRef.current.geometry.computeBoundingSphere();
+          narrowOccluderRef.current.position.set(0, 0, 0);
         }
       }
 
@@ -2372,27 +2718,47 @@ ${JSON.stringify(pass2List, null, 2)}
 
       if (showFullGlbTestRef.current || showCleanFullOccluderRef.current || showProduction2PassRef.current || showPass1MeshAuditRef.current || showPass2InterferenceRef.current || showTempleOccluderDebugRef.current) {
         // Render was already handled above
-      } else if (showOccluderDebugRef.current) {
+      } else if (
+        showOccluderDebugRef.current ||
+        showFullOccluderDebugRef.current ||
+        showSideOccluderDebugRef.current ||
+        showNarrowOccluderDebugRef.current
+      ) {
+        const shouldShowSideOccluder = showOccluderDebugRef.current || showSideOccluderDebugRef.current;
+        const shouldShowFullOccluder = showOccluderDebugRef.current || showFullOccluderDebugRef.current;
+        const shouldShowNarrowOccluder = showNarrowOccluderDebugRef.current;
+
         if (occluderRef.current) {
-          occluderRef.current.visible = true;
+          occluderRef.current.visible = shouldShowSideOccluder;
           if (occluderRef.current.material) {
             occluderRef.current.material.colorWrite = true;
             occluderRef.current.material.transparent = true;
-            occluderRef.current.material.opacity = 0.35;
+            occluderRef.current.material.opacity = 0.25;
             occluderRef.current.material.color.setHex(0xff0000);
-            occluderRef.current.material.depthWrite = true;
+            occluderRef.current.material.depthWrite = false;
             occluderRef.current.material.depthTest = true;
           }
         }
         if (fullOccluderRef.current) {
-          fullOccluderRef.current.visible = true;
+          fullOccluderRef.current.visible = shouldShowFullOccluder;
           if (fullOccluderRef.current.material) {
             fullOccluderRef.current.material.colorWrite = true;
             fullOccluderRef.current.material.transparent = true;
-            fullOccluderRef.current.material.opacity = 0.35;
+            fullOccluderRef.current.material.opacity = 0.22;
             fullOccluderRef.current.material.color.setHex(0x0000ff);
-            fullOccluderRef.current.material.depthWrite = true;
+            fullOccluderRef.current.material.depthWrite = false;
             fullOccluderRef.current.material.depthTest = true;
+          }
+        }
+        if (narrowOccluderRef.current) {
+          narrowOccluderRef.current.visible = shouldShowNarrowOccluder;
+          if (narrowOccluderRef.current.material) {
+            narrowOccluderRef.current.material.colorWrite = true;
+            narrowOccluderRef.current.material.transparent = true;
+            narrowOccluderRef.current.material.opacity = 0.28;
+            narrowOccluderRef.current.material.color.setHex(0x00ff66);
+            narrowOccluderRef.current.material.depthWrite = false;
+            narrowOccluderRef.current.material.depthTest = true;
           }
         }
 
@@ -2442,59 +2808,61 @@ ${JSON.stringify(pass2List, null, 2)}
           fullOccluderRef.current.material.transparent = false;
           fullOccluderRef.current.material.opacity = 1.0;
         }
-
-        const visibleTempleSide = glassesModelRef.current.userData.visibleTempleSide || 'CENTER';
+        if (narrowOccluderRef.current && narrowOccluderRef.current.material) {
+          narrowOccluderRef.current.material.colorWrite = false;
+          narrowOccluderRef.current.material.transparent = false;
+          narrowOccluderRef.current.material.opacity = 1.0;
+        }
 
         glassesModelRef.current.traverse((child) => {
           if (child.isMesh) {
             const part = child.userData.partType;
-            if (!child.userData.skipProductionRender && shouldRenderTempleInPass(part, visibleTempleSide, 1)) {
-              child.visible = true;
-            } else {
-              child.visible = false;
+            child.visible = !child.userData.skipProductionRender;
+            child.renderOrder = 0;
+            child.frustumCulled = false;
+            if (child.material) {
+              const materials = Array.isArray(child.material) ? child.material : [child.material];
+              materials.forEach((mat) => {
+                if (mat) {
+                  if (part === 'LENS') {
+                    mat.transparent = true;
+                    mat.opacity = 0.35;
+                  } else {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                  }
+                  mat.depthTest = true;
+                  mat.depthWrite = true;
+                  mat.side = THREE.DoubleSide;
+                  mat.clippingPlanes = [];
+                }
+              });
             }
           }
         });
+
         if (occluderRef.current) occluderRef.current.visible = false;
-        if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
-
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-
-        rendererRef.current.clearDepth();
-
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            const part = child.userData.partType;
-            if (
-              !child.userData.skipProductionRender &&
-              (part === 'FRONT_FRAME' || part === 'LENS' || shouldRenderTempleInPass(part, visibleTempleSide, 2))
-            ) {
-              child.visible = true;
-            } else {
-              child.visible = false;
-            }
+        if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
+        if (narrowOccluderRef.current) {
+          narrowOccluderRef.current.visible = true;
+          narrowOccluderRef.current.position.set(0, 0, 0);
+          if (narrowOccluderRef.current.material) {
+            narrowOccluderRef.current.material.colorWrite = false;
+            narrowOccluderRef.current.material.depthWrite = true;
+            narrowOccluderRef.current.material.depthTest = true;
+            narrowOccluderRef.current.material.wireframe = false;
+            narrowOccluderRef.current.material.transparent = false;
+            narrowOccluderRef.current.material.opacity = 1.0;
+            narrowOccluderRef.current.material.side = THREE.DoubleSide;
           }
-        });
-        if (fullOccluderRef.current) {
-          fullOccluderRef.current.visible = false;
-        }
-        if (occluderRef.current) {
-          const pushBackVector = new THREE.Vector3(0, 0, -1)
-            .applyQuaternion(prevQuatRef.current)
-            .multiplyScalar(0.006 * s);
-          occluderRef.current.position.copy(pushBackVector);
-          occluderRef.current.visible = true;
         }
 
+        glassesModelRef.current.visible = false;
         rendererRef.current.render(sceneRef.current, cameraRef.current);
 
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            child.visible = true;
-          }
-        });
-        if (occluderRef.current) occluderRef.current.visible = true;
-        if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
+        glassesModelRef.current.visible = true;
+        if (narrowOccluderRef.current) narrowOccluderRef.current.visible = false;
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
       }
     } else {
       if (faceFitHintRef.current) updateFaceFitHint('');
@@ -2958,6 +3326,10 @@ ${JSON.stringify(pass2List, null, 2)}
                 <div><span className="text-gray-500">renderOrder:</span> Main={anatomicalBridgeDiagnostics.occluderRenderOrder} Full={anatomicalBridgeDiagnostics.fullOccluderRenderOrder}</div>
                 <div><span className="text-gray-500">depthWrite:</span> Main={anatomicalBridgeDiagnostics.occluderDepthWrite}</div>
                 <div><span className="text-gray-500">colorWrite:</span> Main={anatomicalBridgeDiagnostics.occluderColorWrite}</div>
+                <div className="pt-1 mt-1 border-t border-white/5"><span className="text-gray-500">Mode:</span> <span className="text-green-400 font-bold">{anatomicalBridgeDiagnostics.occluderMode}</span></div>
+                <div><span className="text-gray-500">Near Side:</span> <span className="text-cyan-400 font-bold">{anatomicalBridgeDiagnostics.nearSide}</span></div>
+                <div><span className="text-gray-500">Far Side:</span> <span className="text-orange-400 font-bold">{anatomicalBridgeDiagnostics.farSide}</span></div>
+                <div><span className="text-gray-500">Visible Left:</span> {anatomicalBridgeDiagnostics.visibleTempleLengthLeft} <span className="text-gray-500">| Right:</span> {anatomicalBridgeDiagnostics.visibleTempleLengthRight}</div>
               </div>
             </div>
 
@@ -2982,6 +3354,12 @@ ${JSON.stringify(pass2List, null, 2)}
                 🧭 Adaptive Smoothing Targets
               </div>
               <div className="space-y-1 text-[7.5px] leading-relaxed font-mono">
+                <div className="pt-1 pb-1 border-b border-white/5 text-red-300 font-bold uppercase">Temple Anchor Debug: {showTempleAnchorDebug ? "ON" : "OFF"}</div>
+                <div><span className="text-gray-500">faceWidth:</span> <span className="text-yellow-400">{templeAnchorDiagnostics.faceWidth}</span></div>
+                <div><span className="text-gray-500">yawDegrees:</span> <span className="text-yellow-400">{templeAnchorDiagnostics.yawDegrees}</span></div>
+                <div><span className="text-gray-500">leftApprox:</span> <span className="text-red-400">{templeAnchorDiagnostics.leftTempleApprox}</span></div>
+                <div><span className="text-gray-500">rightApprox:</span> <span className="text-blue-400">{templeAnchorDiagnostics.rightTempleApprox}</span></div>
+                <div><span className="text-gray-500">sideOffset:</span> {templeAnchorDiagnostics.sideOffset} <span className="text-gray-500">| backOffset:</span> {templeAnchorDiagnostics.backOffset}</div>
                 <div><span className="text-gray-500">Target Lerp X:</span> {anatomicalBridgeDiagnostics.targetLerpX}</div>
                 <div><span className="text-gray-500">Target Lerp Y:</span> {anatomicalBridgeDiagnostics.targetLerpY}</div>
                 <div><span className="text-gray-500">Target Lerp Z:</span> {anatomicalBridgeDiagnostics.targetLerpZ}</div>
@@ -2999,7 +3377,7 @@ ${JSON.stringify(pass2List, null, 2)}
                 <div><span className="text-gray-500">Temple Fade Factor:</span> <span className="text-green-400 font-bold">{anatomicalBridgeDiagnostics.templeFadeFactor}</span></div>
                 <div><span className="text-gray-500">Object_7 Opacity:</span> <span className="text-cyan-400 font-bold">{anatomicalBridgeDiagnostics.object7Opacity}</span></div>
                 <div><span className="text-gray-500">Object_7 Forced Hidden:</span> <span className="text-red-500 font-bold">false</span></div>
-                <div className="text-[6.5px] text-gray-400 mt-1 border-t border-white/5 pt-1 leading-normal">• Fade start: 10° | Full hide: 30° (visible = false / opacity = 0.05)</div>
+                <div className="text-[6.5px] text-gray-400 mt-1 border-t border-white/5 pt-1 leading-normal">Legacy temple fade is disabled in clean render mode.</div>
                 <div className="text-[6.5px] text-gray-400 leading-normal">• Object_7 Local Clipping: DISABLED (using full handles length)</div>
                 <div className="pt-1.5 border-t border-white/5 mt-1 text-yellow-400 font-bold">🛠️ DEPTH CALIBRATION DETAILS:</div>
                 <div><span className="text-gray-500">Video Mirrored:</span> <span className="text-green-400 font-bold">TRUE (CSS ScaleX)</span></div>
@@ -3146,7 +3524,7 @@ ${JSON.stringify(pass2List, null, 2)}
 
         {/* 📐 EXPERIMENT 1 UI PANEL */}
         {(!capturedImage && !recordedVideoUrl) && (
-          <div className="absolute top-24 right-6 z-[200] flex flex-col gap-2 max-w-[140px] bg-black/80 backdrop-blur-md p-2 rounded-2xl border border-white/10">
+          <div className="absolute top-24 right-6 z-[200] flex flex-col gap-2 max-w-[170px] bg-black/80 backdrop-blur-md p-2 rounded-2xl border border-white/10">
             <div className="text-[7px] text-gray-400 font-bold uppercase border-b border-white/10 pb-0.5 mb-1">🧪 EXPERIMENTS</div>
             
             <button
@@ -3349,6 +3727,93 @@ ${JSON.stringify(pass2List, null, 2)}
               }`}
             >
               TEMPLE DET {showTempleOccluderDebug ? "ON" : "OFF"}
+            </button>
+
+            <button
+              onClick={() => {
+                const nextVal = !showTempleAnchorDebug;
+                setShowTempleAnchorDebug(nextVal);
+                showToast(nextVal ? "TEMPLE ANCHOR DEBUG ON" : "TEMPLE ANCHOR DEBUG OFF", nextVal ? "warning" : "success");
+              }}
+              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
+                showTempleAnchorDebug
+                  ? "bg-red-600 text-white shadow-md shadow-red-500/20"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10"
+              }`}
+            >
+              SHOW TEMPLE ANCHORS: {showTempleAnchorDebug ? "ON" : "OFF"}
+            </button>
+
+            <button
+              onClick={() => {
+                const nextVal = !showFullOccluderDebug;
+                setShowFullOccluderDebug(nextVal);
+                if (nextVal) {
+                  setActiveTest("NONE");
+                  setShowFullGlbTest(false);
+                  setShowCleanFullOccluder(false);
+                  setShowProduction2Pass(false);
+                  setShowPass1MeshAudit(false);
+                  setShowPass2Interference(false);
+                  setShowOccluderWireframe(false);
+                }
+                showToast(nextVal ? "SHOW FULL OCCLUDER ON" : "SHOW FULL OCCLUDER OFF", nextVal ? "warning" : "success");
+              }}
+              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
+                showFullOccluderDebug
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10"
+              }`}
+            >
+              SHOW FULL OCCLUDER: {showFullOccluderDebug ? "ON" : "OFF"}
+            </button>
+
+            <button
+              onClick={() => {
+                const nextVal = !showSideOccluderDebug;
+                setShowSideOccluderDebug(nextVal);
+                if (nextVal) {
+                  setActiveTest("NONE");
+                  setShowFullGlbTest(false);
+                  setShowCleanFullOccluder(false);
+                  setShowProduction2Pass(false);
+                  setShowPass1MeshAudit(false);
+                  setShowPass2Interference(false);
+                  setShowOccluderWireframe(false);
+                }
+                showToast(nextVal ? "SHOW SIDE OCCLUDER ON" : "SHOW SIDE OCCLUDER OFF", nextVal ? "warning" : "success");
+              }}
+              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
+                showSideOccluderDebug
+                  ? "bg-red-600 text-white shadow-md shadow-red-500/20"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10"
+              }`}
+            >
+              SHOW SIDE OCCLUDER: {showSideOccluderDebug ? "ON" : "OFF"}
+            </button>
+
+            <button
+              onClick={() => {
+                const nextVal = !showNarrowOccluderDebug;
+                setShowNarrowOccluderDebug(nextVal);
+                if (nextVal) {
+                  setActiveTest("NONE");
+                  setShowFullGlbTest(false);
+                  setShowCleanFullOccluder(false);
+                  setShowProduction2Pass(false);
+                  setShowPass1MeshAudit(false);
+                  setShowPass2Interference(false);
+                  setShowOccluderWireframe(false);
+                }
+                showToast(nextVal ? "SHOW NARROW OCCLUDER ON" : "SHOW NARROW OCCLUDER OFF", nextVal ? "warning" : "success");
+              }}
+              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
+                showNarrowOccluderDebug
+                  ? "bg-green-600 text-white shadow-md shadow-green-500/20"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10"
+              }`}
+            >
+              SHOW NARROW OCCLUDER: {showNarrowOccluderDebug ? "ON" : "OFF"}
             </button>
 
             <button

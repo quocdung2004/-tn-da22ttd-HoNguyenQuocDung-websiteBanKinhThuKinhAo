@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { View, ArrowRight, Sparkles, ShoppingBag, ShieldCheck, Loader2, Box, ChevronLeft, ChevronRight } from 'lucide-react';
+import { View, ArrowRight, Sparkles, ShoppingBag, ShieldCheck, Loader2, Box, ChevronLeft, ChevronRight, Heart } from 'lucide-react';
 import { useSocket } from '../../context/SocketContext';
+import { useAuth } from '../../context/AuthContext';
 
 export default function Home() {
   const navigate = useNavigate();
   const { socket } = useSocket();
+  const { user } = useAuth();
   
   // STATE LƯU DỮ LIỆU TỪ BACKEND
   const [products, setProducts] = useState([]);
   const [banners, setBanners] = useState([]);
   const [activeBannerIndex, setActiveBannerIndex] = useState(0);
+  const [wishlistIds, setWishlistIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
+  const showWishlistActions = !user || user.role === 0;
 
   const fetchProducts = async () => {
     try {
@@ -40,11 +44,36 @@ export default function Home() {
     }
   };
 
+  const fetchWishlist = async () => {
+    const token = localStorage.getItem('glassesToken');
+    if (!token || !user || user.role !== 0) {
+      setWishlistIds(new Set());
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/wishlist', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        const nextIds = new Set((data.items || []).map((item) => item.product?._id).filter(Boolean));
+        setWishlistIds(nextIds);
+      }
+    } catch (error) {
+      console.error('Loi tai danh sach yeu thich:', error);
+    }
+  };
+
   // GỌI API LẤY DANH SÁCH SẢN PHẨM KHI VỪA MỞ TRANG
   useEffect(() => {
     fetchProducts();
     fetchBanners();
   }, []);
+
+  useEffect(() => {
+    fetchWishlist();
+  }, [user]);
 
   useEffect(() => {
     if (banners.length <= 1) return undefined;
@@ -91,6 +120,45 @@ export default function Home() {
       return;
     }
     navigate(targetUrl);
+  };
+
+  const handleWishlistToggle = async (event, productId) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!user) {
+      alert('Vui long dang nhap de su dung danh sach yeu thich!');
+      navigate('/login');
+      return;
+    }
+
+    if (user.role !== 0) return;
+
+    const token = localStorage.getItem('glassesToken');
+    const isWishlisted = wishlistIds.has(productId);
+
+    try {
+      const res = await fetch(`/api/wishlist/${productId}`, {
+        method: isWishlisted ? 'DELETE' : 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        alert(data.message || 'Khong the cap nhat danh sach yeu thich!');
+        return;
+      }
+
+      setWishlistIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        if (isWishlisted) nextIds.delete(productId);
+        else nextIds.add(productId);
+        return nextIds;
+      });
+    } catch (error) {
+      console.error('Loi cap nhat wishlist:', error);
+      alert('Loi ket noi may chu khi cap nhat yeu thich!');
+    }
   };
 
   const activeBanner = banners[activeBannerIndex];
@@ -273,6 +341,16 @@ export default function Home() {
                   onClick={() => navigate(`/product/${product._id}`)} // Chuyển hướng mang theo ID thật
                   className="group bg-white rounded-3xl p-5 shadow-sm hover:shadow-2xl hover:shadow-blue-900/10 transition-all duration-300 border border-gray-100 flex flex-col cursor-pointer relative"
                 >
+                  {showWishlistActions && (
+                    <button
+                      type="button"
+                      onClick={(event) => handleWishlistToggle(event, product._id)}
+                      className="absolute top-4 right-4 z-30 w-11 h-11 rounded-full bg-white/95 border border-gray-100 shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition"
+                      aria-label={wishlistIds.has(product._id) ? 'Bo yeu thich' : 'Them yeu thich'}
+                    >
+                      <Heart className={`w-5 h-5 ${wishlistIds.has(product._id) ? 'fill-red-500 text-red-500' : 'text-gray-500'}`} />
+                    </button>
+                  )}
                   <div className="absolute inset-0 bg-gray-900/5 z-10 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[1px]">
                     <button className="bg-white text-gray-900 font-bold px-6 py-3 rounded-xl shadow-xl transform translate-y-4 group-hover:translate-y-0 transition-transform flex items-center gap-2">
                       <View className="w-5 h-5"/> Xem chi tiết

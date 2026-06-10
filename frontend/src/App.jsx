@@ -20,6 +20,7 @@ import Success from './pages/customer/Success';
 import Profile from './pages/customer/Profile';
 import MyOrders from './pages/customer/MyOrders';
 import Wallet from './pages/customer/Wallet';
+import MyWishlist from './pages/customer/MyWishlist';
 
 // Import Pages (Admin)
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -93,6 +94,11 @@ export default function App() {
               <Route path="/my-wallet" element={
                 <ProtectedRoute allowedRoles={[0, 1, 2]}>
                   <Wallet />
+                </ProtectedRoute>
+              } />
+              <Route path="/my-wishlist" element={
+                <ProtectedRoute allowedRoles={[0]}>
+                  <MyWishlist />
                 </ProtectedRoute>
               } />
             </Route>

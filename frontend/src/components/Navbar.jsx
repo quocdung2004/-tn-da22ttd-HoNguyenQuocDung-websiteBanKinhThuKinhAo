@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, User, Menu, X, Glasses, ChevronRight, ChevronDown, LogOut, Package, Wallet, Eye } from 'lucide-react';
+import { ShoppingCart, User, Menu, X, Glasses, ChevronRight, ChevronDown, LogOut, Package, Wallet, Eye, Heart } from 'lucide-react';
 import { useAuth } from '../context/AuthContext'; // Import Trạm phát sóng (Đổi đường dẫn nếu cần)
 import { getCartKey } from '../utils/cartHelper';
 import NotificationBell from './NotificationBell';
@@ -121,6 +121,12 @@ const Navbar = () => {
                           <Eye className="w-4 h-4" />
                           <span className="font-medium">Hồ sơ độ cận</span>
                         </Link>
+                        {user.role === 0 && (
+                          <Link to="/my-wishlist" className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition" onClick={() => setIsProfileOpen(false)}>
+                            <Heart className="w-4 h-4" />
+                            <span className="font-medium">Yeu thich</span>
+                          </Link>
+                        )}
                         <Link to="/my-orders" className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition" onClick={() => setIsProfileOpen(false)}>
                           <Package className="w-4 h-4" />
                           <span className="font-medium">Đơn hàng của tôi</span>
@@ -198,6 +204,12 @@ const Navbar = () => {
                 <Eye className="w-5 h-5" />
                 <span>Hồ sơ độ cận</span>
               </Link>
+              {user.role === 0 && (
+                <Link to="/my-wishlist" onClick={closeMenu} className="flex items-center space-x-3 text-gray-700 hover:text-blue-600 font-medium py-2">
+                  <Heart className="w-5 h-5" />
+                  <span>Yeu thich</span>
+                </Link>
+              )}
               <Link to="/my-orders" onClick={closeMenu} className="flex items-center space-x-3 text-gray-700 hover:text-blue-600 font-medium py-2">
                 <Package className="w-5 h-5" />
                 <span>Đơn hàng của tôi</span>

@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { getCartKey } from '../../utils/cartHelper';
 import {
-  Camera, ShoppingCart, ShieldCheck, ChevronLeft, Edit3, X, Loader2, Box, CheckCircle2, Sparkles, Star
+  Camera, ShoppingCart, ShieldCheck, ChevronLeft, Edit3, X, Loader2, Box, CheckCircle2, Sparkles, Star, Heart
 } from 'lucide-react';
 import VirtualTryOn from './VirtualTryOn';
+import { useAuth } from '../../context/AuthContext';
 
 export default function ProductDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
 
   // ==========================================
   // 1. QUẢN LÝ TRẠNG THÁI (STATE)
@@ -30,6 +33,8 @@ export default function ProductDetail() {
   const [activeARProduct, setActiveARProduct] = useState(null);
   const [showPrescriptionSheet, setShowPrescriptionSheet] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+  const [isWishlisted, setIsWishlisted] = useState(false);
+  const [wishlistUpdating, setWishlistUpdating] = useState(false);
 
   // Reviews System states
   const [reviews, setReviews] = useState([]);
@@ -133,6 +138,26 @@ export default function ProductDetail() {
     }
   };
 
+  const checkWishlistStatus = async () => {
+    const token = localStorage.getItem('glassesToken');
+    if (!token || !user || user.role !== 0) {
+      setIsWishlisted(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/wishlist/check/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsWishlisted(Boolean(data.isWishlisted));
+      }
+    } catch (err) {
+      console.error('Loi kiem tra wishlist:', err);
+    }
+  };
+
   const handleSaveReview = async (e) => {
     e.preventDefault();
     const token = localStorage.getItem('glassesToken');
@@ -178,6 +203,10 @@ export default function ProductDetail() {
     checkReviewEligibility();
   }, [id]);
 
+  useEffect(() => {
+    checkWishlistStatus();
+  }, [id, user]);
+
   const showToast = (message, type = 'success') => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000);
@@ -215,6 +244,40 @@ export default function ProductDetail() {
   // ==========================================
   // 3. THÊM VÀO GIỎ HÀNG
   // ==========================================
+  const handleWishlistToggle = async () => {
+    if (!user) {
+      showToast('Vui long dang nhap de su dung danh sach yeu thich!', 'error');
+      navigate('/login');
+      return;
+    }
+
+    if (user.role !== 0) return;
+
+    const token = localStorage.getItem('glassesToken');
+    setWishlistUpdating(true);
+
+    try {
+      const res = await fetch(`/api/wishlist/${id}`, {
+        method: isWishlisted ? 'DELETE' : 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        showToast(data.message || 'Khong the cap nhat danh sach yeu thich!', 'error');
+        return;
+      }
+
+      setIsWishlisted(!isWishlisted);
+      showToast(isWishlisted ? 'Da bo khoi danh sach yeu thich' : 'Da them vao danh sach yeu thich', 'success');
+    } catch (err) {
+      console.error('Loi cap nhat wishlist:', err);
+      showToast('Loi ket noi may chu khi cap nhat yeu thich!', 'error');
+    } finally {
+      setWishlistUpdating(false);
+    }
+  };
+
   const handleAddToCart = () => {
     const rx = getActivePrescription();
     if (prescriptionOption === 'custom') {
@@ -392,6 +455,22 @@ export default function ProductDetail() {
                 <Edit3 className="w-6 h-6" />
               </button>
             </div>
+
+            {(!user || user.role === 0) && (
+              <button
+                type="button"
+                onClick={handleWishlistToggle}
+                disabled={wishlistUpdating}
+                className={`w-full py-4 rounded-3xl font-black text-lg flex items-center justify-center gap-3 border-2 transition-all active:scale-95 mb-4 ${
+                  isWishlisted
+                    ? 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100'
+                    : 'bg-white text-gray-800 border-gray-200 hover:border-red-200 hover:text-red-600'
+                }`}
+              >
+                <Heart className={`w-6 h-6 ${isWishlisted ? 'fill-red-500 text-red-500' : ''}`} />
+                {isWishlisted ? 'Da yeu thich' : 'Them yeu thich'}
+              </button>
+            )}
 
             <button onClick={handleAddToCart} disabled={isAdded} className={`w-full py-6 rounded-3xl font-black text-xl flex items-center justify-center gap-3 shadow-2xl transition-all active:scale-95 ${isAdded ? 'bg-green-500 text-white shadow-green-200' : 'bg-blue-600 text-white shadow-blue-200 hover:bg-blue-700'}`}>
               {isAdded ? <><ShieldCheck className="w-7 h-7 animate-bounce" /> ĐÃ THÊM VÀO GIỎ!</> : <><ShoppingCart className="w-7 h-7" /> THÊM VÀO GIỎ HÀNG</>}
