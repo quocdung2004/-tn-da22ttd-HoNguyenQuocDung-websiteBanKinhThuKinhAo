@@ -346,7 +346,7 @@ export default function Home() {
                       type="button"
                       onClick={(event) => handleWishlistToggle(event, product._id)}
                       className="absolute top-4 right-4 z-30 w-11 h-11 rounded-full bg-white/95 border border-gray-100 shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition"
-                      aria-label={wishlistIds.has(product._id) ? 'Bo yeu thich' : 'Them yeu thich'}
+                      aria-label={wishlistIds.has(product._id) ? 'Bỏ yêu thích' : 'Thêm yêu thích'}
                     >
                       <Heart className={`w-5 h-5 ${wishlistIds.has(product._id) ? 'fill-red-500 text-red-500' : 'text-gray-500'}`} />
                     </button>

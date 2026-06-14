@@ -305,7 +305,7 @@ function OverviewTab({ revenue, profit, orders, topProducts, topBrands }) {
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
         <MetricCard
-          title="Revenue Today"
+          title="Doanh thu hôm nay"
           value={formatCurrency(revenue.today)}
           description="Doanh thu trong ngày"
           icon={DollarSign}
@@ -489,7 +489,7 @@ function InventoryTab({ inventory }) {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <StockList
-          title="Out Of Stock Products"
+          title="Sản phẩm hết hàng"
           products={inventory.outOfStockProducts || []}
           emptyText="Không có sản phẩm hết hàng."
           tone="red"
@@ -560,7 +560,7 @@ function TopProductsPanel({ products }) {
     <div className="bg-white border border-gray-100 rounded-lg p-5 shadow-sm">
       <h2 className="text-lg font-black text-gray-900 mb-4 flex items-center gap-2">
         <Award className="w-5 h-5 text-amber-500" />
-        Top Selling Products
+        Sản phẩm bán chạy
       </h2>
 
       {products.length === 0 ? (
@@ -637,7 +637,7 @@ function CampaignAnalytics({ campaigns }) {
     <div className="bg-white border border-gray-100 rounded-lg p-5 shadow-sm overflow-hidden">
       <h2 className="text-lg font-black text-gray-900 mb-4 flex items-center gap-2">
         <TrendingUp className="w-5 h-5 text-blue-600" />
-        Sale Campaign Analytics
+        Phân tích chiến dịch khuyến mãi
       </h2>
 
       {campaigns.length === 0 ? (

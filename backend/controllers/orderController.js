@@ -91,7 +91,7 @@ exports.createOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Mã đơn hàng này đã tồn tại!' });
     }
 
-    if (!items || items.length === 0) {
+    if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, message: 'Đơn hàng phải chứa ít nhất 1 sản phẩm!' });
     }
 
@@ -101,6 +101,15 @@ exports.createOrder = async (req, res) => {
       if (!item.productId) {
         return res.status(400).json({ success: false, message: 'Thiếu thông tin ID sản phẩm!' });
       }
+      const quantity = Number(item.quantity);
+      if (!Number.isInteger(quantity) || quantity <= 0 || quantity > 999) {
+        return res.status(400).json({
+          success: false,
+          message: 'Số lượng sản phẩm không hợp lệ. Số lượng phải là số nguyên từ 1 đến 999.'
+        });
+      }
+      item.quantity = quantity;
+
       const product = await Product.findById(item.productId);
       if (!product) {
         return res.status(400).json({ success: false, message: `Sản phẩm với ID ${item.productId} không tồn tại trên hệ thống!` });

@@ -13,4 +13,6 @@ const prescriptionSchema = new mongoose.Schema({
   note: { type: String }
 });
 
+prescriptionSchema.index({ username: 1 }, { unique: true });
+
 module.exports = mongoose.model('Prescription', prescriptionSchema);

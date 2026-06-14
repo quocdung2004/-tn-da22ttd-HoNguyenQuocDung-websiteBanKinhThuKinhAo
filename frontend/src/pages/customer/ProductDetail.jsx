@@ -468,7 +468,7 @@ export default function ProductDetail() {
                 }`}
               >
                 <Heart className={`w-6 h-6 ${isWishlisted ? 'fill-red-500 text-red-500' : ''}`} />
-                {isWishlisted ? 'Da yeu thich' : 'Them yeu thich'}
+                {isWishlisted ? 'Đã yêu thích' : 'Thêm yêu thích'}
               </button>
             )}
 

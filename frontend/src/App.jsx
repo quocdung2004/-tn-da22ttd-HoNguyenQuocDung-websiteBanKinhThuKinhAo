@@ -134,6 +134,7 @@ export default function App() {
               </ProtectedRoute>
             }>
               <Route index element={<OrderManagement />} />
+              <Route path="orders" element={<OrderManagement />} />
               <Route path="reviews" element={<ReviewManager />} />
               <Route path="cancel-requests" element={<CancelRequests />} />
               <Route path="withdraw-requests" element={<WithdrawRequests />} />

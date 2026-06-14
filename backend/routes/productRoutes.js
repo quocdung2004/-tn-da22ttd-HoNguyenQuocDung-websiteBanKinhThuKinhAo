@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const productController = require('../controllers/productController');
 const uploadCloud = require('../config/cloudinary');
-const { verifyToken, verifyAdmin } = require('../middleware/authMiddleware');
+const { verifyToken, verifyAdmin, optionalVerifyToken } = require('../middleware/authMiddleware');
 
 // Cấu hình Middleware "Bắt File" (Hứng nhiều định dạng cùng lúc từ FormData)
 const cpUpload = uploadCloud.fields([
@@ -11,10 +11,10 @@ const cpUpload = uploadCloud.fields([
 ]);
 
 // Route Lấy danh sách (Ai cũng xem được)
-router.get('/', productController.getProducts);
+router.get('/', optionalVerifyToken, productController.getProducts);
 
 // Route Lấy chi tiết một sản phẩm (Ai cũng xem được)
-router.get('/:id', productController.getProductById);
+router.get('/:id', optionalVerifyToken, productController.getProductById);
 
 // Route Thêm (Yêu cầu Admin)
 router.post('/', verifyToken, verifyAdmin, cpUpload, productController.createProduct);

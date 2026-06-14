@@ -30,8 +30,11 @@ export default function ProductManager() {
 
   const fetchData = async () => {
     try {
+      const token = localStorage.getItem('glassesToken');
       const [prodRes, brandRes, catRes] = await Promise.all([
-        fetch('/api/products?all=true').then(res => res.json()), // Gọi all=true để Admin quản lý toàn bộ
+        fetch('/api/products?all=true', {
+          headers: { Authorization: `Bearer ${token}` }
+        }).then(res => res.json()), // Gọi all=true để Admin quản lý toàn bộ
         fetch('/api/brands').then(res => res.json()),
         fetch('/api/categories').then(res => res.json())
       ]);
@@ -489,3 +492,4 @@ export default function ProductManager() {
     </div>
   );
 }
+

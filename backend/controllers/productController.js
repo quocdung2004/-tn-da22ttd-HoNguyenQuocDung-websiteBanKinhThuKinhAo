@@ -19,6 +19,14 @@ const resolveProductSalePrice = async (product, activeSales) => {
 
 exports.resolveProductSalePrice = resolveProductSalePrice;
 
+const sanitizeProductForRole = (product, userRole) => {
+  const productObj = typeof product.toObject === 'function' ? product.toObject() : { ...product };
+  if (userRole !== 1) {
+    delete productObj.importPrice;
+  }
+  return productObj;
+};
+
 // [POST] Thêm Sản phẩm
 exports.createProduct = async (req, res) => {
   try {
@@ -54,7 +62,11 @@ exports.getProducts = async (req, res) => {
   try {
     // Nếu truyền query all=true thì trả về tất cả (bao gồm cả sản phẩm bị ẩn/xóa mềm - dùng cho Admin)
     // Ngược lại chỉ trả về các sản phẩm đang bán (isActive !== false - dùng cho Customer)
-    const filter = req.query.all === 'true' ? {} : { isActive: { $ne: false } };
+    const isAdmin = req.user?.role === 1;
+    if (req.query.all === 'true' && !isAdmin) {
+      return res.status(403).json({ success: false, message: 'Chỉ Admin được xem toàn bộ sản phẩm.' });
+    }
+    const filter = isAdmin && req.query.all === 'true' ? {} : { isActive: { $ne: false } };
 
     const products = await Product.find(filter)
       .populate('brand', 'name') 
@@ -63,7 +75,10 @@ exports.getProducts = async (req, res) => {
 
     // Tính toán giá khuyến mãi động cho từng sản phẩm trả về sử dụng saleHelper
     const activeSales = await getActiveSales();
-    const resolvedProducts = products.map(product => attachSaleInfoToProduct(product, activeSales));
+    const resolvedProducts = products.map(product => {
+      const productForRole = sanitizeProductForRole(product, req.user?.role);
+      return attachSaleInfoToProduct(productForRole, activeSales);
+    });
 
     res.json({ success: true, products: resolvedProducts });
   } catch (error) {
@@ -84,9 +99,14 @@ exports.getProductById = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm kính mắt!' });
     }
 
+    if (product.isActive === false && req.user?.role !== 1) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm kính mắt!' });
+    }
+
     // Tính toán khuyến mãi động cho sản phẩm
     const activeSales = await getActiveSales();
-    const resolvedProduct = attachSaleInfoToProduct(product, activeSales);
+    const productForRole = sanitizeProductForRole(product, req.user?.role);
+    const resolvedProduct = attachSaleInfoToProduct(productForRole, activeSales);
 
     res.json({ success: true, product: resolvedProduct });
   } catch (error) {

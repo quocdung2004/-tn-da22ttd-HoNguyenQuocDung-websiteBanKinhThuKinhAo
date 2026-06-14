@@ -91,6 +91,25 @@ const AR_FIT_CONFIG = {
 
 const ENABLE_LEGACY_TEMPLE_FADE = false;
 const YAW_SIDE_THRESHOLD_DEG = 8;
+const SHOW_AR_DEBUG_UI = false;
+const SHOW_AR_OPTIONAL_CONTROLS = false;
+const ENABLE_AR_DIAGNOSTIC_LOGS = false;
+const NARROW_OCCLUDER_BACK_EXPAND = 0.22;
+const NARROW_OCCLUDER_SIDE_EXPAND = 0.085;
+const FAR_SIDE_OCCLUSION_STRENGTH = 1.3;
+
+// Final model-only pitch correction.
+// Negative value currently lifts the GLB slightly upward in the production camera view.
+// If the glasses tilt in the wrong direction, only change this constant to +5.
+const GLASSES_PITCH_OFFSET_DEG = -5;
+const GLASSES_PITCH_OFFSET_RAD = THREE.MathUtils.degToRad(GLASSES_PITCH_OFFSET_DEG);
+const GLASSES_PITCH_OFFSET_QUAT = new THREE.Quaternion()
+  .setFromAxisAngle(new THREE.Vector3(1, 0, 0), GLASSES_PITCH_OFFSET_RAD);
+
+const applyFinalGlassesQuaternion = (model, baseQuaternion) => {
+  if (!model || !baseQuaternion) return;
+  model.quaternion.copy(baseQuaternion.clone().multiply(GLASSES_PITCH_OFFSET_QUAT));
+};
 
 const OCCLUDER_MODE = {
   FULL_FACE: 'FULL_FACE',
@@ -149,14 +168,29 @@ const buildNarrowOccluderTriangles = (seedLandmarks) => {
   return triangles;
 };
 
-const getYawVisibilityState = (yawDegrees) => {
+const getTempleSideState = (yawDegrees) => {
   if (yawDegrees > YAW_SIDE_THRESHOLD_DEG) {
-    return { nearSide: 'LEFT', farSide: 'RIGHT' };
+    return {
+      nearSide: 'LEFT',
+      farSide: 'RIGHT',
+      nearTemplePart: 'LEFT_TEMPLE',
+      farTemplePart: 'RIGHT_TEMPLE'
+    };
   }
   if (yawDegrees < -YAW_SIDE_THRESHOLD_DEG) {
-    return { nearSide: 'RIGHT', farSide: 'LEFT' };
+    return {
+      nearSide: 'RIGHT',
+      farSide: 'LEFT',
+      nearTemplePart: 'RIGHT_TEMPLE',
+      farTemplePart: 'LEFT_TEMPLE'
+    };
   }
-  return { nearSide: 'BOTH', farSide: 'NONE' };
+  return {
+    nearSide: 'BOTH',
+    farSide: 'NONE',
+    nearTemplePart: 'BOTH',
+    farTemplePart: 'NONE'
+  };
 };
 
 const estimateTempleVisibleLengths = (yawDegrees, nearSide, farSide) => {
@@ -173,20 +207,458 @@ const estimateTempleVisibleLengths = (yawDegrees, nearSide, farSide) => {
   return { left: 1, right: 1 };
 };
 
-const isTemplePart = (part) =>
-  part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES';
+const TEMPLE_SEGMENT_COUNT = 16;
+if (TEMPLE_SEGMENT_COUNT < 10) {
+  console.warn(`[VirtualTryOn] Warning: TEMPLE_SEGMENT_COUNT is ${TEMPLE_SEGMENT_COUNT}, which is less than 10. Temple occlusion might look jagged.`);
+}
 
-const getVisibleTempleSide = (yaw) => {
-  if (yaw > AR_FIT_CONFIG.templeYawThreshold) return 'RIGHT_TEMPLE';
-  if (yaw < -AR_FIT_CONFIG.templeYawThreshold) return 'LEFT_TEMPLE';
-  return 'CENTER';
+const smoothstep = (edge0, edge1, x) => {
+  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
 };
 
-const shouldRenderTempleInPass = (part, visibleTempleSide, pass) => {
-  if (!isTemplePart(part)) return false;
-  if (visibleTempleSide === 'CENTER') return pass === 1;
-  if (part === 'BOTH_TEMPLES') return pass === 2;
-  return pass === 2 ? part === visibleTempleSide : part !== visibleTempleSide;
+const getTempleBasePart = (part) => {
+  if (part === 'LEFT_TEMPLE' || part?.startsWith('LEFT_TEMPLE_')) return 'LEFT_TEMPLE';
+  if (part === 'RIGHT_TEMPLE' || part?.startsWith('RIGHT_TEMPLE_')) return 'RIGHT_TEMPLE';
+  if (part === 'BOTH_TEMPLES') return 'BOTH_TEMPLES';
+  return null;
+};
+
+const getTempleSegment = (part) => {
+  const match = part?.match(/_SEG_(\d+)$/);
+  return match ? parseInt(match[1], 10) : null;
+};
+
+const getTempleSegmentPartType = (basePart, segmentIndex) => `${basePart}_SEG_${segmentIndex}`;
+
+const LEFT_FACE_MASK_LANDMARKS = [
+  70, 63, 105, 66, 107,
+  127, 162, 21,
+  234, 93, 132,
+  58, 172, 136,
+  150, 149, 176,
+  148, 152
+];
+
+const RIGHT_FACE_MASK_LANDMARKS = [
+  300, 293, 334, 296, 336,
+  356, 389, 251,
+  454, 323, 361,
+  288, 397, 365,
+  379, 378, 400,
+  377, 152
+];
+
+const isPointInPolygon2D = (point, polygon) => {
+  let inside = false;
+  const n = polygon.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y;
+    const xj = polygon[j].x, yj = polygon[j].y;
+    if (((yi > point.y) !== (yj > point.y)) &&
+        (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+};
+
+const distanceToPolygonEdge2D = (point, polygon) => {
+  let minDist = Infinity;
+  const n = polygon.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const ax = polygon[j].x, ay = polygon[j].y;
+    const bx = polygon[i].x, by = polygon[i].y;
+    const dx = bx - ax, dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 0.000001) continue;
+    let t = ((point.x - ax) * dx + (point.y - ay) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const px = ax + t * dx, py = ay + t * dy;
+    const dist = Math.sqrt((point.x - px) * (point.x - px) + (point.y - py) * (point.y - py));
+    if (dist < minDist) minDist = dist;
+  }
+  return minDist;
+};
+
+const lineSegmentIntersection2D = (p, p2, q, q2) => {
+  if (!p || !p2 || !q || !q2) {
+    return { intersects: false, t: Infinity, u: Infinity, point: null };
+  }
+
+  const rx = p2.x - p.x;
+  const ry = p2.y - p.y;
+  const sx = q2.x - q.x;
+  const sy = q2.y - q.y;
+  const denom = rx * sy - ry * sx;
+
+  if (Math.abs(denom) < 1e-8) {
+    return { intersects: false, t: Infinity, u: Infinity, point: null };
+  }
+
+  const qpx = q.x - p.x;
+  const qpy = q.y - p.y;
+  const t = (qpx * sy - qpy * sx) / denom;
+  const u = (qpx * ry - qpy * rx) / denom;
+
+  if (t < 0 || t > 1 || u < 0 || u > 1) {
+    return { intersects: false, t, u, point: null };
+  }
+
+  return {
+    intersects: true,
+    t,
+    u,
+    point: {
+      x: p.x + t * rx,
+      y: p.y + t * ry
+    }
+  };
+};
+
+const findFirstTempleFaceIntersectionT = (templeLineStart2D, templeLineEnd2D, facePolygon2D) => {
+  if (!templeLineStart2D || !templeLineEnd2D || !Array.isArray(facePolygon2D) || facePolygon2D.length < 3) {
+    return { found: false, cutT: null, cutPoint: null };
+  }
+
+  let bestT = Infinity;
+  let bestPoint = null;
+
+  for (let i = 0, j = facePolygon2D.length - 1; i < facePolygon2D.length; j = i++) {
+    const edgeStart = facePolygon2D[j];
+    const edgeEnd = facePolygon2D[i];
+    const hit = lineSegmentIntersection2D(templeLineStart2D, templeLineEnd2D, edgeStart, edgeEnd);
+
+    // Ignore extremely early hits at the hinge because the hinge itself often sits on the face contour.
+    if (hit.intersects && hit.t > 0.03 && hit.t < bestT) {
+      bestT = hit.t;
+      bestPoint = hit.point;
+    }
+  }
+
+  if (!Number.isFinite(bestT)) {
+    return { found: false, cutT: null, cutPoint: null };
+  }
+
+  return {
+    found: true,
+    cutT: clamp(bestT, 0, 1),
+    cutPoint: bestPoint
+  };
+};
+
+const getTempleSegmentScreenState = (mesh, projectFn, hinge2D, ear2D, fallbackT) => {
+  if (!mesh?.geometry || !projectFn || !hinge2D || !ear2D) {
+    return { screenPoint: null, segmentT: fallbackT };
+  }
+
+  if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+  if (!mesh.geometry.boundingSphere) {
+    return { screenPoint: null, segmentT: fallbackT };
+  }
+
+  const center3D = mesh.geometry.boundingSphere.center.clone();
+  mesh.localToWorld(center3D);
+  const screenPoint = projectFn(center3D);
+  if (!screenPoint) {
+    return { screenPoint: null, segmentT: fallbackT };
+  }
+
+  const lineX = ear2D.x - hinge2D.x;
+  const lineY = ear2D.y - hinge2D.y;
+  const lineLengthSq = lineX * lineX + lineY * lineY;
+  if (lineLengthSq < 1e-8) {
+    return { screenPoint, segmentT: fallbackT };
+  }
+
+  const segX = screenPoint.x - hinge2D.x;
+  const segY = screenPoint.y - hinge2D.y;
+  const segmentT = clamp((segX * lineX + segY * lineY) / lineLengthSq, 0, 1);
+
+  return { screenPoint, segmentT };
+};
+
+const getTempleEyeBandOpacity = (screenPoint, eyeBand) => {
+  if (!screenPoint || !eyeBand) {
+    return 1;
+  }
+
+  const softMargin = eyeBand.softMargin ?? 0.035;
+
+  if (screenPoint.y < eyeBand.top) {
+    const overflow = eyeBand.top - screenPoint.y;
+    return clamp(1 - smoothstep(0, softMargin, overflow), 0, 1);
+  }
+
+  if (screenPoint.y > eyeBand.bottom) {
+    const overflow = screenPoint.y - eyeBand.bottom;
+    return clamp(1 - smoothstep(0, softMargin, overflow), 0, 1);
+  }
+
+  return 1;
+};
+
+const getTempleSegmentOpacity = (part, templeSideState, yawDegrees, templeBoundaryModel, faceMaskModel, mesh) => {
+  const basePart = getTempleBasePart(part);
+  const segmentIndex = getTempleSegment(part);
+  if (!basePart || segmentIndex === null) return 1;
+
+  const isLeft = basePart === 'LEFT_TEMPLE';
+  const segmentFallbackT = clamp(segmentIndex / (TEMPLE_SEGMENT_COUNT - 1), 0, 1);
+
+  const hingeApprox = isLeft ? templeBoundaryModel?.leftHingeApprox : templeBoundaryModel?.rightHingeApprox;
+  const estimatedEar = isLeft ? templeBoundaryModel?.leftEstimatedEar : templeBoundaryModel?.rightEstimatedEar;
+  const faceBoundary = isLeft ? templeBoundaryModel?.leftFaceBoundary : templeBoundaryModel?.rightFaceBoundary;
+  const polygon = isLeft ? faceMaskModel?.leftPolygon : faceMaskModel?.rightPolygon;
+  const projectFn = faceMaskModel?.projectWorldToScreen;
+
+  let hinge2D = null;
+  let ear2D = null;
+  if (hingeApprox && estimatedEar && projectFn) {
+    hinge2D = projectFn(hingeApprox);
+    ear2D = projectFn(estimatedEar);
+  }
+
+  const { screenPoint, segmentT } = getTempleSegmentScreenState(
+    mesh,
+    projectFn,
+    hinge2D,
+    ear2D,
+    segmentFallbackT
+  );
+
+  const yawAbs = Math.abs(yawDegrees);
+  const yawStrength = clamp((yawAbs - 6) / 14, 0, 1);
+  const pitchStrengthRaw = faceMaskModel?.pitchTempleHideStrength ?? 0;
+  const eyeBandOpacityRaw = getTempleEyeBandOpacity(screenPoint, faceMaskModel?.eyeBand);
+  const eyeBandStrengthRaw = 1 - eyeBandOpacityRaw;
+
+  // Mode separation:
+  // 1) YAW MODE: head is turned left/right. Protect near-side temple. Do not apply global pitch fail-safe to near side.
+  // 2) FRONTAL PITCH MODE: head is roughly frontal but tilted up/down. Apply pitch/eye-band guard to both temples.
+  const isYawMode =
+    !!templeSideState &&
+    templeSideState.nearSide !== 'BOTH' &&
+    yawAbs > YAW_SIDE_THRESHOLD_DEG;
+
+  const isFrontalPitchMode = !isYawMode;
+
+  const isNearTempleInYawMode =
+    isYawMode &&
+    basePart === templeSideState.nearTemplePart;
+
+  const isFarTempleInYawMode =
+    isYawMode &&
+    basePart === templeSideState.farTemplePart;
+
+  // In yaw mode, near-side is the visible side. Keep it stable and do not let pitch guards delete it.
+  if (isNearTempleInYawMode) {
+    return 1;
+  }
+
+  // In yaw mode, only the far-side temple should be occluded.
+  if (isYawMode && !isFarTempleInYawMode) {
+    return 1;
+  }
+
+  // In frontal pitch mode, pitch/eye-band may affect both temples.
+  // In yaw mode, pitch/eye-band are disabled; far side uses yaw/intersection/mask only.
+  const pitchStrength = isFrontalPitchMode ? pitchStrengthRaw : 0;
+  const eyeBandOpacity = isFrontalPitchMode ? eyeBandOpacityRaw : 1;
+  const eyeBandStrength = isFrontalPitchMode ? eyeBandStrengthRaw : 0;
+
+  const shouldRunTempleCut =
+    isFarTempleInYawMode ||
+    (isFrontalPitchMode && (pitchStrength > 0.02 || eyeBandStrength > 0.02));
+
+  if (!shouldRunTempleCut) {
+    return eyeBandOpacity;
+  }
+
+  const effectStrength = isYawMode
+    ? yawStrength
+    : clamp(Math.max(pitchStrength, eyeBandStrength), 0, 1);
+
+  // If the face is extremely pitched up/down while frontal, temple placement is unreliable. Keep frame/lens only.
+  if (isFrontalPitchMode && pitchStrength > 0.92) {
+    return 0;
+  }
+
+  if (effectStrength <= 0.001) {
+    return eyeBandOpacity;
+  }
+
+  // --- Fallback boundary opacity: old 3D hinge -> ear projection. Used when 2D intersection cannot be found. ---
+  let boundaryOpacity = 1;
+  if (hingeApprox && estimatedEar && faceBoundary) {
+    const lineDir = new THREE.Vector3().subVectors(estimatedEar, hingeApprox);
+    const lineLengthSq = lineDir.lengthSq();
+    if (lineLengthSq > 0.00001) {
+      const toBoundary = new THREE.Vector3().subVectors(faceBoundary, hingeApprox);
+      let boundaryT = toBoundary.dot(lineDir) / lineLengthSq;
+      boundaryT = clamp(boundaryT, 0.15, 0.85);
+      const segmentT3D = segmentFallbackT;
+      const effectiveBoundaryT = clamp(boundaryT - 0.22, 0.22, 0.58);
+      boundaryOpacity = 1 - smoothstep(
+        effectiveBoundaryT - 0.04,
+        effectiveBoundaryT + 0.20,
+        segmentT3D
+      );
+      boundaryOpacity = clamp(boundaryOpacity, 0, 1);
+      if (effectStrength > 0.75 && segmentT3D > effectiveBoundaryT + 0.22) {
+        boundaryOpacity = 0;
+      }
+    }
+  }
+
+  // --- Screen-space mask opacity.
+  let maskOpacity = 1;
+  let insideFaceMask = false;
+  let edgeDist = Infinity;
+
+  if (screenPoint && polygon && polygon.length >= 3) {
+    insideFaceMask = isPointInPolygon2D(screenPoint, polygon);
+    edgeDist = distanceToPolygonEdge2D(screenPoint, polygon);
+
+    if (insideFaceMask) {
+      const softEdge = 0.025;
+      if (edgeDist < softEdge) {
+        maskOpacity = smoothstep(0, softEdge, edgeDist) * 0.3;
+      } else {
+        maskOpacity = 0;
+      }
+    } else {
+      const marginWidth = 0.015;
+      if (edgeDist < marginWidth) {
+        maskOpacity = smoothstep(0, marginWidth, edgeDist);
+      } else {
+        maskOpacity = 1;
+      }
+    }
+  }
+
+  // --- Intersection opacity.
+  // In yaw mode, this clips the far-side temple.
+  // In frontal pitch mode, this can clip both temples so they cannot hang down or point into the forehead.
+  let intersectionOpacity = 1;
+  let intersectionFound = false;
+  let cutT = null;
+
+  if (hinge2D && ear2D && polygon && polygon.length >= 3) {
+    const intersection = findFirstTempleFaceIntersectionT(hinge2D, ear2D, polygon);
+    intersectionFound = intersection.found;
+    cutT = intersection.cutT;
+
+    if (intersectionFound) {
+      const fadeBefore = 0.03;
+      const fadeAfter = isFrontalPitchMode && pitchStrength > 0.25 ? 0.075 : 0.12;
+
+      if (segmentT < cutT - fadeBefore) {
+        intersectionOpacity = 1;
+      } else {
+        intersectionOpacity = 1 - smoothstep(
+          cutT - fadeBefore,
+          cutT + fadeAfter,
+          segmentT
+        );
+        intersectionOpacity = clamp(intersectionOpacity, 0, 1);
+      }
+
+      if (segmentT > cutT + fadeAfter && effectStrength > 0.45) {
+        intersectionOpacity = 0;
+      }
+
+      if (segmentT > cutT + 0.06 && effectStrength > 0.35) {
+        intersectionOpacity = 0;
+      }
+    }
+  }
+
+  // Extra fallback only for frontal pitch mode when no reliable yaw near/far side exists.
+  let pitchFallbackOpacity = 1;
+  if (isFrontalPitchMode && pitchStrength > 0.15 && (!intersectionFound || templeSideState?.nearSide === 'BOTH')) {
+    const pitchCutT = 0.18;
+    pitchFallbackOpacity = 1 - smoothstep(
+      pitchCutT - 0.035,
+      pitchCutT + 0.12,
+      segmentT
+    );
+    pitchFallbackOpacity = clamp(pitchFallbackOpacity, 0, 1);
+
+    if (segmentT > pitchCutT + 0.10 && pitchStrength > 0.35) {
+      pitchFallbackOpacity = 0;
+    }
+  }
+
+  const combinedOpacity = Math.min(
+    intersectionFound ? intersectionOpacity : boundaryOpacity,
+    maskOpacity,
+    eyeBandOpacity,
+    pitchFallbackOpacity
+  );
+
+  let opacity = 1 - effectStrength * (1 - combinedOpacity);
+
+  // Global pitch temple hide is allowed only in frontal pitch mode.
+  // It must not delete the near-side temple during left/right yaw.
+  if (isFrontalPitchMode) {
+    const globalPitchTempleOpacity = 1 - smoothstep(0.45, 0.90, pitchStrength);
+    opacity = Math.min(opacity, globalPitchTempleOpacity);
+  }
+
+  if (insideFaceMask && edgeDist > 0.025 && effectStrength > 0.35) {
+    opacity = 0;
+  }
+
+  if (intersectionFound && cutT !== null && segmentT > cutT + 0.10 && effectStrength > 0.45) {
+    opacity = 0;
+  }
+
+  if (ENABLE_AR_DIAGNOSTIC_LOGS && mesh) {
+    mesh.userData.lastTempleOcclusionDebug = {
+      part,
+      segmentIndex,
+      yawDegrees,
+      yawStrength,
+      pitchStrengthRaw,
+      pitchStrength,
+      effectStrength,
+      isYawMode,
+      isFrontalPitchMode,
+      isNearTempleInYawMode,
+      isFarTempleInYawMode,
+      segmentFallbackT,
+      segmentT,
+      eyeBand: faceMaskModel?.eyeBand || null,
+      eyeBandOpacityRaw,
+      eyeBandOpacity,
+      eyeBandStrength,
+      intersectionFound,
+      cutT,
+      insideFaceMask,
+      edgeDist: Number.isFinite(edgeDist) ? edgeDist : null,
+      boundaryOpacity,
+      maskOpacity,
+      intersectionOpacity,
+      pitchFallbackOpacity,
+      finalOpacity: opacity
+    };
+  }
+
+  return clamp(opacity, 0, 1);
+};
+
+const isTemplePart = (part) =>
+  getTempleBasePart(part) !== null;
+
+const shouldRenderTempleInPass = (part, templeSideState, pass) => {
+  const basePart = getTempleBasePart(part);
+  if (!basePart) return false;
+  if (!templeSideState || templeSideState.nearSide === 'BOTH') return pass === 1;
+  if (basePart === 'BOTH_TEMPLES') return pass === 2;
+  return pass === 1
+    ? basePart === templeSideState.farTemplePart
+    : basePart === templeSideState.nearTemplePart;
 };
 
 const splitMergedTempleMesh = (mesh) => {
@@ -243,6 +715,125 @@ const splitMergedTempleMesh = (mesh) => {
     clone.frustumCulled = false;
     return clone;
   });
+};
+
+const splitTempleMeshIntoSegments = (mesh) => {
+  const sourceGeometry = mesh.geometry;
+  const positionAttr = sourceGeometry?.attributes?.position;
+  const basePart = getTempleBasePart(mesh.userData.partType);
+  if (!positionAttr || (basePart !== 'LEFT_TEMPLE' && basePart !== 'RIGHT_TEMPLE')) return null;
+
+  sourceGeometry.computeBoundingBox();
+  const bbox = sourceGeometry.boundingBox;
+  if (!bbox) return null;
+
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const axis = size.x >= size.y && size.x >= size.z
+    ? 'x'
+    : size.y >= size.x && size.y >= size.z
+      ? 'y'
+      : 'z';
+  const axisIndex = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
+  const axisMin = bbox.min[axis];
+  const axisMax = bbox.max[axis];
+  const axisLength = axisMax - axisMin;
+  if (axisLength <= 0) return null;
+
+  const segmentIndices = Array.from({ length: TEMPLE_SEGMENT_COUNT }, (_, i) => i);
+  const segmentBuckets = Object.fromEntries(
+    segmentIndices.map((idx) => [idx, {}])
+  );
+  const attributeNames = Object.keys(sourceGeometry.attributes);
+  segmentIndices.forEach((idx) => {
+    attributeNames.forEach((name) => {
+      segmentBuckets[idx][name] = [];
+    });
+  });
+
+  const indexArray = sourceGeometry.index ? sourceGeometry.index.array : null;
+  const triangleCount = indexArray ? indexArray.length / 3 : Math.floor(positionAttr.count / 3);
+
+  const getAxisValue = (vertexIndex) => {
+    if (axisIndex === 0) return positionAttr.getX(vertexIndex);
+    if (axisIndex === 1) return positionAttr.getY(vertexIndex);
+    return positionAttr.getZ(vertexIndex);
+  };
+
+  const getLengthProgress = (centerValue) => {
+    if (axis === 'x') {
+      return basePart === 'LEFT_TEMPLE'
+        ? (axisMax - centerValue) / axisLength
+        : (centerValue - axisMin) / axisLength;
+    }
+    if (axis === 'z') {
+      return (axisMax - centerValue) / axisLength;
+    }
+    return (centerValue - axisMin) / axisLength;
+  };
+
+  const getSegmentForProgress = (progress) => {
+    return clamp(Math.floor(progress * TEMPLE_SEGMENT_COUNT), 0, TEMPLE_SEGMENT_COUNT - 1);
+  };
+
+  const pushVertex = (segIndex, vertexIndex) => {
+    attributeNames.forEach((name) => {
+      const attr = sourceGeometry.attributes[name];
+      for (let item = 0; item < attr.itemSize; item++) {
+        segmentBuckets[segIndex][name].push(attr.array[vertexIndex * attr.itemSize + item]);
+      }
+    });
+  };
+
+  for (let tri = 0; tri < triangleCount; tri++) {
+    const ia = indexArray ? indexArray[tri * 3] : tri * 3;
+    const ib = indexArray ? indexArray[tri * 3 + 1] : tri * 3 + 1;
+    const ic = indexArray ? indexArray[tri * 3 + 2] : tri * 3 + 2;
+    const centerValue = (getAxisValue(ia) + getAxisValue(ib) + getAxisValue(ic)) / 3;
+    const progress = clamp(getLengthProgress(centerValue), 0, 1);
+    const segIndex = getSegmentForProgress(progress);
+    pushVertex(segIndex, ia);
+    pushVertex(segIndex, ib);
+    pushVertex(segIndex, ic);
+  }
+
+  return segmentIndices
+    .map((segIndex) => {
+      const segmentPartType = getTempleSegmentPartType(basePart, segIndex);
+      const firstAttrName = attributeNames[0];
+      const vertexValues = firstAttrName ? segmentBuckets[segIndex][firstAttrName] : [];
+      if (!vertexValues || vertexValues.length === 0) return null;
+
+      const geometry = new THREE.BufferGeometry();
+      attributeNames.forEach((name) => {
+        const attr = sourceGeometry.attributes[name];
+        const values = segmentBuckets[segIndex][name];
+        const TypedArray = attr.array.constructor;
+        geometry.setAttribute(name, new THREE.BufferAttribute(new TypedArray(values), attr.itemSize, attr.normalized));
+      });
+      geometry.computeBoundingBox();
+      geometry.computeBoundingSphere();
+
+      const clone = mesh.clone(false);
+      clone.name = segmentPartType;
+      clone.geometry = geometry;
+      clone.material = Array.isArray(mesh.material)
+        ? mesh.material.map((mat) => mat.clone())
+        : mesh.material.clone();
+      clone.userData = {
+        ...mesh.userData,
+        partType: segmentPartType,
+        baseTemplePart: basePart,
+        templeSegmentIndex: segIndex,
+        splitFromTemple: mesh.name || 'UNNAMED',
+        segmentAxis: axis
+      };
+      delete clone.userData.originalTempleTransform;
+      delete clone.userData.skipProductionRender;
+      clone.frustumCulled = false;
+      return clone;
+    })
+    .filter(Boolean);
 };
 
 const applyTempleDepthFit = (mesh, depthScale) => {
@@ -489,82 +1080,82 @@ export default function VirtualTryOn({
   const faceFitHintRef = useRef('');
 
   useEffect(() => {
-    activeTestRef.current = activeTest;
+    activeTestRef.current = SHOW_AR_DEBUG_UI ? activeTest : "NONE";
   }, [activeTest]);
 
   const showOccluderDebugRef = useRef(false);
   useEffect(() => {
-    showOccluderDebugRef.current = showOccluderDebug;
+    showOccluderDebugRef.current = SHOW_AR_DEBUG_UI && showOccluderDebug;
   }, [showOccluderDebug]);
 
   const showTempleOccluderDebugRef = useRef(false);
   useEffect(() => {
-    showTempleOccluderDebugRef.current = showTempleOccluderDebug;
+    showTempleOccluderDebugRef.current = SHOW_AR_DEBUG_UI && showTempleOccluderDebug;
   }, [showTempleOccluderDebug]);
 
   const showFullGlbTestRef = useRef(false);
   useEffect(() => {
-    showFullGlbTestRef.current = showFullGlbTest;
+    showFullGlbTestRef.current = SHOW_AR_DEBUG_UI && showFullGlbTest;
   }, [showFullGlbTest]);
 
   const showCleanFullOccluderRef = useRef(false);
   useEffect(() => {
-    showCleanFullOccluderRef.current = showCleanFullOccluder;
+    showCleanFullOccluderRef.current = SHOW_AR_DEBUG_UI && showCleanFullOccluder;
   }, [showCleanFullOccluder]);
 
   const showProduction2PassRef = useRef(false);
   useEffect(() => {
-    showProduction2PassRef.current = showProduction2Pass;
+    showProduction2PassRef.current = SHOW_AR_DEBUG_UI && showProduction2Pass;
   }, [showProduction2Pass]);
 
   const showPass1MeshAuditRef = useRef(false);
   useEffect(() => {
-    showPass1MeshAuditRef.current = showPass1MeshAudit;
+    showPass1MeshAuditRef.current = SHOW_AR_DEBUG_UI && showPass1MeshAudit;
   }, [showPass1MeshAudit]);
 
   const showPass2InterferenceRef = useRef(false);
   useEffect(() => {
-    showPass2InterferenceRef.current = showPass2Interference;
+    showPass2InterferenceRef.current = SHOW_AR_DEBUG_UI && showPass2Interference;
   }, [showPass2Interference]);
 
   const pass1OnlyFreezeRef = useRef(false);
   useEffect(() => {
-    pass1OnlyFreezeRef.current = pass1OnlyFreeze;
+    pass1OnlyFreezeRef.current = SHOW_AR_DEBUG_UI && pass1OnlyFreeze;
   }, [pass1OnlyFreeze]);
 
   const pass1ThenPass2NoClearRef = useRef(false);
   useEffect(() => {
-    pass1ThenPass2NoClearRef.current = pass1ThenPass2NoClear;
+    pass1ThenPass2NoClearRef.current = SHOW_AR_DEBUG_UI && pass1ThenPass2NoClear;
   }, [pass1ThenPass2NoClear]);
 
   const showOccluderWireframeRef = useRef(false);
   useEffect(() => {
-    showOccluderWireframeRef.current = showOccluderWireframe;
+    showOccluderWireframeRef.current = SHOW_AR_DEBUG_UI && showOccluderWireframe;
   }, [showOccluderWireframe]);
 
   const showTempleAnchorDebugRef = useRef(false);
   useEffect(() => {
-    showTempleAnchorDebugRef.current = showTempleAnchorDebug;
+    showTempleAnchorDebugRef.current = SHOW_AR_DEBUG_UI && showTempleAnchorDebug;
   }, [showTempleAnchorDebug]);
 
   const showFullOccluderDebugRef = useRef(false);
   useEffect(() => {
-    showFullOccluderDebugRef.current = showFullOccluderDebug;
+    showFullOccluderDebugRef.current = SHOW_AR_DEBUG_UI && showFullOccluderDebug;
   }, [showFullOccluderDebug]);
 
   const showSideOccluderDebugRef = useRef(false);
   useEffect(() => {
-    showSideOccluderDebugRef.current = showSideOccluderDebug;
+    showSideOccluderDebugRef.current = SHOW_AR_DEBUG_UI && showSideOccluderDebug;
   }, [showSideOccluderDebug]);
 
   const showNarrowOccluderDebugRef = useRef(false);
   useEffect(() => {
-    showNarrowOccluderDebugRef.current = showNarrowOccluderDebug;
+    showNarrowOccluderDebugRef.current = SHOW_AR_DEBUG_UI && showNarrowOccluderDebug;
   }, [showNarrowOccluderDebug]);
 
   const showMeshDebugRef = useRef(false);
   useEffect(() => {
-    showMeshDebugRef.current = showMeshDebug;
+    showMeshDebugRef.current = SHOW_AR_DEBUG_UI && showMeshDebug;
   }, [showMeshDebug]);
 
   // SMOOTHING REFS
@@ -582,7 +1173,7 @@ export default function VirtualTryOn({
   const addLog = (...args) => {
     const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
     setDebugLogs(prev => [...prev, msg]);
-    console.log(...args);
+    if (ENABLE_AR_DIAGNOSTIC_LOGS) console.log(...args);
   };
 
   const showToast = (message, type = 'success') => {
@@ -911,7 +1502,10 @@ ${JSON.stringify(pass2List, null, 2)}
       activeSide: 'BOTH',
       leftIndices: narrowLeftTriangles,
       rightIndices: narrowRightTriangles,
-      bothIndices: narrowBothTriangles
+      bothIndices: narrowBothTriangles,
+      leftVertexSet: new Set(narrowLeftTriangles),
+      rightVertexSet: new Set(narrowRightTriangles),
+      expansion: null
     };
     scene.add(narrowOccluder);
     narrowOccluderRef.current = narrowOccluder;
@@ -955,7 +1549,7 @@ ${JSON.stringify(pass2List, null, 2)}
       glassesModelRef.current = null;
     }
 
-    console.log("🚀 [AR BUILD_VERSION] 1.0.5 - PREMIUM RIGID TEMPLES ACTIVATED");
+    if (ENABLE_AR_DIAGNOSTIC_LOGS) console.log("🚀 [AR BUILD_VERSION] 1.0.5 - PREMIUM RIGID TEMPLES ACTIVATED");
     addLog("🚀 [AR BUILD] Version 1.0.5 - Premium Rigid Temples");
     addLog(`Đang tải file 3D: ${prod.arUrl}`);
     const loader = new GLTFLoader();
@@ -968,7 +1562,7 @@ ${JSON.stringify(pass2List, null, 2)}
         const size = box.getSize(new THREE.Vector3());
         const center = box.getCenter(new THREE.Vector3());
 
-        console.log('====== [AR DIAGNOSTIC] BẮT ĐẦU ĐỌC CẤU TRÚC MODEL GLTF ======');
+        if (ENABLE_AR_DIAGNOSTIC_LOGS) console.log('====== [AR DIAGNOSTIC] BẮT ĐẦU ĐỌC CẤU TRÚC MODEL GLTF ======');
         let meshIndex = 0;
         const diagList = [];
         const mergedTempleSplitCandidates = [];
@@ -1136,6 +1730,58 @@ ${JSON.stringify(pass2List, null, 2)}
           setGltfWarning("INFO: Object_7 was split into LEFT_TEMPLE and RIGHT_TEMPLE for side-aware AR rendering.");
         });
 
+        const templeMeshesToSegment = [];
+        model.traverse((child) => {
+          if (child.isMesh && !child.userData.skipProductionRender) {
+            const basePart = getTempleBasePart(child.userData.partType);
+            if (basePart === 'LEFT_TEMPLE' || basePart === 'RIGHT_TEMPLE') {
+              templeMeshesToSegment.push(child);
+            }
+          }
+        });
+
+        const createdTempleSegments = [];
+        templeMeshesToSegment.forEach((child) => {
+          const segmentMeshes = splitTempleMeshIntoSegments(child);
+          if (!segmentMeshes || segmentMeshes.length === 0 || !child.parent) return;
+
+          const originalPartType = child.userData.partType;
+          child.visible = false;
+          child.userData.originalPartType = originalPartType;
+          child.userData.partType = 'SEGMENTED_TEMPLE_SOURCE';
+          child.userData.skipProductionRender = true;
+
+          segmentMeshes.forEach((segmentMesh) => {
+            segmentMesh.renderOrder = child.renderOrder;
+            if (segmentMesh.material) {
+              const materials = Array.isArray(segmentMesh.material) ? segmentMesh.material : [segmentMesh.material];
+              materials.forEach((mat) => {
+                if (mat) {
+                  mat.transparent = false;
+                  mat.opacity = 1.0;
+                  mat.depthWrite = true;
+                  mat.depthTest = true;
+                  mat.side = THREE.DoubleSide;
+                }
+              });
+            }
+            child.parent.add(segmentMesh);
+            createdTempleSegments.push(segmentMesh.name || segmentMesh.userData.partType);
+          });
+        });
+
+        model.userData.createdTempleSegments = createdTempleSegments;
+        if (createdTempleSegments.length > 0) {
+          let warningText = `INFO: Temple meshes segmented for partial side occlusion: ${createdTempleSegments.length} segments created (segmentCount = ${TEMPLE_SEGMENT_COUNT}).`;
+          if (TEMPLE_SEGMENT_COUNT < 10) {
+            warningText += ` WARNING: segmentCount < 10, may look jagged.`;
+          }
+          setGltfWarning(warningText);
+          if (ENABLE_AR_DIAGNOSTIC_LOGS) {
+            console.log('AR_TEMPLE_SEGMENTS_CREATED', createdTempleSegments);
+          }
+        }
+
         const buildGLTFTree = (node, prefix = '') => {
           let typeStr = node.type || 'Object3D';
           let nameStr = node.name || 'UNNAMED';
@@ -1156,8 +1802,10 @@ ${JSON.stringify(pass2List, null, 2)}
         const treeStr = buildGLTFTree(model);
         setGltfTree(treeStr);
 
-        console.log("====== 📊 [AR GLTF SCENE DIAGNOSTICS] ======");
-        console.table(diagList);
+        if (ENABLE_AR_DIAGNOSTIC_LOGS) {
+          console.log("====== 📊 [AR GLTF SCENE DIAGNOSTICS] ======");
+          console.table(diagList);
+        }
         setMeshDebugData(diagList);
 
         if (helperGroupRef.current) {
@@ -1264,6 +1912,38 @@ ${JSON.stringify(pass2List, null, 2)}
         rightTempleApproxLine.visible = false;
         helperGroup.add(rightTempleApproxLine);
 
+        const leftFaceBoundGeo = new THREE.SphereGeometry(0.045, 16, 16);
+        const leftFaceBoundMat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false, depthWrite: false, transparent: false, opacity: 1.0, toneMapped: false });
+        const leftFaceBoundSphere = new THREE.Mesh(leftFaceBoundGeo, leftFaceBoundMat);
+        leftFaceBoundSphere.name = "leftFaceBoundarySphere";
+        leftFaceBoundSphere.renderOrder = 1000;
+        leftFaceBoundSphere.visible = false;
+        helperGroup.add(leftFaceBoundSphere);
+
+        const rightFaceBoundGeo = new THREE.SphereGeometry(0.045, 16, 16);
+        const rightFaceBoundMat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false, depthWrite: false, transparent: false, opacity: 1.0, toneMapped: false });
+        const rightFaceBoundSphere = new THREE.Mesh(rightFaceBoundGeo, rightFaceBoundMat);
+        rightFaceBoundSphere.name = "rightFaceBoundarySphere";
+        rightFaceBoundSphere.renderOrder = 1000;
+        rightFaceBoundSphere.visible = false;
+        helperGroup.add(rightFaceBoundSphere);
+
+        const leftEarGeo = new THREE.SphereGeometry(0.045, 16, 16);
+        const leftEarMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, depthTest: false, depthWrite: false, transparent: false, opacity: 1.0, toneMapped: false });
+        const leftEarSphere = new THREE.Mesh(leftEarGeo, leftEarMat);
+        leftEarSphere.name = "leftEstimatedEarSphere";
+        leftEarSphere.renderOrder = 1000;
+        leftEarSphere.visible = false;
+        helperGroup.add(leftEarSphere);
+
+        const rightEarGeo = new THREE.SphereGeometry(0.045, 16, 16);
+        const rightEarMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, depthTest: false, depthWrite: false, transparent: false, opacity: 1.0, toneMapped: false });
+        const rightEarSphere = new THREE.Mesh(rightEarGeo, rightEarMat);
+        rightEarSphere.name = "rightEstimatedEarSphere";
+        rightEarSphere.renderOrder = 1000;
+        rightEarSphere.visible = false;
+        helperGroup.add(rightEarSphere);
+
         setHelperStatus({
           redOrigin: 'CREATED',
           greenCenter: 'CREATED',
@@ -1334,7 +2014,7 @@ ${JSON.stringify(pass2List, null, 2)}
 
         model.traverse((child) => {
           if (child.isMesh) {
-            const isExcludedType = child.userData.partType === 'LEFT_TEMPLE' || child.userData.partType === 'RIGHT_TEMPLE';
+            const isExcludedType = isTemplePart(child.userData.partType);
             if (isExcludedType) {
               exclList.push(child.name || "UNNAMED");
             } else {
@@ -1469,9 +2149,9 @@ ${JSON.stringify(pass2List, null, 2)}
           debugRotDelta = rotDelta;
           debugSlerpRot = SLERP_ROT;
           prevQuatRef.current.slerp(targetQuat, SLERP_ROT);
-          glassesModelRef.current.quaternion.copy(prevQuatRef.current);
+          applyFinalGlassesQuaternion(glassesModelRef.current, prevQuatRef.current);
         } else {
-          glassesModelRef.current.quaternion.copy(prevQuatRef.current);
+          applyFinalGlassesQuaternion(glassesModelRef.current, prevQuatRef.current);
         }
 
         const euler = new THREE.Euler().setFromQuaternion(prevQuatRef.current, 'YXZ');
@@ -1482,28 +2162,33 @@ ${JSON.stringify(pass2List, null, 2)}
         const yawAbsRad = Math.abs(yaw);
         const yawDegreesVal = yawAbsRad * 180 / Math.PI;
         debugYawDegrees = yaw * 180 / Math.PI;
-        const yawVisibilityState = getYawVisibilityState(debugYawDegrees);
+        const templeSideState = getTempleSideState(debugYawDegrees);
         const templeVisibleLengths = estimateTempleVisibleLengths(
           debugYawDegrees,
-          yawVisibilityState.nearSide,
-          yawVisibilityState.farSide
+          templeSideState.nearSide,
+          templeSideState.farSide
         );
 
         glassesModelRef.current.userData.occlusionMode = OCCLUDER_MODE.NARROW_SIDE;
+        glassesModelRef.current.userData.templeSideState = templeSideState;
         glassesModelRef.current.userData.occlusionSideState = {
           yawDegrees: debugYawDegrees,
-          nearSide: yawVisibilityState.nearSide,
-          farSide: yawVisibilityState.farSide,
+          nearSide: templeSideState.nearSide,
+          farSide: templeSideState.farSide,
+          nearTemplePart: templeSideState.nearTemplePart,
+          farTemplePart: templeSideState.farTemplePart,
           visibleTempleLengthLeft: templeVisibleLengths.left,
           visibleTempleLengthRight: templeVisibleLengths.right
         };
 
+        let narrowOccluderActiveSide = 'BOTH';
         if (narrowOccluderRef.current) {
-          const activeSide = yawVisibilityState.farSide === 'LEFT'
+          const activeSide = templeSideState.farSide === 'LEFT'
             ? 'LEFT'
-            : yawVisibilityState.farSide === 'RIGHT'
+            : templeSideState.farSide === 'RIGHT'
               ? 'RIGHT'
               : 'BOTH';
+          narrowOccluderActiveSide = activeSide;
 
           if (narrowOccluderRef.current.userData.activeSide !== activeSide) {
             const indices = activeSide === 'LEFT'
@@ -1515,6 +2200,17 @@ ${JSON.stringify(pass2List, null, 2)}
             narrowOccluderRef.current.geometry.computeBoundingSphere();
             narrowOccluderRef.current.userData.activeSide = activeSide;
           }
+        }
+
+        if (ENABLE_AR_DIAGNOSTIC_LOGS && diagnosticFrameCountRef.current % 60 === 0) {
+          console.log('AR_TEMPLE_SIDE_STATE', {
+            yawDegrees: debugYawDegrees.toFixed(4),
+            nearSide: templeSideState.nearSide,
+            farSide: templeSideState.farSide,
+            nearTemplePart: templeSideState.nearTemplePart,
+            farTemplePart: templeSideState.farTemplePart,
+            narrowOccluderActiveSide
+          });
         }
 
         let activeFadeFactor = 0.0;
@@ -1555,6 +2251,7 @@ ${JSON.stringify(pass2List, null, 2)}
         const ipd3D = leftPupilW.distanceTo(rightPupilW);
         const faceWidth3D = faceLeftW.distanceTo(faceRightW);
         const headRightVector = new THREE.Vector3(1, 0, 0).applyQuaternion(prevQuatRef.current).normalize();
+        const headUpVector = new THREE.Vector3(0, 1, 0).applyQuaternion(prevQuatRef.current).normalize();
         const headBackVector = new THREE.Vector3(0, 0, -1).applyQuaternion(prevQuatRef.current).normalize();
         const templeSideOffset = faceWidth3D * AR_FIT_CONFIG.templeAnchorSideOffsetRatio;
         const templeBackOffset = faceWidth3D * AR_FIT_CONFIG.templeAnchorBackOffsetRatio;
@@ -1571,6 +2268,241 @@ ${JSON.stringify(pass2List, null, 2)}
           sideOffset: templeSideOffset,
           backOffset: templeBackOffset
         };
+
+        // Calculate face boundaries
+        const leftBoundaryIdxs = [234, 127, 162, 21, 70, 63, 105];
+        const leftFaceBoundary = new THREE.Vector3(0, 0, 0);
+        leftBoundaryIdxs.forEach(idx => leftFaceBoundary.add(toW(landmarks[idx])));
+        leftFaceBoundary.multiplyScalar(1 / leftBoundaryIdxs.length);
+
+        const rightBoundaryIdxs = [454, 356, 389, 251, 300, 293, 334];
+        const rightFaceBoundary = new THREE.Vector3(0, 0, 0);
+        rightBoundaryIdxs.forEach(idx => rightFaceBoundary.add(toW(landmarks[idx])));
+        rightFaceBoundary.multiplyScalar(1 / rightBoundaryIdxs.length);
+
+        // Hinge approximations
+        const leftHingeApprox = toW(landmarks[33]).addScaledVector(headRightVector, -faceWidth3D * 0.05);
+        const rightHingeApprox = toW(landmarks[263]).addScaledVector(headRightVector, faceWidth3D * 0.05);
+
+        // Estimated ears (raw)
+        const estSideOffset = faceWidth3D * 0.08;
+        const estBackOffset = faceWidth3D * 0.28;
+        const leftEstimatedEarRaw = leftFaceBoundary.clone()
+          .addScaledVector(headRightVector, -estSideOffset)
+          .addScaledVector(headBackVector, estBackOffset);
+        const rightEstimatedEarRaw = rightFaceBoundary.clone()
+          .addScaledVector(headRightVector, estSideOffset)
+          .addScaledVector(headBackVector, estBackOffset);
+
+        // Clamp estimated ear Y so temple line runs level or slightly downward
+        const clampEstimatedEarY = (earRaw, hinge, fw3d) => {
+          const clamped = earRaw.clone();
+          const maxEarY = hinge.y + fw3d * 0.015;
+          const minEarY = hinge.y - fw3d * 0.10;
+          clamped.y = clamp(clamped.y, minEarY, maxEarY);
+          return clamped;
+        };
+
+        const leftEstimatedEar = clampEstimatedEarY(leftEstimatedEarRaw, leftHingeApprox, faceWidth3D);
+        const rightEstimatedEar = clampEstimatedEarY(rightEstimatedEarRaw, rightHingeApprox, faceWidth3D);
+
+        const leftTempleLineSlopeY = leftEstimatedEar.y - leftHingeApprox.y;
+        const rightTempleLineSlopeY = rightEstimatedEar.y - rightHingeApprox.y;
+
+        // Temple lines
+        const leftTempleLine = { start: leftHingeApprox.clone(), end: leftEstimatedEar.clone() };
+        const rightTempleLine = { start: rightHingeApprox.clone(), end: rightEstimatedEar.clone() };
+
+        // Near-side calculations
+        const nearSide = templeSideState.nearSide;
+        let nearHingePoint = null;
+        let nearEstimatedEarPoint = null;
+        let nearTempleDirection = null;
+
+        if (nearSide === 'LEFT') {
+          nearHingePoint = leftHingeApprox.clone();
+          nearEstimatedEarPoint = leftEstimatedEar.clone();
+          nearTempleDirection = new THREE.Vector3().subVectors(leftEstimatedEar, leftHingeApprox).normalize();
+        } else if (nearSide === 'RIGHT') {
+          nearHingePoint = rightHingeApprox.clone();
+          nearEstimatedEarPoint = rightEstimatedEar.clone();
+          nearTempleDirection = new THREE.Vector3().subVectors(rightEstimatedEar, rightHingeApprox).normalize();
+        }
+
+        glassesModelRef.current.userData.templeBoundaryModel = {
+          leftFaceBoundary,
+          rightFaceBoundary,
+          leftHingeApprox,
+          rightHingeApprox,
+          leftEstimatedEar,
+          rightEstimatedEar,
+          leftEstimatedEarRaw,
+          rightEstimatedEarRaw,
+          leftEstimatedEarClamped: leftEstimatedEar,
+          rightEstimatedEarClamped: rightEstimatedEar,
+          leftTempleLineSlopeY,
+          rightTempleLineSlopeY,
+          leftTempleLine,
+          rightTempleLine,
+          nearHingePoint,
+          nearEstimatedEarPoint,
+          nearTempleDirection
+        };
+
+        // FACE RIG LAYER
+        // This is the single source of truth that binds the 3D glasses to the scanned face.
+        // The glasses fitter and occlusion systems read from this rig instead of guessing screen-only positions.
+        const faceRig = {
+          version: 'FACE_RIG_V1',
+          center: headCenter.clone(),
+          eyeCenter: eyeOuterMidW.clone(),
+          noseBridge: noseBridgeW.clone(),
+          leftPupil: leftPupilW.clone(),
+          rightPupil: rightPupilW.clone(),
+          leftFace: faceLeftW.clone(),
+          rightFace: faceRightW.clone(),
+          leftHingeAnchor: leftHingeApprox.clone(),
+          rightHingeAnchor: rightHingeApprox.clone(),
+          leftSideAnchor: leftFaceBoundary.clone(),
+          rightSideAnchor: rightFaceBoundary.clone(),
+          leftEstimatedEar: leftEstimatedEar.clone(),
+          rightEstimatedEar: rightEstimatedEar.clone(),
+          basis: {
+            right: headRightVector.clone(),
+            up: headUpVector.clone(),
+            back: headBackVector.clone()
+          },
+          metrics: {
+            ipd3D,
+            faceWidth3D,
+            templeSideOffset,
+            templeBackOffset,
+            yawDegrees: debugYawDegrees,
+            pitchDegrees: pitch * 180 / Math.PI,
+            scale: prevScaleRef.current
+          },
+          temple: {
+            leftLine: leftTempleLine,
+            rightLine: rightTempleLine,
+            nearSide,
+            nearHingePoint,
+            nearEstimatedEarPoint,
+            nearTempleDirection
+          },
+          glassesCalibration: {
+            pitchOffsetDeg: GLASSES_PITCH_OFFSET_DEG
+          }
+        };
+
+        glassesModelRef.current.userData.faceRig = faceRig;
+
+        // Build face mask 2D polygons for screen-space occlusion
+        const projectWorldToScreen = (worldPoint) => {
+          const projected = worldPoint.clone().project(cameraRef.current);
+          return {
+            x: (projected.x + 1) / 2,
+            y: (1 - projected.y) / 2
+          };
+        };
+
+        const buildFaceMaskPolygon = (landmarkIndices) => {
+          const poly = [];
+          for (let i = 0; i < landmarkIndices.length; i++) {
+            const idx = landmarkIndices[i];
+            if (idx < landmarks.length) {
+              const w = toW(landmarks[idx]);
+              poly.push(projectWorldToScreen(w));
+            }
+          }
+          return poly;
+        };
+
+        const leftFaceMaskPolygon = buildFaceMaskPolygon(LEFT_FACE_MASK_LANDMARKS);
+        const rightFaceMaskPolygon = buildFaceMaskPolygon(RIGHT_FACE_MASK_LANDMARKS);
+
+        const buildEyeBand = () => {
+          // Normalized screen Y: 0 = top, 1 = bottom.
+          // Use eye/brow landmarks as the stable valid vertical region for temple rendering.
+          // This is a rendering guard only; MediaPipe still tracks the full face.
+          const topLandmarks = [
+            70, 63, 105, 66, 107,
+            300, 293, 334, 296, 336,
+            33, 263
+          ];
+          const bottomLandmarks = [
+            145, 153, 154, 155, 133,
+            374, 380, 381, 382, 362,
+            33, 263
+          ];
+
+          const ysFrom = (indices) => {
+            const ys = [];
+            indices.forEach((idx) => {
+              if (idx < landmarks.length) {
+                const projected = projectWorldToScreen(toW(landmarks[idx]));
+                if (projected && Number.isFinite(projected.y)) {
+                  ys.push(projected.y);
+                }
+              }
+            });
+            return ys;
+          };
+
+          const topYs = ysFrom(topLandmarks);
+          const bottomYs = ysFrom(bottomLandmarks);
+
+          if (!topYs.length || !bottomYs.length) {
+            return null;
+          }
+
+          const rawTop = Math.min(...topYs);
+          const rawBottom = Math.max(...bottomYs);
+
+          // Allow a small area above the eyebrow and a wider area below the eye for normal temple placement,
+          // but cut temples that escape far above the forehead or far below the cheek/neck.
+          const topMargin = 0.025;
+          const bottomMargin = 0.085;
+
+          return {
+            top: clamp(rawTop - topMargin, 0, 1),
+            bottom: clamp(rawBottom + bottomMargin, 0, 1),
+            rawTop,
+            rawBottom,
+            topMargin,
+            bottomMargin,
+            softMargin: 0.025
+          };
+        };
+
+        const eyeBand = buildEyeBand();
+        const pitchDegrees = pitch * 180 / Math.PI;
+        const pitchTempleHideStrength = clamp((Math.abs(pitchDegrees) - 14) / 12, 0, 1);
+
+        glassesModelRef.current.userData.faceMaskModel = {
+          leftPolygon: leftFaceMaskPolygon,
+          rightPolygon: rightFaceMaskPolygon,
+          eyeBand,
+          pitchDegrees,
+          pitchTempleHideStrength,
+          faceRig,
+          projectWorldToScreen,
+          leftLandmarkCount: leftFaceMaskPolygon.length,
+          rightLandmarkCount: rightFaceMaskPolygon.length
+        };
+
+        if (narrowOccluderRef.current) {
+          const occlusionRamp = templeSideState.farSide === 'NONE'
+            ? 0
+            : clamp((yawDegreesVal - YAW_SIDE_THRESHOLD_DEG) / 22, 0, 1);
+          const occlusionStrength = FAR_SIDE_OCCLUSION_STRENGTH * (0.55 + occlusionRamp * 0.45);
+          narrowOccluderRef.current.userData.expansion = {
+            activeSide: narrowOccluderActiveSide,
+            headRightVector: headRightVector.clone(),
+            headBackVector: headBackVector.clone(),
+            sideExpand: faceWidth3D * NARROW_OCCLUDER_SIDE_EXPAND * occlusionStrength,
+            backExpand: faceWidth3D * NARROW_OCCLUDER_BACK_EXPAND * occlusionStrength
+          };
+        }
 
         const ipdTargetWidth = ipd3D * AR_FIT_CONFIG.ipdWidthRatio;
         const faceTargetWidth = faceWidth3D * AR_FIT_CONFIG.faceWidthRatio;
@@ -1618,7 +2550,7 @@ ${JSON.stringify(pass2List, null, 2)}
           AR_FIT_CONFIG.templeDepthScaleBase,
           AR_FIT_CONFIG.maxTempleDepthScale
         );
-        const visibleTempleSide = getVisibleTempleSide(yaw);
+        const visibleTempleSide = templeSideState.nearTemplePart;
         glassesModelRef.current.userData.visibleTempleSide = visibleTempleSide;
         glassesModelRef.current.userData.templeDepthScale = templeDepthScale;
 
@@ -1690,7 +2622,7 @@ ${JSON.stringify(pass2List, null, 2)}
             if (child.isMesh) {
               const part = child.userData.partType;
               if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE') {
-                const isVisibleSide = visibleTempleSide === 'CENTER' || part === visibleTempleSide;
+                const isVisibleSide = visibleTempleSide === 'BOTH' || part === visibleTempleSide;
                 const materials = Array.isArray(child.material) ? child.material : [child.material];
                 materials.forEach((mat) => {
                   if (mat) {
@@ -1791,29 +2723,50 @@ ${JSON.stringify(pass2List, null, 2)}
           const leftTempleApproxLine = helperGroupRef.current.getObjectByName("leftTempleApproxLine");
           const rightTempleApproxLine = helperGroupRef.current.getObjectByName("rightTempleApproxLine");
 
+          const leftFaceBoundarySphere = helperGroupRef.current.getObjectByName("leftFaceBoundarySphere");
+          const rightFaceBoundarySphere = helperGroupRef.current.getObjectByName("rightFaceBoundarySphere");
+          const leftEstimatedEarSphere = helperGroupRef.current.getObjectByName("leftEstimatedEarSphere");
+          const rightEstimatedEarSphere = helperGroupRef.current.getObjectByName("rightEstimatedEarSphere");
+
           if (leftTempleAnchorSphere) {
             leftTempleAnchorSphere.visible = templeAnchorVisible;
-            if (templeAnchorVisible) leftTempleAnchorSphere.position.copy(leftTempleApprox);
+            if (templeAnchorVisible && leftHingeApprox) leftTempleAnchorSphere.position.copy(leftHingeApprox);
           }
           if (rightTempleAnchorSphere) {
             rightTempleAnchorSphere.visible = templeAnchorVisible;
-            if (templeAnchorVisible) rightTempleAnchorSphere.position.copy(rightTempleApprox);
+            if (templeAnchorVisible && rightHingeApprox) rightTempleAnchorSphere.position.copy(rightHingeApprox);
+          }
+          if (leftFaceBoundarySphere) {
+            leftFaceBoundarySphere.visible = templeAnchorVisible;
+            if (templeAnchorVisible && leftFaceBoundary) leftFaceBoundarySphere.position.copy(leftFaceBoundary);
+          }
+          if (rightFaceBoundarySphere) {
+            rightFaceBoundarySphere.visible = templeAnchorVisible;
+            if (templeAnchorVisible && rightFaceBoundary) rightFaceBoundarySphere.position.copy(rightFaceBoundary);
+          }
+          if (leftEstimatedEarSphere) {
+            leftEstimatedEarSphere.visible = templeAnchorVisible;
+            if (templeAnchorVisible && leftEstimatedEar) leftEstimatedEarSphere.position.copy(leftEstimatedEar);
+          }
+          if (rightEstimatedEarSphere) {
+            rightEstimatedEarSphere.visible = templeAnchorVisible;
+            if (templeAnchorVisible && rightEstimatedEar) rightEstimatedEarSphere.position.copy(rightEstimatedEar);
           }
           if (leftTempleApproxLine) {
             leftTempleApproxLine.visible = templeAnchorVisible;
-            if (templeAnchorVisible) {
+            if (templeAnchorVisible && leftHingeApprox && leftEstimatedEar) {
               const linePos = leftTempleApproxLine.geometry.attributes.position;
-              linePos.setXYZ(0, faceLeftW.x, faceLeftW.y, faceLeftW.z);
-              linePos.setXYZ(1, leftTempleApprox.x, leftTempleApprox.y, leftTempleApprox.z);
+              linePos.setXYZ(0, leftHingeApprox.x, leftHingeApprox.y, leftHingeApprox.z);
+              linePos.setXYZ(1, leftEstimatedEar.x, leftEstimatedEar.y, leftEstimatedEar.z);
               linePos.needsUpdate = true;
             }
           }
           if (rightTempleApproxLine) {
             rightTempleApproxLine.visible = templeAnchorVisible;
-            if (templeAnchorVisible) {
+            if (templeAnchorVisible && rightHingeApprox && rightEstimatedEar) {
               const linePos = rightTempleApproxLine.geometry.attributes.position;
-              linePos.setXYZ(0, faceRightW.x, faceRightW.y, faceRightW.z);
-              linePos.setXYZ(1, rightTempleApprox.x, rightTempleApprox.y, rightTempleApprox.z);
+              linePos.setXYZ(0, rightHingeApprox.x, rightHingeApprox.y, rightHingeApprox.z);
+              linePos.setXYZ(1, rightEstimatedEar.x, rightEstimatedEar.y, rightEstimatedEar.z);
               linePos.needsUpdate = true;
             }
           }
@@ -1936,22 +2889,127 @@ ${JSON.stringify(pass2List, null, 2)}
           const templeAnchorSnapshot = {
             faceWidth: faceWidth3D.toFixed(4),
             yawDegrees: debugYawDegrees.toFixed(4),
-            leftTempleApprox: `${leftTempleApprox.x.toFixed(4)}, ${leftTempleApprox.y.toFixed(4)}, ${leftTempleApprox.z.toFixed(4)}`,
-            rightTempleApprox: `${rightTempleApprox.x.toFixed(4)}, ${rightTempleApprox.y.toFixed(4)}, ${rightTempleApprox.z.toFixed(4)}`,
+            leftTempleApprox: `${leftHingeApprox.x.toFixed(4)}, ${leftHingeApprox.y.toFixed(4)}, ${leftHingeApprox.z.toFixed(4)}`,
+            rightTempleApprox: `${rightHingeApprox.x.toFixed(4)}, ${rightHingeApprox.y.toFixed(4)}, ${rightHingeApprox.z.toFixed(4)}`,
             sideOffset: templeSideOffset.toFixed(4),
             backOffset: templeBackOffset.toFixed(4)
           };
           setTempleAnchorDiagnostics(templeAnchorSnapshot);
 
-          if (showTempleAnchorDebugRef.current && diagnosticFrameCountRef.current % 60 === 0) {
+          if (ENABLE_AR_DIAGNOSTIC_LOGS && showTempleAnchorDebugRef.current && diagnosticFrameCountRef.current % 60 === 0) {
             console.log('TEMPLE_ANCHOR_DEBUG', templeAnchorSnapshot);
           }
 
-          if (diagnosticFrameCountRef.current % 60 === 0) {
-            console.log('AR_OCCLUDER_SIDE_STATE', {
+          if (ENABLE_AR_DIAGNOSTIC_LOGS && diagnosticFrameCountRef.current % 60 === 0) {
+            if (leftTempleLineSlopeY > faceWidth3D * 0.02) {
+              console.warn('[AR] Left temple line is sloping upward too much:', leftTempleLineSlopeY.toFixed(6));
+            }
+            if (rightTempleLineSlopeY > faceWidth3D * 0.02) {
+              console.warn('[AR] Right temple line is sloping upward too much:', rightTempleLineSlopeY.toFixed(6));
+            }
+            console.log('AR_TEMPLE_DIRECTION_DEBUG', {
+              yawDegrees: parseFloat(debugYawDegrees.toFixed(4)),
+              leftHingeApprox: { x: leftHingeApprox.x, y: leftHingeApprox.y, z: leftHingeApprox.z },
+              rightHingeApprox: { x: rightHingeApprox.x, y: rightHingeApprox.y, z: rightHingeApprox.z },
+              leftEstimatedEarRaw: { x: leftEstimatedEarRaw.x, y: leftEstimatedEarRaw.y, z: leftEstimatedEarRaw.z },
+              rightEstimatedEarRaw: { x: rightEstimatedEarRaw.x, y: rightEstimatedEarRaw.y, z: rightEstimatedEarRaw.z },
+              leftEstimatedEarClamped: { x: leftEstimatedEar.x, y: leftEstimatedEar.y, z: leftEstimatedEar.z },
+              rightEstimatedEarClamped: { x: rightEstimatedEar.x, y: rightEstimatedEar.y, z: rightEstimatedEar.z },
+              leftTempleLineSlopeY: parseFloat(leftTempleLineSlopeY.toFixed(6)),
+              rightTempleLineSlopeY: parseFloat(rightTempleLineSlopeY.toFixed(6))
+            });
+          }
+
+          if (ENABLE_AR_DIAGNOSTIC_LOGS && diagnosticFrameCountRef.current % 60 === 0) {
+            const isLeftFar = templeSideState.farSide === 'LEFT';
+            const farHinge = isLeftFar ? leftHingeApprox : rightHingeApprox;
+            const farEar = isLeftFar ? leftEstimatedEar : rightEstimatedEar;
+            const farBoundary = isLeftFar ? leftFaceBoundary : rightFaceBoundary;
+            let farBoundaryT = 0;
+            if (farHinge && farEar && farBoundary) {
+              const fDir = new THREE.Vector3().subVectors(farEar, farHinge);
+              const fLengthSq = fDir.lengthSq();
+              if (fLengthSq > 0.00001) {
+                const fToBoundary = new THREE.Vector3().subVectors(farBoundary, farHinge);
+                farBoundaryT = clamp(fToBoundary.dot(fDir) / fLengthSq, 0.15, 0.85);
+              }
+            }
+
+            const segmentOpacitySamples = [];
+            for (let i = 0; i < TEMPLE_SEGMENT_COUNT; i++) {
+              const segName = getTempleSegmentPartType(templeSideState.farTemplePart || 'LEFT_TEMPLE', i);
+              const op = getTempleSegmentOpacity(segName, templeSideState, debugYawDegrees, glassesModelRef.current.userData.templeBoundaryModel, glassesModelRef.current.userData.faceMaskModel, null);
+              segmentOpacitySamples.push({ segment: i, opacity: parseFloat(op.toFixed(4)) });
+            }
+
+            console.log('AR_FACE_BOUNDARY_TEMPLE_MODEL', {
+              yawDegrees: parseFloat(debugYawDegrees.toFixed(4)),
+              nearSide: templeSideState.nearSide,
+              farSide: templeSideState.farSide,
+              leftFaceBoundary: leftFaceBoundary ? { x: leftFaceBoundary.x, y: leftFaceBoundary.y, z: leftFaceBoundary.z } : null,
+              rightFaceBoundary: rightFaceBoundary ? { x: rightFaceBoundary.x, y: rightFaceBoundary.y, z: rightFaceBoundary.z } : null,
+              leftHingeApprox: leftHingeApprox ? { x: leftHingeApprox.x, y: leftHingeApprox.y, z: leftHingeApprox.z } : null,
+              rightHingeApprox: rightHingeApprox ? { x: rightHingeApprox.x, y: rightHingeApprox.y, z: rightHingeApprox.z } : null,
+              leftEstimatedEar: leftEstimatedEar ? { x: leftEstimatedEar.x, y: leftEstimatedEar.y, z: leftEstimatedEar.z } : null,
+              rightEstimatedEar: rightEstimatedEar ? { x: rightEstimatedEar.x, y: rightEstimatedEar.y, z: rightEstimatedEar.z } : null,
+              farBoundaryT: parseFloat(farBoundaryT.toFixed(4)),
+              segmentOpacitySamples
+            });
+
+            // Face mask occlusion debug
+            const faceMaskModel = glassesModelRef.current.userData.faceMaskModel;
+            if (faceMaskModel) {
+              const farSide = templeSideState.farSide;
+              const farBasePart = templeSideState.farTemplePart || 'LEFT_TEMPLE';
+              const isLeftFarMask = farSide === 'LEFT';
+              const farPolygon = isLeftFarMask ? faceMaskModel.leftPolygon : faceMaskModel.rightPolygon;
+
+              const sampleSegments = [];
+              glassesModelRef.current.traverse((child) => {
+                if (child.isMesh && child.userData.partType && getTempleBasePart(child.userData.partType) === farBasePart) {
+                  const segIdx = getTempleSegment(child.userData.partType);
+                  if (segIdx !== null && child.geometry) {
+                    if (!child.geometry.boundingSphere) child.geometry.computeBoundingSphere();
+                    if (child.geometry.boundingSphere && faceMaskModel.projectWorldToScreen) {
+                      const center3D = child.geometry.boundingSphere.center.clone();
+                      child.localToWorld(center3D);
+                      const screenPt = faceMaskModel.projectWorldToScreen(center3D);
+                      const insideMask = screenPt && farPolygon && farPolygon.length >= 3 ? isPointInPolygon2D(screenPt, farPolygon) : false;
+                      const boundaryOp = getTempleSegmentOpacity(child.userData.partType, templeSideState, debugYawDegrees, glassesModelRef.current.userData.templeBoundaryModel, null, null);
+                      const maskOp = getTempleSegmentOpacity(child.userData.partType, templeSideState, debugYawDegrees, null, faceMaskModel, child);
+                      const finalOp = getTempleSegmentOpacity(child.userData.partType, templeSideState, debugYawDegrees, glassesModelRef.current.userData.templeBoundaryModel, faceMaskModel, child);
+                      sampleSegments.push({
+                        partType: child.userData.partType,
+                        segmentIndex: segIdx,
+                        screenPoint: screenPt ? { x: parseFloat(screenPt.x.toFixed(4)), y: parseFloat(screenPt.y.toFixed(4)) } : null,
+                        insideFaceMask: insideMask,
+                        boundaryOpacity: parseFloat(boundaryOp.toFixed(4)),
+                        maskOpacity: parseFloat(maskOp.toFixed(4)),
+                        finalOpacity: parseFloat(finalOp.toFixed(4))
+                      });
+                    }
+                  }
+                }
+              });
+
+              console.log('AR_FACE_MASK_OCCLUSION_DEBUG', {
+                yawDegrees: parseFloat(debugYawDegrees.toFixed(4)),
+                nearSide: templeSideState.nearSide,
+                farSide: templeSideState.farSide,
+                farFaceMaskLandmarks: isLeftFarMask ? LEFT_FACE_MASK_LANDMARKS : RIGHT_FACE_MASK_LANDMARKS,
+                farFaceMaskPolygonSize: farPolygon ? farPolygon.length : 0,
+                sampleSegments
+              });
+            }
+          }
+
+          if (ENABLE_AR_DIAGNOSTIC_LOGS && diagnosticFrameCountRef.current % 60 === 0) {
+            console.log('AR_TEMPLE_VISIBILITY_STATE', {
               yawDegrees: debugYawDegrees.toFixed(4),
-              nearSide: yawVisibilityState.nearSide,
-              farSide: yawVisibilityState.farSide,
+              nearSide: templeSideState.nearSide,
+              farSide: templeSideState.farSide,
+              nearTemplePart: templeSideState.nearTemplePart,
+              farTemplePart: templeSideState.farTemplePart,
               visibleTempleLengthLeft: templeVisibleLengths.left.toFixed(4),
               visibleTempleLengthRight: templeVisibleLengths.right.toFixed(4),
               occluderMode: OCCLUDER_MODE.NARROW_SIDE
@@ -2030,9 +3088,10 @@ ${JSON.stringify(pass2List, null, 2)}
             glassesModelRef.current.traverse((child) => {
               if (child.isMesh) {
                 const part = child.userData.partType;
-                if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
-                  if (part === 'LEFT_TEMPLE') leftTempleNames.push(child.name);
-                  else if (part === 'RIGHT_TEMPLE') rightTempleNames.push(child.name);
+                const basePart = getTempleBasePart(part);
+                if (basePart) {
+                  if (basePart === 'LEFT_TEMPLE') leftTempleNames.push(child.name);
+                  else if (basePart === 'RIGHT_TEMPLE') rightTempleNames.push(child.name);
                   else bothTempleNames.push(child.name);
 
                   templeDiagnosticsList.push({
@@ -2106,8 +3165,8 @@ ${JSON.stringify(pass2List, null, 2)}
             object7Opacity: debugObject7Opacity.toFixed(4),
             object7ForcedHidden: "true",
             occluderMode: glassesModelRef.current.userData.occlusionMode || OCCLUDER_MODE.NARROW_SIDE,
-            nearSide: yawVisibilityState.nearSide,
-            farSide: yawVisibilityState.farSide,
+            nearSide: templeSideState.nearSide,
+            farSide: templeSideState.farSide,
             visibleTempleLengthLeft: templeVisibleLengths.left.toFixed(4),
             visibleTempleLengthRight: templeVisibleLengths.right.toFixed(4)
           });
@@ -2158,12 +3217,38 @@ ${JSON.stringify(pass2List, null, 2)}
         const posAttr = occluderRef.current ? occluderRef.current.geometry.attributes.position : null;
         const fullPosAttr = fullOccluderRef.current ? fullOccluderRef.current.geometry.attributes.position : null;
         const narrowPosAttr = narrowOccluderRef.current ? narrowOccluderRef.current.geometry.attributes.position : null;
+        const narrowUserData = narrowOccluderRef.current ? narrowOccluderRef.current.userData : null;
+        const narrowExpansion = narrowUserData ? narrowUserData.expansion : null;
+        const leftNarrowVertices = narrowUserData ? narrowUserData.leftVertexSet : null;
+        const rightNarrowVertices = narrowUserData ? narrowUserData.rightVertexSet : null;
 
         for (let i = 0; i < Math.min(landmarks.length, 478); i++) {
           const w = toW(landmarks[i]);
           if (posAttr) posAttr.setXYZ(i, w.x, w.y, w.z);
           if (fullPosAttr) fullPosAttr.setXYZ(i, w.x, w.y, w.z);
-          if (narrowPosAttr) narrowPosAttr.setXYZ(i, w.x, w.y, w.z);
+          if (narrowPosAttr) {
+            const isLeftVertex = leftNarrowVertices ? leftNarrowVertices.has(i) : false;
+            const isRightVertex = rightNarrowVertices ? rightNarrowVertices.has(i) : false;
+            const isSharedSideVertex = isLeftVertex && isRightVertex;
+            const shouldExpandFarSide =
+              narrowExpansion &&
+              narrowExpansion.activeSide !== 'BOTH' &&
+              !isSharedSideVertex &&
+              (
+                (narrowExpansion.activeSide === 'LEFT' && isLeftVertex) ||
+                (narrowExpansion.activeSide === 'RIGHT' && isRightVertex)
+              );
+
+            if (shouldExpandFarSide) {
+              const sideSign = narrowExpansion.activeSide === 'LEFT' ? -1 : 1;
+              const expandedW = w.clone()
+                .addScaledVector(narrowExpansion.headRightVector, sideSign * narrowExpansion.sideExpand)
+                .addScaledVector(narrowExpansion.headBackVector, narrowExpansion.backExpand);
+              narrowPosAttr.setXYZ(i, expandedW.x, expandedW.y, expandedW.z);
+            } else {
+              narrowPosAttr.setXYZ(i, w.x, w.y, w.z);
+            }
+          }
         }
 
         if (posAttr) {
@@ -2226,7 +3311,7 @@ ${JSON.stringify(pass2List, null, 2)}
         addLog(`DISTANCE_TO_GLASSES_CENTER: ${dist.toFixed(4)}`);
       }
 
-      if (!window.lastOcclusionLogTime || Date.now() - window.lastOcclusionLogTime > 4000) {
+      if (ENABLE_AR_DIAGNOSTIC_LOGS && (!window.lastOcclusionLogTime || Date.now() - window.lastOcclusionLogTime > 4000)) {
         window.lastOcclusionLogTime = Date.now();
         console.log("=== 🛡️ [AR RUNTIME OCCLUSION PASS VERIFICATION] ===");
         
@@ -2798,6 +3883,91 @@ ${JSON.stringify(pass2List, null, 2)}
 
         rendererRef.current.render(sceneRef.current, cameraRef.current);
       } else {
+        const productionTempleSideState = glassesModelRef.current.userData.templeSideState || getTempleSideState(0);
+        const isFrontalPass = productionTempleSideState.nearSide === 'BOTH';
+        let hasSplitTempleMeshes = false;
+
+        glassesModelRef.current.traverse((child) => {
+          if (child.isMesh) {
+            const basePart = getTempleBasePart(child.userData.partType);
+            if (basePart === 'LEFT_TEMPLE' || basePart === 'RIGHT_TEMPLE') {
+              hasSplitTempleMeshes = true;
+            }
+          }
+        });
+
+        const prepareProductionMesh = (child) => {
+          const part = child.userData.partType;
+          child.renderOrder = 0;
+          child.frustumCulled = false;
+          if (child.material) {
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach((mat) => {
+              if (mat) {
+                if (part === 'LENS') {
+                  mat.transparent = true;
+                  mat.opacity = 0.35;
+                  mat.depthTest = true;
+                  mat.depthWrite = true;
+                } else if (isTemplePart(part)) {
+                  const segmentOpacity = getTempleSegmentOpacity(
+                    part,
+                    productionTempleSideState,
+                    debugYawDegrees,
+                    glassesModelRef.current?.userData?.templeBoundaryModel,
+                    glassesModelRef.current?.userData?.faceMaskModel,
+                    child
+                  );
+                  mat.transparent = true;
+                  mat.opacity = segmentOpacity;
+                  mat.depthWrite = segmentOpacity > 0.85;
+                  mat.depthTest = true;
+                } else {
+                  mat.transparent = false;
+                  mat.opacity = 1.0;
+                  mat.depthTest = true;
+                  mat.depthWrite = true;
+                }
+                mat.side = THREE.DoubleSide;
+                mat.clippingPlanes = [];
+              }
+            });
+          }
+        };
+
+        const shouldRenderProductionMesh = (child, pass) => {
+          const part = child.userData.partType;
+          if (child.userData.skipProductionRender || part === 'MERGED_TEMPLE_SOURCE') return false;
+
+          if (pass === 1) {
+            if (isFrontalPass || part === 'BOTH_TEMPLES') return false;
+            return shouldRenderTempleInPass(part, productionTempleSideState, 1);
+          }
+
+          if (part === 'FRONT_FRAME' || part === 'LENS') return true;
+          if (part === 'BOTH_TEMPLES') return isFrontalPass && !hasSplitTempleMeshes;
+          if (isFrontalPass) {
+            const basePart = getTempleBasePart(part);
+            return basePart === 'LEFT_TEMPLE' || basePart === 'RIGHT_TEMPLE';
+          }
+          return shouldRenderTempleInPass(part, productionTempleSideState, 2);
+        };
+
+        const setProductionPassVisibility = (pass) => {
+          const visibleMeshes = [];
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              const shouldShow = shouldRenderProductionMesh(child, pass);
+              child.visible = shouldShow;
+              prepareProductionMesh(child);
+              if (shouldShow) {
+                visibleMeshes.push(`${child.name || 'UNNAMED'} (${child.userData.partType || 'UNKNOWN'})`);
+              }
+            }
+          });
+          return visibleMeshes;
+        };
+
         if (occluderRef.current && occluderRef.current.material) {
           occluderRef.current.material.colorWrite = false;
           occluderRef.current.material.transparent = false;
@@ -2814,37 +3984,12 @@ ${JSON.stringify(pass2List, null, 2)}
           narrowOccluderRef.current.material.opacity = 1.0;
         }
 
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            const part = child.userData.partType;
-            child.visible = !child.userData.skipProductionRender;
-            child.renderOrder = 0;
-            child.frustumCulled = false;
-            if (child.material) {
-              const materials = Array.isArray(child.material) ? child.material : [child.material];
-              materials.forEach((mat) => {
-                if (mat) {
-                  if (part === 'LENS') {
-                    mat.transparent = true;
-                    mat.opacity = 0.35;
-                  } else {
-                    mat.transparent = false;
-                    mat.opacity = 1.0;
-                  }
-                  mat.depthTest = true;
-                  mat.depthWrite = true;
-                  mat.side = THREE.DoubleSide;
-                  mat.clippingPlanes = [];
-                }
-              });
-            }
-          }
-        });
-
+        rendererRef.current.clear();
+        glassesModelRef.current.visible = true;
         if (occluderRef.current) occluderRef.current.visible = false;
         if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
         if (narrowOccluderRef.current) {
-          narrowOccluderRef.current.visible = true;
+          narrowOccluderRef.current.visible = !isFrontalPass;
           narrowOccluderRef.current.position.set(0, 0, 0);
           if (narrowOccluderRef.current.material) {
             narrowOccluderRef.current.material.colorWrite = false;
@@ -2857,12 +4002,25 @@ ${JSON.stringify(pass2List, null, 2)}
           }
         }
 
-        glassesModelRef.current.visible = false;
+        const pass1VisibleMeshes = setProductionPassVisibility(1);
+        if (!isFrontalPass && pass1VisibleMeshes.length > 0) {
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+        }
+
+        rendererRef.current.clearDepth();
+        if (narrowOccluderRef.current) narrowOccluderRef.current.visible = false;
+        const pass2VisibleMeshes = setProductionPassVisibility(2);
         rendererRef.current.render(sceneRef.current, cameraRef.current);
 
-        glassesModelRef.current.visible = true;
-        if (narrowOccluderRef.current) narrowOccluderRef.current.visible = false;
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
+        if (ENABLE_AR_DIAGNOSTIC_LOGS && diagnosticFrameCountRef.current % 60 === 0) {
+          console.log('AR_PRODUCTION_PASS_STATE', {
+            yawDegrees: debugYawDegrees.toFixed(4),
+            nearTemplePart: productionTempleSideState.nearTemplePart,
+            farTemplePart: productionTempleSideState.farTemplePart,
+            pass1VisibleMeshes,
+            pass2VisibleMeshes
+          });
+        }
       }
     } else {
       if (faceFitHintRef.current) updateFaceFitHint('');
@@ -3150,16 +4308,16 @@ ${JSON.stringify(pass2List, null, 2)}
   return (
     <div className="fixed inset-0 z-[100] bg-black flex flex-col animate-in fade-in duration-300">
       {/* ---------------- IN-APP DEBUGGER ---------------- */}
-      <button onClick={() => setShowDebugPane(!showDebugPane)} className="fixed bottom-4 right-4 z-[9999] bg-yellow-500 text-white p-3 rounded-full shadow-[0_0_15px_rgba(234,179,8,0.5)] active:scale-90">
+      {SHOW_AR_DEBUG_UI && <button onClick={() => setShowDebugPane(!showDebugPane)} className="fixed bottom-4 right-4 z-[9999] bg-yellow-500 text-white p-3 rounded-full shadow-[0_0_15px_rgba(234,179,8,0.5)] active:scale-90">
         <Bug className="w-6 h-6" />
-      </button>
-      <div className={`fixed bottom-0 left-0 w-full h-[50vh] bg-black/95 z-[9998] border-t-2 border-green-500 p-4 font-mono text-[10px] sm:text-xs overflow-y-auto transition-transform duration-300 ${showDebugPane ? 'translate-y-0' : 'translate-y-full'}`}>
+      </button>}
+      {SHOW_AR_DEBUG_UI && <div className={`fixed bottom-0 left-0 w-full h-[50vh] bg-black/95 z-[9998] border-t-2 border-green-500 p-4 font-mono text-[10px] sm:text-xs overflow-y-auto transition-transform duration-300 ${showDebugPane ? 'translate-y-0' : 'translate-y-full'}`}>
         <div className="flex justify-between items-center mb-3 sticky top-0 bg-black pb-2 border-b border-gray-800">
           <span className="text-green-500 font-bold">TERMINAL DI ĐỘNG v1.0</span>
           <button onClick={() => setDebugLogs([])} className="text-red-400 hover:text-red-300"><Trash2 className="w-4 h-4" /></button>
         </div>
         {debugLogs.map((log, i) => (<div key={i} className="mb-1 border-b border-white/5 pb-1"><span className="text-gray-600 mr-2">[{i + 1}]</span> {log}</div>))}
-      </div>
+      </div>}
 
       {/* ---------------- TOAST NOTIFICATION ---------------- */}
       <div className={`fixed top-10 left-1/2 transform -translate-x-1/2 z-[999] transition-all duration-300 ${toast.show ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0 pointer-events-none'}`}>
@@ -3169,14 +4327,13 @@ ${JSON.stringify(pass2List, null, 2)}
         </div>
       </div>
 
-      <div className="p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10 text-white absolute top-0 w-full">
-        <span className="font-bold tracking-wide flex items-center gap-2 uppercase"><div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div> PHÒNG THỬ KÍNH 3D</span>
+      <div className="p-6 flex justify-end items-center bg-gradient-to-b from-black/80 to-transparent z-10 text-white absolute top-0 w-full">
         <button onClick={stopCamera} className="bg-white/20 hover:bg-red-500 text-white p-2 rounded-full transition-colors"><X className="w-8 h-8" /></button>
       </div>
 
       <div className="relative flex-1 flex items-center justify-center overflow-hidden">
         {/* BUTTON ẨN/HIỆN MESH DEBUG TRÊN DI ĐỘNG */}
-        {(!capturedImage && !recordedVideoUrl) && (
+        {SHOW_AR_DEBUG_UI && (!capturedImage && !recordedVideoUrl) && (
           <button
             onClick={() => setShowMeshDebug(!showMeshDebug)}
             className="absolute top-24 left-6 z-[200] bg-yellow-500 hover:bg-yellow-600 text-black font-black text-[9px] px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1 active:scale-95 transition-all uppercase"
@@ -3187,7 +4344,7 @@ ${JSON.stringify(pass2List, null, 2)}
         )}
 
         {/* BẢNG DIAGNOSTIC OVERLAY CUỘN TRÊN MÀN HÌNH */}
-        {(!capturedImage && !recordedVideoUrl) && showMeshDebug && meshDebugData.length > 0 && (
+        {SHOW_AR_DEBUG_UI && (!capturedImage && !recordedVideoUrl) && showMeshDebug && meshDebugData.length > 0 && (
           <div className="absolute top-[135px] left-6 z-[190] bg-black/95 backdrop-blur-md text-white p-3 rounded-2xl border border-white/20 text-[8px] max-w-[88vw] max-h-[45vh] overflow-y-auto font-mono shadow-2xl">
             <div className="font-bold border-b border-white/20 pb-1.5 mb-1.5 uppercase text-yellow-400 flex items-center justify-between">
               <span>📊 MESH DIAGNOSTICS ({meshDebugData.length})</span>
@@ -3417,7 +4574,7 @@ ${JSON.stringify(pass2List, null, 2)}
         {/* liveCanvas: Hiển thị giao diện thực tế (Composite của video + 3D, lật gương) */}
         <canvas ref={liveCanvasRef} className="w-full h-full object-cover select-none" />
 
-        {faceFitHint && !capturedImage && !recordedVideoUrl && !isAiLoading && (
+        {SHOW_AR_DEBUG_UI && faceFitHint && !capturedImage && !recordedVideoUrl && !isAiLoading && (
           <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 max-w-[82vw] rounded-full bg-black/70 px-4 py-2 text-center text-[11px] font-black uppercase tracking-wide text-white shadow-xl border border-white/15 backdrop-blur-md">
             {faceFitHint}
           </div>
@@ -3440,7 +4597,7 @@ ${JSON.stringify(pass2List, null, 2)}
         )}
 
         {/* SLIDER ĐIỀU CHỈNH ĐỘ CẬN TẠM THỜI TẠI RUNTIME */}
-        {showArDiopterControl && (
+        {SHOW_AR_OPTIONAL_CONTROLS && showArDiopterControl && (
           <div className="absolute bottom-36 left-1/2 transform -translate-x-1/2 bg-black/80 backdrop-blur-md px-6 py-4 rounded-[32px] border border-white/20 z-40 flex flex-col items-center w-48 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
             <button onClick={() => setShowArDiopterControl(false)} className="absolute top-4 right-4 text-white/50 hover:text-white transition"><X className="w-4 h-4" /></button>
             <p className="text-[10px] font-black tracking-widest opacity-60 mb-2 mt-2 uppercase flex items-center gap-1"><Sparkles className="w-3 h-3 text-blue-400" /> Độ Cận</p>
@@ -3457,11 +4614,11 @@ ${JSON.stringify(pass2List, null, 2)}
 
         {/* THANH ĐIỀU KHIỂN CHÍNH (Đổi mẫu, Chụp, Quay, Chỉnh độ cận) */}
         {(!capturedImage && !recordedVideoUrl) && (
-          <div className={`absolute w-full flex justify-between items-center px-8 z-20 transition-all duration-500 ${showGlassesMenu ? 'bottom-56 opacity-0 pointer-events-none' : 'bottom-16 opacity-100'}`}>
-            <button onClick={() => setShowGlassesMenu(true)} className={`flex flex-col items-center gap-1 group w-16 transition-opacity ${isRecording ? 'opacity-0' : 'opacity-100'}`}>
+          <div className="absolute w-full flex justify-center items-center px-8 z-20 transition-all duration-500 bottom-16 opacity-100">
+            {SHOW_AR_OPTIONAL_CONTROLS && <button onClick={() => setShowGlassesMenu(true)} className={`flex flex-col items-center gap-1 group w-16 transition-opacity ${isRecording ? 'opacity-0' : 'opacity-100'}`}>
               <div className="w-14 h-14 bg-black/40 backdrop-blur-md rounded-full border border-white/30 flex items-center justify-center text-white group-hover:bg-white/20 transition-all active:scale-95"><Sparkles className="w-6 h-6 text-blue-400" /></div>
               <span className="text-white text-[10px] font-black tracking-widest uppercase mt-1 drop-shadow-md">Đổi mẫu</span>
-            </button>
+            </button>}
 
             <div className={`flex items-center gap-6 backdrop-blur-md p-2 rounded-full border transition-all duration-300 ${isRecording ? 'bg-transparent border-transparent' : 'bg-black/40 border-white/20'}`}>
               <button onClick={capturePhoto} className={`flex flex-col items-center group ml-2 transition-all duration-300 ${isRecording ? 'w-0 overflow-hidden opacity-0 mx-0' : 'w-12 h-12 opacity-100'}`}>
@@ -3475,15 +4632,15 @@ ${JSON.stringify(pass2List, null, 2)}
               </button>
             </div>
 
-            <button onClick={() => setShowArDiopterControl(!showArDiopterControl)} className={`flex flex-col items-center gap-1 group w-16 transition-opacity ${isRecording ? 'opacity-0' : 'opacity-100'}`}>
+            {SHOW_AR_OPTIONAL_CONTROLS && <button onClick={() => setShowArDiopterControl(!showArDiopterControl)} className={`flex flex-col items-center gap-1 group w-16 transition-opacity ${isRecording ? 'opacity-0' : 'opacity-100'}`}>
               <div className={`w-14 h-14 backdrop-blur-md rounded-full border flex items-center justify-center text-white transition-all active:scale-95 ${showArDiopterControl ? 'bg-blue-600 border-blue-400' : 'bg-black/40 border-white/30 group-hover:bg-white/20'}`}><Eye className={`w-6 h-6 ${showArDiopterControl ? 'text-white' : 'text-blue-400'}`} /></div>
               <span className="text-white text-[10px] font-black tracking-widest uppercase mt-1 drop-shadow-md">Độ cận</span>
-            </button>
+            </button>}
           </div>
         )}
 
         {/* NGĂN KÉO CHỌN MẪU KÍNH 3D */}
-        <div className={`absolute bottom-0 w-full z-30 bg-black/80 backdrop-blur-3xl rounded-t-[40px] pt-6 pb-12 transition-transform duration-500 ease-out ${showGlassesMenu ? 'translate-y-0' : 'translate-y-full'}`}>
+        {SHOW_AR_OPTIONAL_CONTROLS && <div className={`absolute bottom-0 w-full z-30 bg-black/80 backdrop-blur-3xl rounded-t-[40px] pt-6 pb-12 transition-transform duration-500 ease-out ${showGlassesMenu ? 'translate-y-0' : 'translate-y-full'}`}>
           <div className="flex justify-between items-center px-8 mb-6">
             <span className="text-white text-xs font-black tracking-widest uppercase flex items-center gap-2"><Box className="w-4 h-4 text-blue-400" /> KHO KÍNH 3D ({allArProducts.length})</span>
             <button onClick={() => setShowGlassesMenu(false)} className="bg-white/10 p-2 rounded-full text-white"><ChevronDown className="w-5 h-5" /></button>
@@ -3496,7 +4653,7 @@ ${JSON.stringify(pass2List, null, 2)}
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
         {/* MÀN HÌNH LOADING LƯU FILE */}
         {isDownloading && (
@@ -3523,7 +4680,7 @@ ${JSON.stringify(pass2List, null, 2)}
         )}
 
         {/* 📐 EXPERIMENT 1 UI PANEL */}
-        {(!capturedImage && !recordedVideoUrl) && (
+        {SHOW_AR_DEBUG_UI && (!capturedImage && !recordedVideoUrl) && (
           <div className="absolute top-24 right-6 z-[200] flex flex-col gap-2 max-w-[170px] bg-black/80 backdrop-blur-md p-2 rounded-2xl border border-white/10">
             <div className="text-[7px] text-gray-400 font-bold uppercase border-b border-white/10 pb-0.5 mb-1">🧪 EXPERIMENTS</div>
             

@@ -29,6 +29,32 @@ exports.verifyToken = async (req, res, next) => {
   }
 };
 
+// Soft auth for public endpoints that can return extra fields to admins.
+exports.optionalVerifyToken = async (req, res, next) => {
+  const token = req.header('Authorization')?.split(' ')[1];
+
+  if (!token) {
+    req.user = null;
+    return next();
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+
+    if (!user || user.isBlocked) {
+      req.user = null;
+      return next();
+    }
+
+    req.user = { id: user._id, username: user.username, role: user.role, name: user.name };
+    return next();
+  } catch (error) {
+    req.user = null;
+    return next();
+  }
+};
+
 // Middleware xác thực quyền hạn Quản trị viên tối cao (Admin - role === 1)
 exports.verifyAdmin = (req, res, next) => {
   if (req.user && req.user.role === 1) {

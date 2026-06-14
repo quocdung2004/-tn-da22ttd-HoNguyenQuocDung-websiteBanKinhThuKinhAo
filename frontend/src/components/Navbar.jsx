@@ -124,7 +124,7 @@ const Navbar = () => {
                         {user.role === 0 && (
                           <Link to="/my-wishlist" className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition" onClick={() => setIsProfileOpen(false)}>
                             <Heart className="w-4 h-4" />
-                            <span className="font-medium">Yeu thich</span>
+                            <span className="font-medium">Yêu thích</span>
                           </Link>
                         )}
                         <Link to="/my-orders" className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition" onClick={() => setIsProfileOpen(false)}>
@@ -207,7 +207,7 @@ const Navbar = () => {
               {user.role === 0 && (
                 <Link to="/my-wishlist" onClick={closeMenu} className="flex items-center space-x-3 text-gray-700 hover:text-blue-600 font-medium py-2">
                   <Heart className="w-5 h-5" />
-                  <span>Yeu thich</span>
+                  <span>Yêu thích</span>
                 </Link>
               )}
               <Link to="/my-orders" onClick={closeMenu} className="flex items-center space-x-3 text-gray-700 hover:text-blue-600 font-medium py-2">

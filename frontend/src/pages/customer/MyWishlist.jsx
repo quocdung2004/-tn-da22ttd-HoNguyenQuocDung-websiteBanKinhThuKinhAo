@@ -26,7 +26,7 @@ export default function MyWishlist() {
         setItems(data.items || []);
       }
     } catch (error) {
-      console.error('Loi tai wishlist:', error);
+      console.error('Lỗi tải wishlist:', error);
     } finally {
       setLoading(false);
     }
@@ -49,11 +49,11 @@ export default function MyWishlist() {
       if (data.success) {
         setItems((currentItems) => currentItems.filter((item) => item.product?._id !== productId));
       } else {
-        alert(data.message || 'Khong the xoa san pham yeu thich!');
+        alert(data.message || 'Không thể xóa sản phẩm yêu thích!');
       }
     } catch (error) {
-      console.error('Loi xoa wishlist:', error);
-      alert('Loi ket noi may chu khi xoa yeu thich!');
+      console.error('Lỗi xóa wishlist:', error);
+      alert('Lỗi kết nối máy chủ khi xóa yêu thích!');
     } finally {
       setRemovingId(null);
     }
@@ -66,34 +66,34 @@ export default function MyWishlist() {
           <div>
             <div className="inline-flex items-center gap-2 bg-red-50 text-red-600 px-4 py-2 rounded-full font-black text-xs uppercase tracking-widest mb-4">
               <Heart className="w-4 h-4 fill-red-500" />
-              Yeu thich
+              Yêu thích
             </div>
-            <h1 className="text-3xl md:text-4xl font-black text-gray-900">Danh sach yeu thich</h1>
-            <p className="text-gray-500 mt-2">Nhung mau kinh ban da luu de xem lai sau.</p>
+            <h1 className="text-3xl md:text-4xl font-black text-gray-900">Danh sách yêu thích</h1>
+            <p className="text-gray-500 mt-2">Những mẫu kính bạn đã lưu để xem lại sau.</p>
           </div>
           <Link
             to="/"
             className="inline-flex items-center justify-center gap-2 bg-gray-900 text-white px-5 py-3 rounded-2xl font-bold hover:bg-blue-600 transition"
           >
             <ShoppingBag className="w-5 h-5" />
-            Tiep tuc mua sam
+            Tiếp tục mua sắm
           </Link>
         </div>
 
         {loading ? (
           <div className="flex flex-col items-center justify-center py-24 text-gray-400">
             <Loader2 className="w-12 h-12 animate-spin text-blue-500 mb-4" />
-            <p className="font-bold uppercase tracking-widest">Dang tai danh sach...</p>
+            <p className="font-bold uppercase tracking-widest">Đang tải danh sách...</p>
           </div>
         ) : items.length === 0 ? (
           <div className="bg-white rounded-3xl border border-gray-100 shadow-sm py-20 px-6 text-center">
             <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-5">
               <Heart className="w-8 h-8" />
             </div>
-            <h2 className="text-2xl font-black text-gray-900 mb-2">Chua co san pham yeu thich</h2>
-            <p className="text-gray-500 mb-6">Hay bam trai tim tren san pham ban quan tam.</p>
+            <h2 className="text-2xl font-black text-gray-900 mb-2">Chưa có sản phẩm yêu thích</h2>
+            <p className="text-gray-500 mb-6">Hãy bấm trái tim trên sản phẩm bạn quan tâm.</p>
             <Link to="/" className="inline-flex bg-blue-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-blue-700 transition">
-              Xem san pham
+              Xem sản phẩm
             </Link>
           </div>
         ) : (
@@ -104,14 +104,14 @@ export default function MyWishlist() {
                 return (
                   <div key={item._id} className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm">
                     <div className="aspect-square rounded-2xl bg-gray-100 mb-4 flex items-center justify-center text-gray-400 font-bold text-sm">
-                      San pham khong ton tai
+                      Sản phẩm không tồn tại
                     </div>
                     <button
                       type="button"
                       disabled
                       className="w-full bg-gray-100 text-gray-400 py-3 rounded-2xl font-bold cursor-not-allowed"
                     >
-                      Khong kha dung
+                      Không khả dụng
                     </button>
                   </div>
                 );
@@ -132,7 +132,7 @@ export default function MyWishlist() {
                     )}
                     {inactive && (
                       <div className="absolute bottom-3 left-3 right-3 bg-gray-900/90 text-white text-[10px] font-black px-3 py-2 rounded-xl text-center">
-                        Khong con kinh doanh
+                        Không còn kinh doanh
                       </div>
                     )}
                   </div>
@@ -145,11 +145,11 @@ export default function MyWishlist() {
                     <div className="mt-4">
                       {hasSale ? (
                         <>
-                          <div className="text-xs text-gray-400 line-through font-medium">{formatPrice(product.originalPrice)} d</div>
-                          <div className="text-xl font-black text-red-500">{formatPrice(product.salePrice)} d</div>
+                          <div className="text-xs text-gray-400 line-through font-medium">{formatPrice(product.originalPrice)} đ</div>
+                          <div className="text-xl font-black text-red-500">{formatPrice(product.salePrice)} đ</div>
                         </>
                       ) : (
-                        <div className="text-xl font-black text-blue-600">{formatPrice(product.price)} d</div>
+                        <div className="text-xl font-black text-blue-600">{formatPrice(product.price)} đ</div>
                       )}
                     </div>
                   </div>
@@ -160,14 +160,14 @@ export default function MyWishlist() {
                       className="inline-flex items-center justify-center gap-2 bg-gray-900 text-white py-3 rounded-2xl font-bold hover:bg-blue-600 transition"
                     >
                       <Eye className="w-4 h-4" />
-                      Chi tiet
+                      Chi tiết
                     </Link>
                     <button
                       type="button"
                       onClick={() => handleRemove(product._id)}
                       disabled={removingId === product._id}
                       className="w-12 h-12 rounded-2xl bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition disabled:opacity-60"
-                      aria-label="Bo yeu thich"
+                      aria-label="Bỏ yêu thích"
                     >
                       {removingId === product._id ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
                     </button>
