@@ -90,7 +90,7 @@ const sanitizeProductForRole = (product, userRole) => {
 exports.createProduct = async (req, res) => {
   try {
     // Lấy các trường text từ req.body (Lưu ý: arUrl không lấy ở đây nữa vì nó đã thành File)
-    const { name, price, description, stock, importPrice, brand, category, gender } = req.body;
+    const { name, price, description, stock, importPrice, brand, category, gender, arConfig } = req.body;
     const imageFiles = req.files?.images || [];
     const arModelFile = req.files?.arModel?.[0] || null;
     let images = [];
@@ -106,8 +106,17 @@ exports.createProduct = async (req, res) => {
       arUrl = await uploadArModelToSupabase(arModelFile);
     }
 
+    let parsedArConfig = {};
+    if (arConfig) {
+      try {
+        parsedArConfig = typeof arConfig === 'string' ? JSON.parse(arConfig) : arConfig;
+      } catch (e) {
+        parsedArConfig = {};
+      }
+    }
+
     const newProduct = new Product({
-      name, price, description, images, arUrl, stock, importPrice: Number(importPrice) || 0, brand, category, gender
+      name, price, description, images, arUrl, stock, importPrice: Number(importPrice) || 0, brand, category, gender, arConfig: parsedArConfig
     });
 
     await newProduct.save();
@@ -299,12 +308,21 @@ exports.getProductById = async (req, res) => {
 // [PUT] Cập nhật Sản phẩm
 exports.updateProduct = async (req, res) => {
   try {
-    const { name, price, description, stock, importPrice, brand, category, isActive, gender } = req.body;
+    const { name, price, description, stock, importPrice, brand, category, isActive, gender, arConfig } = req.body;
     const imageFiles = req.files?.images || [];
     const arModelFile = req.files?.arModel?.[0] || null;
 
+    let parsedArConfig = {};
+    if (arConfig) {
+      try {
+        parsedArConfig = typeof arConfig === 'string' ? JSON.parse(arConfig) : arConfig;
+      } catch (e) {
+        parsedArConfig = {};
+      }
+    }
+
     // Tạo object chứa dữ liệu mới cơ bản
-    let updateData = { name, price, description, stock, importPrice: Number(importPrice) || 0, brand, category, gender };
+    let updateData = { name, price, description, stock, importPrice: Number(importPrice) || 0, brand, category, gender, arConfig: parsedArConfig };
 
     if (isActive !== undefined) {
       updateData.isActive = isActive === 'true' || isActive === true;

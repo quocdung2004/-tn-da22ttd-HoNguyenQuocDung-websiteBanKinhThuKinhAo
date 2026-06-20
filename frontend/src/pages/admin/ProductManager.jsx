@@ -11,7 +11,15 @@ export default function ProductManager() {
   
   // STATE CỦA FORM
   const [formData, setFormData] = useState({ 
-    name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true, gender: 'unisex' 
+    name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true, gender: 'unisex',
+    arConfig: {
+      splitSingleMeshByDepth: false,
+      frontDepthStartRatio: 0.68,
+      templeDepthEndRatio: 0.70,
+      frontCenterKeepRatio: 0.23,
+      verticalOffsetRatio: 0,
+      scaleMultiplier: 1
+    }
   });
   
   // STATE XỬ LÝ ẢNH & FILE 3D
@@ -118,7 +126,15 @@ export default function ProductManager() {
       brand: prod.brand ? prod.brand._id : '',
       category: prod.category ? prod.category._id : '',
       isActive: prod.isActive !== false, // nạp đúng trạng thái
-			gender: prod.gender || 'unisex'
+      gender: prod.gender || 'unisex',
+      arConfig: {
+        splitSingleMeshByDepth: prod.arConfig?.splitSingleMeshByDepth ?? false,
+        frontDepthStartRatio: prod.arConfig?.frontDepthStartRatio ?? 0.68,
+        templeDepthEndRatio: prod.arConfig?.templeDepthEndRatio ?? 0.70,
+        frontCenterKeepRatio: prod.arConfig?.frontCenterKeepRatio ?? 0.23,
+        verticalOffsetRatio: prod.arConfig?.verticalOffsetRatio ?? 0,
+        scaleMultiplier: prod.arConfig?.scaleMultiplier ?? 1
+      }
     });
     setImagePreviews(prod.images || []); // Hiện mảng ảnh cũ từ DB
     setImageFiles([]); 
@@ -131,7 +147,17 @@ export default function ProductManager() {
     setIsModalOpen(false);
     setEditingId(null);
     // Reset form về trạng thái rỗng
-    setFormData({ name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true, gender: 'unisex' });
+    setFormData({ 
+      name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true, gender: 'unisex',
+      arConfig: {
+        splitSingleMeshByDepth: false,
+        frontDepthStartRatio: 0.68,
+        templeDepthEndRatio: 0.70,
+        frontCenterKeepRatio: 0.23,
+        verticalOffsetRatio: 0,
+        scaleMultiplier: 1
+      }
+    });
     setImagePreviews([]);
     setImageFiles([]);
     setArFile(null);
@@ -193,6 +219,7 @@ export default function ProductManager() {
     dataToSend.append('brand', formData.brand);
     dataToSend.append('category', formData.category);
 		dataToSend.append('gender', formData.gender);
+    dataToSend.append('arConfig', JSON.stringify(formData.arConfig));
     
     // Gửi trạng thái isActive khi đang sửa sản phẩm
     if (editingId) {
@@ -461,6 +488,127 @@ export default function ProductManager() {
                     </select>
                   </div>
                 )}
+
+                {/* ⚙️ Cấu hình hình học AR (Dành cho file sinh từ AI) */}
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-4">
+                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <span>⚙️</span> Cấu hình hình học AR (Dành cho file sinh từ AI)
+                  </h4>
+                  
+                  <div className="flex items-center gap-3">
+                    <input 
+                      type="checkbox" 
+                      id="splitSingleMeshByDepth"
+                      checked={formData.arConfig?.splitSingleMeshByDepth || false}
+                      onChange={e => setFormData({
+                        ...formData,
+                        arConfig: {
+                          ...formData.arConfig,
+                          splitSingleMeshByDepth: e.target.checked
+                        }
+                      })}
+                      className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500 border-gray-300"
+                    />
+                    <label htmlFor="splitSingleMeshByDepth" className="text-sm font-medium text-slate-700 select-none cursor-pointer">
+                      Kích hoạt chia nhỏ Mesh đơn lẻ theo độ sâu (splitSingleMeshByDepth)
+                    </label>
+                  </div>
+
+                  {formData.arConfig?.splitSingleMeshByDepth && (
+                    <div className="grid grid-cols-3 gap-4 pt-2 animate-in fade-in duration-200">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1">Mặt trước bắt đầu (frontDepthStartRatio)</label>
+                        <input 
+                          type="number" 
+                          step="0.01" 
+                          min="0"
+                          max="1"
+                          value={formData.arConfig?.frontDepthStartRatio ?? 0.68}
+                          onChange={e => setFormData({
+                            ...formData,
+                            arConfig: {
+                              ...formData.arConfig,
+                              frontDepthStartRatio: parseFloat(e.target.value) || 0
+                            }
+                          })}
+                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1">Càng kính kết thúc (templeDepthEndRatio)</label>
+                        <input 
+                          type="number" 
+                          step="0.01" 
+                          min="0"
+                          max="1"
+                          value={formData.arConfig?.templeDepthEndRatio ?? 0.70}
+                          onChange={e => setFormData({
+                            ...formData,
+                            arConfig: {
+                              ...formData.arConfig,
+                              templeDepthEndRatio: parseFloat(e.target.value) || 0
+                            }
+                          })}
+                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1">Tâm mặt giữ lại (frontCenterKeepRatio)</label>
+                        <input 
+                          type="number" 
+                          step="0.01" 
+                          min="0"
+                          max="1"
+                          value={formData.arConfig?.frontCenterKeepRatio ?? 0.23}
+                          onChange={e => setFormData({
+                            ...formData,
+                            arConfig: {
+                              ...formData.arConfig,
+                              frontCenterKeepRatio: parseFloat(e.target.value) || 0
+                            }
+                          })}
+                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-600"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4 pt-2">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">Dịch chuyển dọc (verticalOffsetRatio)</label>
+                      <input 
+                        type="number" 
+                        step="0.01"
+                        value={formData.arConfig?.verticalOffsetRatio ?? 0}
+                        onChange={e => setFormData({
+                          ...formData,
+                          arConfig: {
+                            ...formData.arConfig,
+                            verticalOffsetRatio: parseFloat(e.target.value) || 0
+                          }
+                        })}
+                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-600"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">Tỉ lệ kích thước (scaleMultiplier)</label>
+                      <input 
+                        type="number" 
+                        step="0.01"
+                        min="0.1"
+                        value={formData.arConfig?.scaleMultiplier ?? 1}
+                        onChange={e => setFormData({
+                          ...formData,
+                          arConfig: {
+                            ...formData.arConfig,
+                            scaleMultiplier: parseFloat(e.target.value) || 1
+                          }
+                        })}
+                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-600"
+                      />
+                    </div>
+                  </div>
+                </div>
 
                 {/* VÙNG CHỌN FILE 3D (.GLB) */}
                 <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">

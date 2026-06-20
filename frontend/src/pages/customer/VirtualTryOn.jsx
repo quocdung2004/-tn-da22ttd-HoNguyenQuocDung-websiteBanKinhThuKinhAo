@@ -2302,7 +2302,18 @@ export default function VirtualTryOn({
       prod.arUrl,
       (gltf) => {
         const model = gltf.scene;
-        const fitOverride = getModelFitOverride(prod.arUrl);
+        const fitOverride = {
+          verticalOffsetRatio: prod.arConfig?.verticalOffsetRatio ?? 0,
+          scaleMultiplier: prod.arConfig?.scaleMultiplier ?? 1,
+          splitSingleMeshByDepth: prod.arConfig?.splitSingleMeshByDepth ?? false,
+          frontDepthStartRatio: prod.arConfig?.frontDepthStartRatio ?? 0.68,
+          templeDepthEndRatio: prod.arConfig?.templeDepthEndRatio ?? 0.70,
+          frontCenterKeepRatio: prod.arConfig?.frontCenterKeepRatio ?? 0.23,
+          pitchOffsetDeg: 0,
+          yawOffsetDeg: 0,
+          rollOffsetDeg: 0,
+          id: prod._id
+        };
         model.userData.fitOverride = fitOverride;
         const singleMeshSplitAudit = splitSingleMeshGlassesByDepth(model, fitOverride);
         model.userData.singleMeshSplitAudit = singleMeshSplitAudit;
@@ -2341,50 +2352,53 @@ export default function VirtualTryOn({
             const materials = getMeshMaterials(child);
             const matName = materials.map((mat) => mat.name || '').join(' ').toLowerCase();
             const preassignedPartType = child.userData.partType;
-            const isLensMesh = meshName.includes('lens') || meshName.includes('glass') || meshName.includes('kính') || matName.includes('lens') || matName.includes('glass') || matName.includes('kính');
-            const isTempleMesh = meshName.includes('handle') || meshName.includes('temple') || meshName.includes('càng') || meshName.includes('object_7') ||
-              matName.includes('handle') || matName.includes('temple') || matName.includes('càng');
-
-            const isNearCenter = Math.abs(childCenter.x) < 0.35 * size.x;
             const physicalGlassMaterial = materials.some(isPhysicalGlassMaterial);
-            const isLikelyCenterGlass =
-              isNearCenter &&
-              physicalGlassMaterial &&
-              childSize.x < size.x * 0.85 &&
-              childSize.y < size.y * 0.85;
+            const isLensMesh = meshName.includes('lens') || meshName.includes('glass') || meshName.includes('kính') ||
+              matName.includes('lens') || matName.includes('glass') || matName.includes('kính') ||
+              physicalGlassMaterial;
 
-            if (preassignedPartType === 'FRONT_FRAME' || preassignedPartType === 'LENS' || isTemplePart(preassignedPartType)) {
-              child.userData.partType = preassignedPartType;
-            } else if (isLensMesh || isLikelyCenterGlass) {
+            // 1. Ưu tiên nhận diện LENS (Tròng kính) trước
+            if (preassignedPartType === 'LENS' || isLensMesh) {
               child.userData.partType = 'LENS';
-            } else if (isTempleMesh) {
-              if (childCenter.x < -0.01) {
+            }
+            // 2. Nhận diện bằng Vị trí tương đối (Spatial Fallback) nếu không có từ khóa LENS rõ ràng
+            else {
+              const isLeftTempleSpatial = childCenter.x < -0.15 * size.x && childSize.z > childSize.x;
+              const isRightTempleSpatial = childCenter.x > 0.15 * size.x && childSize.z > childSize.x;
+              const isFrontFrameSpatial = childSize.x > 0.4 * size.x && (relativeZ > 0.50 || childCenter.z > box.min.z + 0.5 * size.z);
+
+              const isTempleMesh = meshName.includes('handle') || meshName.includes('temple') || meshName.includes('càng') || meshName.includes('object_7') ||
+                matName.includes('handle') || matName.includes('temple') || matName.includes('càng');
+
+              if (preassignedPartType === 'FRONT_FRAME') {
+                child.userData.partType = 'FRONT_FRAME';
+              } else if (isTemplePart(preassignedPartType)) {
+                child.userData.partType = preassignedPartType;
+              } else if (isLeftTempleSpatial || (isTempleMesh && childCenter.x < -0.01)) {
                 child.userData.partType = 'LEFT_TEMPLE';
-              } else if (childCenter.x > 0.01) {
+              } else if (isRightTempleSpatial || (isTempleMesh && childCenter.x > 0.01)) {
                 child.userData.partType = 'RIGHT_TEMPLE';
+              } else if (isFrontFrameSpatial || relativeZ > 0.60 || Math.abs(childCenter.x) < 0.35 * size.x) {
+                child.userData.partType = 'FRONT_FRAME';
               } else {
-                child.userData.partType = 'BOTH_TEMPLES';
+                // Fallback cuối cùng
+                if (childCenter.x < 0) {
+                  child.userData.partType = 'LEFT_TEMPLE';
+                } else {
+                  child.userData.partType = 'RIGHT_TEMPLE';
+                }
               }
+            }
+
+            // 3. Cập nhật trạng thái Vật liệu (Materials) tương ứng
+            const finalPartType = child.userData.partType;
+            if (finalPartType === 'FRONT_FRAME') {
               getMeshMaterials(child).forEach((mat) => {
                 mat.side = THREE.DoubleSide;
                 mat.depthWrite = true;
                 mat.depthTest = true;
-                mat.transparent = true;
-                mat.opacity = 1.0;
               });
-            } else if (relativeZ > 0.60 || isNearCenter) {
-              child.userData.partType = 'FRONT_FRAME';
-              getMeshMaterials(child).forEach((mat) => {
-                mat.side = THREE.DoubleSide;
-                mat.depthWrite = true;
-                mat.depthTest = true;
-              });
-            } else {
-              if (childCenter.x < 0) {
-                child.userData.partType = 'LEFT_TEMPLE';
-              } else {
-                child.userData.partType = 'RIGHT_TEMPLE';
-              }
+            } else if (isTemplePart(finalPartType) || finalPartType === 'BOTH_TEMPLES') {
               getMeshMaterials(child).forEach((mat) => {
                 mat.side = THREE.DoubleSide;
                 mat.depthWrite = true;
@@ -5273,15 +5287,6 @@ export default function VirtualTryOn({
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setDebugMode(v => !v)}
-            className={`px-3 py-1.5 rounded-full font-black text-[10px] uppercase tracking-wider transition-all shadow-md ${debugMode
-                ? 'bg-red-600 hover:bg-red-700 text-white border border-red-400'
-                : 'bg-white/25 hover:bg-white/35 text-white border border-white/20'
-              }`}
-          >
-            Debug Mode: {debugMode ? 'ON' : 'OFF'}
-          </button>
           <button onClick={stopCamera} className="bg-white/20 hover:bg-red-500 text-white p-2 rounded-full transition-colors"><X className="w-8 h-8" /></button>
         </div>
       </div>

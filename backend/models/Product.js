@@ -16,7 +16,15 @@ const productSchema = new mongoose.Schema({
   brand: { type: mongoose.Schema.Types.ObjectId, ref: 'Brand', required: true },
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   isActive: { type: Boolean, default: true },
-  gender: { type: String, enum: ['nam', 'nu', 'unisex'], default: 'unisex' }
+  gender: { type: String, enum: ['nam', 'nu', 'unisex'], default: 'unisex' },
+  arConfig: {
+    splitSingleMeshByDepth: { type: Boolean, default: false },
+    frontDepthStartRatio: { type: Number, default: 0.68 },
+    templeDepthEndRatio: { type: Number, default: 0.70 },
+    frontCenterKeepRatio: { type: Number, default: 0.23 },
+    verticalOffsetRatio: { type: Number, default: 0 },
+    scaleMultiplier: { type: Number, default: 1 }
+  }
 }, { timestamps: true });
 
 productSchema.index({ gender: 1 });
