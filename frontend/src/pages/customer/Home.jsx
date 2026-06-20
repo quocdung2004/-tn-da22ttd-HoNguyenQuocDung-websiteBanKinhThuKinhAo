@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { View, ArrowRight, Sparkles, ShoppingBag, ShieldCheck, Loader2, Box, ChevronLeft, ChevronRight, Heart } from 'lucide-react';
+import { View, ArrowRight, Sparkles, ShoppingBag, ShieldCheck, Loader2, Box, ChevronLeft, ChevronRight, Heart, Search } from 'lucide-react';
 import { useSocket } from '../../context/SocketContext';
 import { useAuth } from '../../context/AuthContext';
+import ProductCard from '../../components/ProductCard';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -16,6 +17,9 @@ export default function Home() {
   const [wishlistIds, setWishlistIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const showWishlistActions = !user || user.role === 0;
+
+  // STATE CHO THANH TÌM KIẾM
+  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchProducts = async () => {
     try {
@@ -122,12 +126,13 @@ export default function Home() {
     navigate(targetUrl);
   };
 
-  const handleWishlistToggle = async (event, productId) => {
+  // P2: DÙNG USECALLBACK CHO HANDLEWISHLISTTOGGLE
+  const handleWishlistToggle = useCallback(async (event, productId) => {
     event.preventDefault();
     event.stopPropagation();
 
     if (!user) {
-      alert('Vui long dang nhap de su dung danh sach yeu thich!');
+      alert('Vui lòng đăng nhập để sử dụng danh sách yêu thích!');
       navigate('/login');
       return;
     }
@@ -145,7 +150,7 @@ export default function Home() {
       const data = await res.json();
 
       if (!data.success) {
-        alert(data.message || 'Khong the cap nhat danh sach yeu thich!');
+        alert(data.message || 'Không thể cập nhật danh sách yêu thích!');
         return;
       }
 
@@ -156,8 +161,31 @@ export default function Home() {
         return nextIds;
       });
     } catch (error) {
-      console.error('Loi cap nhat wishlist:', error);
-      alert('Loi ket noi may chu khi cap nhat yeu thich!');
+      console.error('Lỗi cập nhật wishlist:', error);
+      alert('Lỗi kết nối máy chủ khi cập nhật yêu thích!');
+    }
+  }, [user, navigate, wishlistIds]);
+
+  // P0: DÙNG USEMEMO CHO TOÀN BỘ DỮ LIỆU KHÁM PHÁ SẢN PHẨM PHỤ THUỘC VÀO [PRODUCTS]
+  const promoProducts = useMemo(() => {
+    return products.filter(p => p.discountPercent > 0).slice(0, 8);
+  }, [products]);
+
+  const arProducts = useMemo(() => {
+    return products.filter(p => p.arUrl && p.arUrl.trim() !== '').slice(0, 8);
+  }, [products]);
+
+  const newProducts = useMemo(() => {
+    return [...products]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 8);
+  }, [products]);
+
+  // P1: HÀM XỬ LÝ SEARCH SUBMIT ĐIỀU HƯỚNG THỰC TẾ
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      navigate(`/products?search=${encodeURIComponent(searchQuery.trim())}`);
     }
   };
 
@@ -165,6 +193,7 @@ export default function Home() {
 
   return (
     <div className="bg-gray-50 min-h-screen pb-20">
+      {/* ================= 1. BANNER SLIDER (GIỮ NGUYÊN) ================= */}
       {activeBanner && (
         <section className="bg-white border-b border-gray-100">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -196,7 +225,7 @@ export default function Home() {
                   </p>
                 )}
                 <div className="mt-5 inline-flex w-fit items-center gap-2 bg-white text-gray-900 px-5 py-3 rounded-2xl font-black text-sm shadow-lg">
-                  Kham pha ngay <ArrowRight className="w-4 h-4" />
+                  Khám phá ngay <ArrowRight className="w-4 h-4" />
                 </div>
               </div>
 
@@ -206,7 +235,7 @@ export default function Home() {
                     type="button"
                     onClick={goToPreviousBanner}
                     className="absolute left-3 sm:left-5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/85 text-gray-900 flex items-center justify-center shadow-lg hover:bg-white transition"
-                    aria-label="Banner truoc"
+                    aria-label="Banner trước"
                   >
                     <ChevronLeft className="w-5 h-5" />
                   </button>
@@ -214,7 +243,7 @@ export default function Home() {
                     type="button"
                     onClick={goToNextBanner}
                     className="absolute right-3 sm:right-5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/85 text-gray-900 flex items-center justify-center shadow-lg hover:bg-white transition"
-                    aria-label="Banner tiep theo"
+                    aria-label="Banner tiếp theo"
                   >
                     <ChevronRight className="w-5 h-5" />
                   </button>
@@ -228,7 +257,7 @@ export default function Home() {
                           setActiveBannerIndex(index);
                         }}
                         className={`h-2 rounded-full transition-all ${index === activeBannerIndex ? 'w-8 bg-white' : 'w-2 bg-white/50 hover:bg-white/80'}`}
-                        aria-label={`Chuyen den banner ${index + 1}`}
+                        aria-label={`Chuyển đến banner ${index + 1}`}
                       />
                     ))}
                   </div>
@@ -238,8 +267,8 @@ export default function Home() {
           </div>
         </section>
       )}
-      
-      {/* ================= HERO BANNER (CHIA 2 CỘT) ================= */}
+
+      {/* ================= 2. HERO AR SECTION (GIỮ NGUYÊN) ================= */}
       <div className="bg-white border-b border-gray-100 overflow-hidden relative">
         <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-blue-50/50 blur-3xl -z-10"></div>
         <div className="absolute bottom-[-10%] left-[-10%] w-[300px] h-[300px] rounded-full bg-indigo-50/50 blur-3xl -z-10"></div>
@@ -267,7 +296,10 @@ export default function Home() {
             
             <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
               <button 
-                onClick={() => document.getElementById('product-section').scrollIntoView({ behavior: 'smooth' })}
+                onClick={() => {
+                  const el = document.getElementById('promo-section') || document.getElementById('ar-section') || document.getElementById('new-arrivals-section');
+                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                }}
                 className="bg-gray-900 text-white px-8 py-4 rounded-2xl font-bold text-lg hover:bg-blue-600 transition flex items-center justify-center gap-2 shadow-xl hover:-translate-y-1"
               >
                 <View className="w-6 h-6" /> Thử kính ngay
@@ -305,125 +337,162 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ================= PRODUCT GRID (DANH SÁCH SẢN PHẨM THẬT TỪ DB) ================= */}
-      <div id="product-section" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-20">
-        
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-10 gap-4">
-          <div>
-            <h2 className="text-3xl md:text-4xl font-black text-gray-900 tracking-tight">Bộ sưu tập Kính</h2>
-            <p className="text-gray-500 mt-2 text-lg">Đeo thử trực tiếp trên khuôn mặt qua Camera của bạn</p>
+      {/* ================= 3. THANH TÌM KIẾM LỚN NẰM GIỮA TRANG ================= */}
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mt-12">
+        <form 
+          onSubmit={handleSearchSubmit}
+          className="relative bg-white/90 backdrop-blur-md rounded-3xl shadow-xl border border-gray-100 p-2.5 flex items-center gap-2 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-all duration-300"
+        >
+          <div className="pl-4 text-gray-400 group-focus-within:text-blue-600 transition-colors">
+            <Search className="w-6 h-6" />
           </div>
-          <button className="flex items-center text-blue-600 font-bold hover:text-blue-800 transition bg-blue-50 px-4 py-2 rounded-full">
-            Xem tất cả {products.length} mẫu <ArrowRight className="ml-2 w-4 h-4" />
+          <input 
+            type="text" 
+            placeholder="Tìm kiếm sản phẩm hoặc thương hiệu kính mắt..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full py-4 px-2 outline-none bg-transparent text-gray-800 font-bold placeholder-gray-400 text-lg"
+          />
+          <button 
+            type="submit" 
+            className="bg-gray-900 hover:bg-blue-600 active:scale-95 text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 shadow-md shadow-gray-900/10 hover:shadow-blue-500/20"
+          >
+            Tìm kiếm
           </button>
-        </div>
-
-        {/* XỬ LÝ TRẠNG THÁI LOADING */}
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-            <Loader2 className="w-12 h-12 animate-spin mb-4 text-blue-500" />
-            <p className="font-bold tracking-widest uppercase">Đang tải kho hàng...</p>
-          </div>
-        ) : products.length === 0 ? (
-          <div className="text-center py-20 text-gray-400 font-bold">
-            Chưa có sản phẩm nào trong kho. Hãy vào trang Admin để thêm kính nhé!
-          </div>
-        ) : (
-          /* LƯỚI SẢN PHẨM */
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
-            {products.map((product) => {
-              // Kiểm tra xem kính này có link 3D không
-              const is3DReady = product.arUrl && product.arUrl.trim() !== '';
-
-              return (
-                <div 
-                  key={product._id} // Dùng ID của MongoDB
-                  onClick={() => navigate(`/product/${product._id}`)} // Chuyển hướng mang theo ID thật
-                  className="group bg-white rounded-3xl p-5 shadow-sm hover:shadow-2xl hover:shadow-blue-900/10 transition-all duration-300 border border-gray-100 flex flex-col cursor-pointer relative"
-                >
-                  {showWishlistActions && (
-                    <button
-                      type="button"
-                      onClick={(event) => handleWishlistToggle(event, product._id)}
-                      className="absolute top-4 right-4 z-30 w-11 h-11 rounded-full bg-white/95 border border-gray-100 shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition"
-                      aria-label={wishlistIds.has(product._id) ? 'Bỏ yêu thích' : 'Thêm yêu thích'}
-                    >
-                      <Heart className={`w-5 h-5 ${wishlistIds.has(product._id) ? 'fill-red-500 text-red-500' : 'text-gray-500'}`} />
-                    </button>
-                  )}
-                  <div className="absolute inset-0 bg-gray-900/5 z-10 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[1px]">
-                    <button className="bg-white text-gray-900 font-bold px-6 py-3 rounded-xl shadow-xl transform translate-y-4 group-hover:translate-y-0 transition-transform flex items-center gap-2">
-                      <View className="w-5 h-5"/> Xem chi tiết
-                    </button>
-                  </div>
-
-                    <div className="relative aspect-square rounded-2xl overflow-hidden bg-gray-50 mb-5 p-4 flex items-center justify-center">
-                      {/* Lấy ảnh đầu tiên trong mảng images */}
-                      <img 
-                        src={product.images && product.images.length > 0 ? product.images[0] : '/placeholder.png'} 
-                        alt={product.name} 
-                        className="w-full h-full object-cover rounded-xl group-hover:scale-110 transition-transform duration-500 relative z-0 mix-blend-multiply"
-                      />
-                      
-                      {/* NẾU CÓ FILE 3D THÌ HIỆN BADGE NÀY */}
-                      {is3DReady && (
-                        <div className="absolute top-3 left-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full flex items-center shadow-lg uppercase tracking-wider z-10">
-                          <span className="w-2 h-2 bg-white rounded-full mr-2 animate-ping absolute"></span>
-                          <span className="w-2 h-2 bg-white rounded-full mr-2"></span>
-                          Hỗ trợ 3D AR
-                        </div>
-                      )}
-
-                      {/* BADGE BÁO GIẢM GIÁ */}
-                      {product.discountPercent > 0 && (
-                        <div className="absolute top-3 right-3 bg-gradient-to-r from-red-500 to-rose-600 text-white text-[10px] font-black px-3 py-1.5 rounded-full flex flex-col items-center shadow-lg uppercase tracking-wider z-10 animate-bounce">
-                          <div>- {product.discountPercent}% OFF</div>
-                          {product.remainingSaleQuantity !== null && product.remainingSaleQuantity > 0 && (
-                            <div className="text-[8px] opacity-90 mt-0.5 lowercase font-medium">Còn {product.remainingSaleQuantity} suất</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col flex-1 relative z-0">
-                      <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mb-2 line-clamp-1">
-                        {/* Lấy tên Brand và Category từ dữ liệu populate */}
-                        {product.brand?.name || "Kính Mắt"} • {product.category?.name || "Thời Trang"}
-                      </p>
-                      <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors">
-                        {product.name}
-                      </h3>
-                      
-                      <div className="mt-auto pt-4 border-t border-gray-100 flex items-center justify-between">
-                        <div className="flex flex-col">
-                          {product.discountPercent > 0 ? (
-                            <>
-                              <span className="text-[10px] text-gray-400 line-through font-medium leading-none mb-1">
-                                {product.originalPrice.toLocaleString('vi-VN')} đ
-                              </span>
-                              <span className="text-red-500 font-black text-xl leading-none">
-                                {product.salePrice.toLocaleString('vi-VN')} đ
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-blue-600 font-black text-xl leading-none">
-                              {product.price.toLocaleString('vi-VN')} đ
-                            </span>
-                          )}
-                        </div>
-                        
-                        <div className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center text-gray-400 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                          <ShoppingBag className="w-5 h-5" />
-                        </div>
-                      </div>
-                    </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        </form>
       </div>
 
+      {/* XỬ LÝ TRẠNG THÁI LOADING */}
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-24 text-gray-400">
+          <Loader2 className="w-12 h-12 animate-spin mb-4 text-blue-500" />
+          <p className="font-bold tracking-widest uppercase text-sm">Đang tải kho hàng...</p>
+        </div>
+      ) : products.length === 0 ? (
+        <div className="text-center py-24 text-gray-400 font-bold max-w-7xl mx-auto px-4">
+          Chưa có sản phẩm nào trong kho. Hãy vào trang Admin để thêm kính nhé!
+        </div>
+      ) : (
+        /* LƯỚI KHÁM PHÁ SẢN PHẨM */
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-20 space-y-24">
+          
+          {/* ================= 4. SECTION "ĐANG KHUYẾN MÃI" ================= */}
+          {promoProducts.length > 0 && (
+            <section id="promo-section" className="relative">
+              <div className="flex justify-between items-end mb-8 border-b border-gray-100 pb-4">
+                <div>
+                  <div className="inline-flex items-center gap-1.5 bg-red-50 text-red-600 px-3.5 py-1.5 rounded-full font-black text-xs uppercase tracking-wider mb-2">
+                    <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+                    Hot Deals
+                  </div>
+                  <h2 className="text-3xl font-black text-gray-900 tracking-tight">Đang Khuyến Mãi</h2>
+                  <p className="text-sm text-gray-500 mt-1">Các mẫu kính mắt cao cấp đang được áp dụng mức giá ưu đãi nhất</p>
+                </div>
+                <button 
+                  onClick={() => navigate('/products?isSale=true')}
+                  className="group flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold transition-all text-sm bg-blue-50 hover:bg-blue-100/80 px-4 py-2 rounded-full"
+                >
+                  Xem tất cả <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </button>
+              </div>
+
+              {/* P1: TỐI ƯU RESPONSIVE MOBILE SỬ DỤNG GRID-COLS-2 */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
+                {promoProducts.map((product) => (
+                  <ProductCard 
+                    key={product._id} 
+                    product={product} 
+                    showWishlistActions={showWishlistActions} 
+                    wishlistIds={wishlistIds} 
+                    onWishlistToggle={handleWishlistToggle} 
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ================= 5. SECTION "HỖ TRỢ THỬ KÍNH AR" ================= */}
+          {arProducts.length > 0 && (
+            <section id="ar-section" className="relative">
+              <div className="flex justify-between items-end mb-8 border-b border-gray-100 pb-4">
+                <div>
+                  <div className="inline-flex items-center gap-1.5 bg-indigo-50 text-indigo-600 px-3.5 py-1.5 rounded-full font-black text-xs uppercase tracking-wider mb-2">
+                    <Box className="w-3.5 h-3.5" />
+                    AR Try-On
+                  </div>
+                  <h2 className="text-3xl font-black text-gray-900 tracking-tight">Hỗ Trợ Thử Kính AR</h2>
+                  <p className="text-sm text-gray-500 mt-1">Trải nghiệm đeo thử kính ảo trực quan bằng camera của bạn ngay tại chỗ</p>
+                </div>
+                <button 
+                  onClick={() => navigate('/products?isAR=true')}
+                  className="group flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold transition-all text-sm bg-blue-50 hover:bg-blue-100/80 px-4 py-2 rounded-full"
+                >
+                  Xem tất cả <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </button>
+              </div>
+
+              {/* P1: TỐI ƯU RESPONSIVE MOBILE SỬ DỤNG GRID-COLS-2 */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
+                {arProducts.map((product) => (
+                  <ProductCard 
+                    key={product._id} 
+                    product={product} 
+                    showWishlistActions={showWishlistActions} 
+                    wishlistIds={wishlistIds} 
+                    onWishlistToggle={handleWishlistToggle} 
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ================= 6. SECTION "SẢN PHẨM MỚI" ================= */}
+          {newProducts.length > 0 && (
+            <section id="new-arrivals-section" className="relative">
+              <div className="flex justify-between items-end mb-8 border-b border-gray-100 pb-4">
+                <div>
+                  <div className="inline-flex items-center gap-1.5 bg-green-50 text-green-600 px-3.5 py-1.5 rounded-full font-black text-xs uppercase tracking-wider mb-2">
+                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping"></span>
+                    New Arrivals
+                  </div>
+                  <h2 className="text-3xl font-black text-gray-900 tracking-tight">Sản Phẩm Mới</h2>
+                  <p className="text-sm text-gray-500 mt-1">Những mẫu kính mắt thời thượng vừa cập bến cửa hàng của chúng tôi</p>
+                </div>
+                <button 
+                  onClick={() => navigate('/products?sort=newest')}
+                  className="group flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold transition-all text-sm bg-blue-50 hover:bg-blue-100/80 px-4 py-2 rounded-full"
+                >
+                  Xem tất cả <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </button>
+              </div>
+
+              {/* P1: TỐI ƯU RESPONSIVE MOBILE SỬ DỤNG GRID-COLS-2 */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
+                {newProducts.map((product) => (
+                  <ProductCard 
+                    key={product._id} 
+                    product={product} 
+                    showWishlistActions={showWishlistActions} 
+                    wishlistIds={wishlistIds} 
+                    onWishlistToggle={handleWishlistToggle} 
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ================= 7. NÚT "XEM TẤT CẢ SẢN PHẨM" ================= */}
+          <div className="flex justify-center pt-8">
+            <button 
+              onClick={() => navigate('/products')}
+              className="inline-flex items-center gap-2 bg-gray-950 hover:bg-blue-600 active:scale-95 text-white px-10 py-5 rounded-3xl font-extrabold text-lg transition-all duration-300 shadow-xl shadow-gray-900/10 hover:shadow-blue-500/20"
+            >
+              Xem tất cả sản phẩm <ArrowRight className="w-5 h-5" />
+            </button>
+          </div>
+
+        </div>
+      )}
     </div>
   );
 }

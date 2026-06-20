@@ -5,6 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute'; // Import ProtectedRou
 // Import Layouts
 import Navbar from './components/Navbar';
 import ChatWidget from './components/ChatWidget';
+import Footer from './components/Footer';
 import AdminLayout from './pages/admin/AdminLayout';
 import StaffLayout from './pages/staff/StaffLayout'; // Layout mới cho Staff
 import Login from './pages/Login';
@@ -21,6 +22,7 @@ import Profile from './pages/customer/Profile';
 import MyOrders from './pages/customer/MyOrders';
 import Wallet from './pages/customer/Wallet';
 import MyWishlist from './pages/customer/MyWishlist';
+import Products from './pages/customer/Products';
 
 // Import Pages (Admin)
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -55,13 +57,15 @@ export default function App() {
             <Route path="/" element={
               <>
                 <Navbar />
-                <div className="pt-16 min-h-screen bg-gray-55">
+                <div className="pt-16 min-h-screen bg-gray-55 flex flex-col justify-between">
                   <Outlet />
+                  <Footer />
                 </div>
                 <ChatWidget />
               </>
             }>
               <Route index element={<Home />} />
+              <Route path="/products" element={<Products />} />
               <Route path="/product/:id" element={<ProductDetail />} />
               <Route path="/cart" element={<Cart />} />
               

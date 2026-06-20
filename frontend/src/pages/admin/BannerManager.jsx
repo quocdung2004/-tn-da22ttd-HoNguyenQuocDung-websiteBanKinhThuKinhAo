@@ -174,7 +174,7 @@ export default function BannerManager() {
       <div className="max-w-7xl mx-auto space-y-8">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-black text-gray-900">Quan ly Banner</h1>
+            <h1 className="text-3xl font-black text-gray-900">Quản lý Banner</h1>
             <p className="text-gray-500 mt-2">Quan ly banner quang cao hien thi tren trang chu.</p>
           </div>
           <div className="relative w-full sm:w-72">

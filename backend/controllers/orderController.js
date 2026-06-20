@@ -50,9 +50,12 @@ exports.createOrder = async (req, res) => {
     for (const reservedStock of reservedStocks) {
       try {
         console.warn('[ORDER_CREATE_STOCK_ROLLBACK]', reservedStock);
-        await Product.findByIdAndUpdate(reservedStock.productId, {
-          $inc: { stock: reservedStock.quantity }
-        });
+        const prod = await Product.findById(reservedStock.productId);
+        if (prod) {
+          prod.stock = (prod.stock || 0) + reservedStock.quantity;
+          prod.soldQuantity = Math.max(0, (prod.soldQuantity || 0) - reservedStock.quantity);
+          await prod.save();
+        }
       } catch (rollbackError) {
         console.error('[ORDER_CREATE_STOCK_ROLLBACK_FAILED]', {
           productId: reservedStock.productId,
@@ -236,7 +239,7 @@ exports.createOrder = async (req, res) => {
             stock: { $gte: qty }
           },
           {
-            $inc: { stock: -qty }
+            $inc: { stock: -qty, soldQuantity: qty }
           },
           {
             new: true
@@ -493,6 +496,7 @@ exports.updateOrderStatus = async (req, res) => {
           if (product) {
             console.log(`[STOCK_RESTORED] Hoàn lại tồn kho cho sản phẩm ${product.name} (ID: ${product._id}) từ đơn hàng bị hủy, số lượng: ${item.quantity}`);
             product.stock = (product.stock || 0) + item.quantity;
+            product.soldQuantity = Math.max(0, (product.soldQuantity || 0) - item.quantity);
             await product.save();
 
             // ================= REALTIME STOCK INTEGRATION =================
@@ -612,6 +616,7 @@ exports.requestOrderCancel = async (req, res) => {
             if (product) {
               console.log(`[STOCK_RESTORED] Hoàn lại tồn kho cho sản phẩm ${product.name} (ID: ${product._id}) từ đơn hàng bị hủy, số lượng: ${item.quantity}`);
               product.stock = (product.stock || 0) + item.quantity;
+              product.soldQuantity = Math.max(0, (product.soldQuantity || 0) - item.quantity);
               await product.save();
 
               // ================= REALTIME STOCK INTEGRATION =================
@@ -770,6 +775,7 @@ exports.handleOrderCancel = async (req, res) => {
           if (product) {
             console.log(`[STOCK_RESTORED] Hoàn lại tồn kho cho sản phẩm ${product.name} (ID: ${product._id}) từ đơn hàng bị hủy, số lượng: ${item.quantity}`);
             product.stock = (product.stock || 0) + item.quantity;
+            product.soldQuantity = Math.max(0, (product.soldQuantity || 0) - item.quantity);
             await product.save();
 
             // ================= REALTIME STOCK INTEGRATION =================

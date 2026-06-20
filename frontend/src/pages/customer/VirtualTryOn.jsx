@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 import {
   X, RefreshCw, Download, Sparkles, ChevronDown, Eye, StopCircle, ImageIcon,
-  Loader2, Bug, Trash2, Box, Copy
+  Loader2, ShoppingBag
 } from 'lucide-react';
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import { TRIANGULATION } from "../../constants/triangulation";
+import { getCartKey } from '../../utils/cartHelper';
 
 const countConnectedComponents = (geometry) => {
   if (!geometry) return 0;
@@ -89,26 +91,83 @@ const AR_FIT_CONFIG = {
   templeAnchorBackOffsetRatio: 0.28
 };
 
+const DEFAULT_MODEL_FIT_OVERRIDE = {
+  verticalOffsetRatio: 0,
+  scaleMultiplier: 1,
+  pitchOffsetDeg: 0,
+  yawOffsetDeg: 0,
+  rollOffsetDeg: 0,
+  splitSingleMeshByDepth: false,
+  frontDepthStartRatio: 0.68,
+  templeDepthEndRatio: 0.70,
+  frontCenterKeepRatio: 0.23
+};
+
+const MODEL_FIT_OVERRIDES = [
+  {
+    id: 'meshy-ray-ban-tortoiseshell',
+    match: ['meshy_ai_ray_ban_tortoiseshell', '0618144300', 'tortoiseshell'],
+    verticalOffsetRatio: -0.08,
+    scaleMultiplier: 0.96,
+    pitchOffsetDeg: -3,
+    yawOffsetDeg: 0,
+    rollOffsetDeg: 0,
+    splitSingleMeshByDepth: true,
+    frontDepthStartRatio: 0.66,
+    templeDepthEndRatio: 0.72,
+    frontCenterKeepRatio: 0.24
+  }
+];
+
+const getModelFitOverride = (arUrl = '') => {
+  const normalizedUrl = decodeURIComponent(String(arUrl || '')).toLowerCase();
+  const matched = MODEL_FIT_OVERRIDES.find((override) =>
+    override.match?.some((token) => normalizedUrl.includes(token.toLowerCase()))
+  );
+
+  return {
+    ...DEFAULT_MODEL_FIT_OVERRIDE,
+    ...(matched || {}),
+    id: matched?.id || 'default'
+  };
+};
+
 const ENABLE_LEGACY_TEMPLE_FADE = false;
 const YAW_SIDE_THRESHOLD_DEG = 8;
-const SHOW_AR_DEBUG_UI = false;
-const SHOW_AR_OPTIONAL_CONTROLS = false;
-const ENABLE_AR_DIAGNOSTIC_LOGS = false;
+const USE_FACE_ATTACHED_2_5D_TEMPLES = true;
 const NARROW_OCCLUDER_BACK_EXPAND = 0.22;
 const NARROW_OCCLUDER_SIDE_EXPAND = 0.085;
 const FAR_SIDE_OCCLUSION_STRENGTH = 1.3;
+const FACE_ATTACHED_TEMPLE_SEGMENTS = 12;
+const MIN_HINGE_VISIBLE_T = 0.10;
+const FRONTAL_MAX_TEMPLE_VISIBLE_T = 0.30;
+const FAR_SIDE_MIN_TEMPLE_VISIBLE_T = 0.025;
+const FAR_SIDE_MAX_TEMPLE_VISIBLE_T = 0.10;
+const FAR_SIDE_TEMPLE_FADE_T = 0.022;
+const NEAR_SIDE_MIN_YAW_VISIBLE_T = 0.72;
+const NEAR_SIDE_NORMAL_YAW_VISIBLE_T = 0.86;
+const NEAR_SIDE_STRONG_YAW_VISIBLE_T = 0.98;
+const NEAR_SIDE_MAX_TEMPLE_VISIBLE_T = NEAR_SIDE_STRONG_YAW_VISIBLE_T;
+const NEAR_SIDE_FORBIDDEN_START_T = 0.42;
+const MIXED_NEAR_MAX_TEMPLE_VISIBLE_T = 0.90;
+const MIXED_FAR_MAX_TEMPLE_VISIBLE_T = 0.08;
+const FACE_ATTACHED_TEMPLE_PITCH_THRESHOLD_DEG = 15;
 
 // Final model-only pitch correction.
 // Negative value currently lifts the GLB slightly upward in the production camera view.
 // If the glasses tilt in the wrong direction, only change this constant to +5.
 const GLASSES_PITCH_OFFSET_DEG = -5;
-const GLASSES_PITCH_OFFSET_RAD = THREE.MathUtils.degToRad(GLASSES_PITCH_OFFSET_DEG);
-const GLASSES_PITCH_OFFSET_QUAT = new THREE.Quaternion()
-  .setFromAxisAngle(new THREE.Vector3(1, 0, 0), GLASSES_PITCH_OFFSET_RAD);
-
 const applyFinalGlassesQuaternion = (model, baseQuaternion) => {
   if (!model || !baseQuaternion) return;
-  model.quaternion.copy(baseQuaternion.clone().multiply(GLASSES_PITCH_OFFSET_QUAT));
+  const fitOverride = model.userData?.fitOverride || DEFAULT_MODEL_FIT_OVERRIDE;
+  const pitchOffsetRad = THREE.MathUtils.degToRad(GLASSES_PITCH_OFFSET_DEG + (fitOverride.pitchOffsetDeg || 0));
+  const yawOffsetRad = THREE.MathUtils.degToRad(fitOverride.yawOffsetDeg || 0);
+  const rollOffsetRad = THREE.MathUtils.degToRad(fitOverride.rollOffsetDeg || 0);
+  const modelOffsetQuat = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(pitchOffsetRad, yawOffsetRad, rollOffsetRad, 'XYZ')
+  );
+
+  model.quaternion.copy(baseQuaternion.clone().multiply(modelOffsetQuat));
 };
 
 const OCCLUDER_MODE = {
@@ -195,7 +254,7 @@ const getTempleSideState = (yawDegrees) => {
 
 const estimateTempleVisibleLengths = (yawDegrees, nearSide, farSide) => {
   const yawAbs = Math.abs(yawDegrees);
-  const nearLength = clamp(1 - yawAbs / 100, 0.42, 1);
+  const nearLength = clamp(0.72 + Math.max(0, yawAbs - YAW_SIDE_THRESHOLD_DEG) / 58, 0.72, 1);
   const farLength = clamp(1 - Math.max(0, yawAbs - YAW_SIDE_THRESHOLD_DEG) / 42, 0, 1);
 
   if (farSide === 'LEFT') {
@@ -224,6 +283,14 @@ const getTempleBasePart = (part) => {
   return null;
 };
 
+const getDebugColorForPartType = (partType) => {
+  if (partType === 'FRONT_FRAME') return 0x00ff00; // green
+  if (partType === 'LEFT_TEMPLE' || partType?.startsWith?.('LEFT_TEMPLE_')) return 0xff0000; // red
+  if (partType === 'RIGHT_TEMPLE' || partType?.startsWith?.('RIGHT_TEMPLE_')) return 0x0000ff; // blue
+  if (partType === 'LENS') return 0xffff00; // yellow
+  return 0xffffff; // white
+};
+
 const getTempleSegment = (part) => {
   const match = part?.match(/_SEG_(\d+)$/);
   return match ? parseInt(match[1], 10) : null;
@@ -249,6 +316,14 @@ const RIGHT_FACE_MASK_LANDMARKS = [
   377, 152
 ];
 
+const LEFT_EYE_FORBIDDEN_LANDMARKS = [
+  33, 133, 159, 145, 70, 63, 105, 66, 107
+];
+
+const RIGHT_EYE_FORBIDDEN_LANDMARKS = [
+  263, 362, 386, 374, 300, 293, 334, 296, 336
+];
+
 const isPointInPolygon2D = (point, polygon) => {
   let inside = false;
   const n = polygon.length;
@@ -256,7 +331,7 @@ const isPointInPolygon2D = (point, polygon) => {
     const xi = polygon[i].x, yi = polygon[i].y;
     const xj = polygon[j].x, yj = polygon[j].y;
     if (((yi > point.y) !== (yj > point.y)) &&
-        (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi)) {
+      (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi)) {
       inside = !inside;
     }
   }
@@ -345,6 +420,26 @@ const findFirstTempleFaceIntersectionT = (templeLineStart2D, templeLineEnd2D, fa
     cutT: clamp(bestT, 0, 1),
     cutPoint: bestPoint
   };
+};
+
+const findEarliestTempleBoundaryIntersectionT = (templeLineStart2D, templeLineEnd2D, polygons = []) => {
+  let best = { found: false, cutT: null, cutPoint: null, polygonIndex: -1 };
+
+  polygons.forEach((polygon, polygonIndex) => {
+    if (!Array.isArray(polygon) || polygon.length < 3) return;
+
+    const hit = findFirstTempleFaceIntersectionT(templeLineStart2D, templeLineEnd2D, polygon);
+    if (!hit.found) return;
+
+    if (!best.found || hit.cutT < best.cutT) {
+      best = {
+        ...hit,
+        polygonIndex
+      };
+    }
+  });
+
+  return best;
 };
 
 const getTempleSegmentScreenState = (mesh, projectFn, hinge2D, ear2D, fallbackT) => {
@@ -614,36 +709,7 @@ const getTempleSegmentOpacity = (part, templeSideState, yawDegrees, templeBounda
     opacity = 0;
   }
 
-  if (ENABLE_AR_DIAGNOSTIC_LOGS && mesh) {
-    mesh.userData.lastTempleOcclusionDebug = {
-      part,
-      segmentIndex,
-      yawDegrees,
-      yawStrength,
-      pitchStrengthRaw,
-      pitchStrength,
-      effectStrength,
-      isYawMode,
-      isFrontalPitchMode,
-      isNearTempleInYawMode,
-      isFarTempleInYawMode,
-      segmentFallbackT,
-      segmentT,
-      eyeBand: faceMaskModel?.eyeBand || null,
-      eyeBandOpacityRaw,
-      eyeBandOpacity,
-      eyeBandStrength,
-      intersectionFound,
-      cutT,
-      insideFaceMask,
-      edgeDist: Number.isFinite(edgeDist) ? edgeDist : null,
-      boundaryOpacity,
-      maskOpacity,
-      intersectionOpacity,
-      pitchFallbackOpacity,
-      finalOpacity: opacity
-    };
-  }
+
 
   return clamp(opacity, 0, 1);
 };
@@ -715,6 +781,149 @@ const splitMergedTempleMesh = (mesh) => {
     clone.frustumCulled = false;
     return clone;
   });
+};
+
+const buildTriangleSubmesh = (sourceMesh, triangleBuckets, name, partType) => {
+  const sourceGeometry = sourceMesh.geometry;
+  const attributeNames = Object.keys(sourceGeometry.attributes || {});
+  const firstAttrName = attributeNames[0];
+  const firstValues = firstAttrName ? triangleBuckets[firstAttrName] : null;
+
+  if (!firstValues || firstValues.length === 0) return null;
+
+  const geometry = new THREE.BufferGeometry();
+  attributeNames.forEach((attrName) => {
+    const sourceAttr = sourceGeometry.attributes[attrName];
+    const TypedArray = sourceAttr.array.constructor;
+    geometry.setAttribute(
+      attrName,
+      new THREE.BufferAttribute(new TypedArray(triangleBuckets[attrName]), sourceAttr.itemSize, sourceAttr.normalized)
+    );
+  });
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+
+  const clone = sourceMesh.clone(false);
+  clone.name = name;
+  clone.geometry = geometry;
+  clone.material = Array.isArray(sourceMesh.material)
+    ? sourceMesh.material.map((mat) => mat.clone())
+    : sourceMesh.material.clone();
+  clone.userData = {
+    ...sourceMesh.userData,
+    partType,
+    splitFromSingleMesh: sourceMesh.name || 'UNNAMED'
+  };
+  delete clone.userData.skipProductionRender;
+  delete clone.userData.skipMeshClassification;
+  clone.visible = true;
+  clone.frustumCulled = false;
+  return clone;
+};
+
+const splitSingleMeshGlassesByDepth = (model, fitOverride) => {
+  if (!model || !fitOverride?.splitSingleMeshByDepth) return null;
+
+  const meshes = [];
+  model.traverse((child) => {
+    if (child.isMesh && child.geometry?.attributes?.position && !child.userData.skipProductionRender) {
+      meshes.push(child);
+    }
+  });
+
+  if (meshes.length !== 1) return null;
+
+  const sourceMesh = meshes[0];
+  const sourceGeometry = sourceMesh.geometry;
+  const positionAttr = sourceGeometry.attributes.position;
+  const indexArray = sourceGeometry.index ? sourceGeometry.index.array : null;
+  const triangleCount = indexArray ? indexArray.length / 3 : Math.floor(positionAttr.count / 3);
+
+  sourceGeometry.computeBoundingBox();
+  const bbox = sourceGeometry.boundingBox;
+  const size = bbox.getSize(new THREE.Vector3());
+  const frontStartZ = bbox.min.z + size.z * fitOverride.frontDepthStartRatio;
+  const templeEndZ = bbox.min.z + size.z * fitOverride.templeDepthEndRatio;
+  const centerKeepX = size.x * fitOverride.frontCenterKeepRatio;
+  const attributeNames = Object.keys(sourceGeometry.attributes || {});
+  const buckets = {
+    FRONT_FRAME: Object.fromEntries(attributeNames.map((name) => [name, []])),
+    LEFT_TEMPLE: Object.fromEntries(attributeNames.map((name) => [name, []])),
+    RIGHT_TEMPLE: Object.fromEntries(attributeNames.map((name) => [name, []]))
+  };
+
+  const pushVertex = (bucketName, vertexIndex) => {
+    attributeNames.forEach((attrName) => {
+      const attr = sourceGeometry.attributes[attrName];
+      for (let item = 0; item < attr.itemSize; item++) {
+        buckets[bucketName][attrName].push(attr.array[vertexIndex * attr.itemSize + item]);
+      }
+    });
+  };
+
+  let frontTriangles = 0;
+  let leftTempleTriangles = 0;
+  let rightTempleTriangles = 0;
+
+  for (let tri = 0; tri < triangleCount; tri++) {
+    const ia = indexArray ? indexArray[tri * 3] : tri * 3;
+    const ib = indexArray ? indexArray[tri * 3 + 1] : tri * 3 + 1;
+    const ic = indexArray ? indexArray[tri * 3 + 2] : tri * 3 + 2;
+    const centerX = (positionAttr.getX(ia) + positionAttr.getX(ib) + positionAttr.getX(ic)) / 3;
+    const centerZ = (positionAttr.getZ(ia) + positionAttr.getZ(ib) + positionAttr.getZ(ic)) / 3;
+    const isFrontTriangle = centerZ >= frontStartZ || Math.abs(centerX) <= centerKeepX;
+    const isTempleTriangle = centerZ <= templeEndZ && !isFrontTriangle;
+    const bucketName = isFrontTriangle
+      ? 'FRONT_FRAME'
+      : isTempleTriangle && centerX < 0
+        ? 'LEFT_TEMPLE'
+        : isTempleTriangle
+          ? 'RIGHT_TEMPLE'
+          : 'FRONT_FRAME';
+
+    pushVertex(bucketName, ia);
+    pushVertex(bucketName, ib);
+    pushVertex(bucketName, ic);
+
+    if (bucketName === 'FRONT_FRAME') frontTriangles++;
+    else if (bucketName === 'LEFT_TEMPLE') leftTempleTriangles++;
+    else rightTempleTriangles++;
+  }
+
+  const splitMeshes = [
+    buildTriangleSubmesh(sourceMesh, buckets.FRONT_FRAME, `${sourceMesh.name || 'mesh'}__FRONT_FRAME`, 'FRONT_FRAME'),
+    buildTriangleSubmesh(sourceMesh, buckets.LEFT_TEMPLE, `${sourceMesh.name || 'mesh'}__LEFT_TEMPLE`, 'LEFT_TEMPLE'),
+    buildTriangleSubmesh(sourceMesh, buckets.RIGHT_TEMPLE, `${sourceMesh.name || 'mesh'}__RIGHT_TEMPLE`, 'RIGHT_TEMPLE')
+  ].filter(Boolean);
+
+  if (splitMeshes.length < 2 || !sourceMesh.parent) return null;
+
+  sourceMesh.visible = false;
+  sourceMesh.userData.partType = 'SINGLE_MESH_SOURCE';
+  sourceMesh.userData.skipProductionRender = true;
+  sourceMesh.userData.skipMeshClassification = true;
+
+  splitMeshes.forEach((mesh) => {
+    sourceMesh.parent.add(mesh);
+  });
+
+  return {
+    sourceMesh: sourceMesh.name || 'UNNAMED',
+    sourceSize: {
+      x: Number(size.x.toFixed(5)),
+      y: Number(size.y.toFixed(5)),
+      z: Number(size.z.toFixed(5))
+    },
+    frontStartZ: Number(frontStartZ.toFixed(5)),
+    templeEndZ: Number(templeEndZ.toFixed(5)),
+    centerKeepX: Number(centerKeepX.toFixed(5)),
+    createdMeshes: splitMeshes.map((mesh) => mesh.name),
+    triangles: {
+      front: frontTriangles,
+      leftTemple: leftTempleTriangles,
+      rightTemple: rightTempleTriangles
+    }
+  };
 };
 
 const splitTempleMeshIntoSegments = (mesh) => {
@@ -860,6 +1069,888 @@ const applyTempleDepthFit = (mesh, depthScale) => {
   );
 };
 
+const getMeshMaterials = (mesh) => (Array.isArray(mesh?.material) ? mesh.material : [mesh?.material]).filter(Boolean);
+
+const cloneMeshMaterials = (mesh) => {
+  if (!mesh?.material) return;
+  mesh.material = Array.isArray(mesh.material)
+    ? mesh.material.map((mat) => mat?.clone?.() || mat)
+    : mesh.material.clone();
+};
+
+const neutralizePhysicalGlassProps = (mat) => {
+  if (!mat) return;
+  if ('transmission' in mat) mat.transmission = 0;
+  if ('thickness' in mat) mat.thickness = 0;
+  if ('ior' in mat) mat.ior = 1.0;
+  if ('envMapIntensity' in mat) mat.envMapIntensity = 0;
+  if ('reflectivity' in mat) mat.reflectivity = 0;
+  if ('metalness' in mat) mat.metalness = 0;
+  if ('roughness' in mat) mat.roughness = 1;
+  mat.needsUpdate = true;
+};
+
+const isPhysicalGlassMaterial = (mat) => {
+  if (!mat) return false;
+  const name = `${mat.name || ''} ${mat.map?.name || ''} ${mat.map?.image?.src || ''}`.toLowerCase();
+  const hasGlassName = /glass|lens|kính|clear|transparent|crystal/.test(name);
+  const hasTransmission = typeof mat.transmission === 'number' && mat.transmission > 0.01;
+  const hasPhysicalProps =
+    (typeof mat.thickness === 'number' && mat.thickness > 0) ||
+    (typeof mat.ior === 'number' && mat.ior > 1.05) ||
+    (typeof mat.opacity === 'number' && mat.opacity < 0.75) ||
+    mat.transparent === true ||
+    (typeof mat.alphaTest === 'number' && mat.alphaTest > 0.1);
+
+  return hasGlassName || hasTransmission || hasPhysicalProps;
+};
+
+const isDecorativeLensOverlay = (mesh) => {
+  const name = `${mesh?.name || ''} ${Array.isArray(mesh?.material)
+    ? mesh.material.map((mat) => `${mat?.name || ''} ${mat?.map?.name || ''} ${mat?.map?.image?.src || ''}`).join(' ')
+    : `${mesh?.material?.name || ''} ${mesh?.material?.map?.name || ''} ${mesh?.material?.map?.image?.src || ''}`}`.toLowerCase();
+
+  return ['highlight', 'reflection', 'reflect', 'coating', 'specular', 'glare', 'shine', 'gloss', 'flare', 'overlay'].some((keyword) =>
+    name.includes(keyword)
+  );
+};
+
+const isTintedLensMaterial = (mat, mesh) => {
+  const mapName = `${mat?.map?.name || ''} ${mat?.map?.image?.src || ''}`.toLowerCase();
+  const name = `${mesh?.name || ''} ${mat?.name || ''} ${mapName}`.toLowerCase();
+  const keywordTinted =
+    /sunglass|sun|tint|tinted|smoke|brown|gray|grey|dark|black|blue|green|yellow|amber|polarized|gradient|mirror/.test(name);
+  const color = mat?.color;
+  const brightness = color
+    ? (color.r + color.g + color.b) / 3
+    : 1;
+  const saturation = color
+    ? Math.max(color.r, color.g, color.b) - Math.min(color.r, color.g, color.b)
+    : 0;
+  const isDark = brightness < 0.70;
+  const isStronglyColored = saturation > 0.18;
+
+  return keywordTinted || isDark || isStronglyColored;
+};
+
+const isClearLensMaterial = (mat, mesh) => {
+  if (!mat) return false;
+
+  const mapName = `${mat?.map?.name || ''} ${mat?.map?.image?.src || ''}`.toLowerCase();
+  const name = `${mesh?.name || ''} ${mat?.name || ''} ${mapName}`.toLowerCase();
+  const clearKeyword =
+    /clear|transparent|transparency|glass|lens|kính|trong|crystal/.test(name);
+  const color = mat?.color;
+  const brightness = color
+    ? (color.r + color.g + color.b) / 3
+    : 1;
+  const saturation = color
+    ? Math.max(color.r, color.g, color.b) - Math.min(color.r, color.g, color.b)
+    : 0;
+  const tintedKeyword =
+    /sunglass|sun|tint|tinted|smoke|brown|gray|grey|dark|black|blue|green|yellow|amber|polarized|gradient|mirror/.test(name);
+  const isDark = brightness < 0.70;
+  const isStronglyColored = saturation > 0.18;
+
+  if (tintedKeyword || isDark || isStronglyColored) {
+    return false;
+  }
+
+  const hasTransparentFlag = mat.transparent === true;
+  const hasLowOpacity = typeof mat.opacity === 'number' && mat.opacity < 0.65;
+  const hasAlphaTest = typeof mat.alphaTest === 'number' && mat.alphaTest > 0.1;
+  const isBrightNeutral = brightness > 0.78 && saturation < 0.16;
+
+  return (
+    (hasTransparentFlag && hasLowOpacity) ||
+    hasAlphaTest ||
+    isBrightNeutral ||
+    clearKeyword
+  );
+};
+
+const getTintOpacityFromMaterial = (mat) => {
+  const color = mat?.color;
+  if (!color) return 0.18;
+
+  const brightness = (color.r + color.g + color.b) / 3;
+  return clamp(0.08 + (1 - brightness) * 0.34, 0.08, 0.38);
+};
+
+const createTintedLensMaterialFromGLB = (originalMat, opacity) => {
+  const mat = new THREE.MeshPhongMaterial({
+    color: originalMat?.color ? originalMat.color.clone() : new THREE.Color(0x333333),
+    map: originalMat?.map || null,
+    transparent: true,
+    opacity,
+    specular: new THREE.Color(0xffffff),
+    shininess: 120,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide
+  });
+
+  mat.toneMapped = false;
+  mat.needsUpdate = true;
+  return mat;
+};
+
+const applyClearLensMaterial = (mesh) => {
+  if (!mesh) return;
+
+  const sourceMaterials = getMeshMaterials(mesh);
+  const firstMat = sourceMaterials[0];
+  const originalOpacity = firstMat?.opacity ?? 1.0;
+  const targetOpacity =
+    typeof originalOpacity === 'number' && originalOpacity > 0 && originalOpacity < 0.20
+      ? clamp(originalOpacity, 0.04, 0.12)
+      : 0.08;
+
+  mesh.userData.skipProductionRender = false;
+  mesh.userData.arLensMode = 'CLEAR_RENDERED';
+  mesh.userData.clearLensOpacity = targetOpacity;
+
+  const makeClearMat = (originalMat) => {
+    const mat = new THREE.MeshPhongMaterial({
+      color: originalMat?.color ? originalMat.color.clone() : new THREE.Color(0xe0f2f1), // Light blue-green tint like AR coating
+      transparent: true,
+      opacity: targetOpacity,
+      specular: new THREE.Color(0xffffff),
+      shininess: 150,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide
+    });
+
+    mat.map = null;
+    mat.toneMapped = false;
+    mat.needsUpdate = true;
+    return mat;
+  };
+
+  mesh.material = Array.isArray(mesh.material)
+    ? mesh.material.map(makeClearMat)
+    : makeClearMat(mesh.material);
+  mesh.visible = true;
+};
+
+const applyArLensRenderState = (mesh) => {
+  if (!mesh || mesh.userData.partType !== 'LENS') return;
+
+  if (mesh.userData.arLensMode === 'TINTED_RENDERED') {
+    mesh.visible = true;
+    mesh.userData.skipProductionRender = false;
+    getMeshMaterials(mesh).forEach((mat) => {
+      if (!mat) return;
+      mat.transparent = true;
+      mat.depthWrite = false;
+      mat.depthTest = true;
+      mat.side = THREE.DoubleSide;
+      mat.toneMapped = false;
+      mat.clippingPlanes = [];
+      mat.needsUpdate = true;
+    });
+    return;
+  }
+
+  if (mesh.userData.arLensMode === 'CLEAR_RENDERED') {
+    mesh.visible = true;
+    mesh.userData.skipProductionRender = false;
+
+    const targetOpacity = mesh.userData.clearLensOpacity ?? 0.08;
+    getMeshMaterials(mesh).forEach((mat) => {
+      if (!mat) return;
+      mat.transparent = true;
+      mat.opacity = targetOpacity;
+      mat.depthWrite = false;
+      mat.depthTest = true;
+      mat.side = THREE.DoubleSide;
+      mat.toneMapped = false;
+      mat.clippingPlanes = [];
+      mat.needsUpdate = true;
+    });
+
+    return;
+  }
+
+  mesh.visible = false;
+  mesh.userData.skipProductionRender = true;
+};
+
+const auditLensMeshes = (model) => {
+  const lensMeshes = [];
+  const hiddenOverlayMeshes = [];
+  const clearLensMeshes = [];
+  const tintedLensMeshes = [];
+
+  model?.traverse((child) => {
+    if (!child.isMesh || child.userData.partType !== 'LENS') return;
+
+    lensMeshes.push(child);
+    const materials = getMeshMaterials(child);
+    materials.forEach(neutralizePhysicalGlassProps);
+
+    if (isDecorativeLensOverlay(child)) {
+      child.visible = false;
+      child.userData.skipProductionRender = true;
+      child.userData.arLensMode = 'DECORATIVE_OVERLAY_HIDDEN';
+      hiddenOverlayMeshes.push(child.name || 'UNNAMED');
+      return;
+    }
+
+    const hasTintedMaterial = materials.some((mat) => isTintedLensMaterial(mat, child));
+    const isClearLens = materials.every((mat) => isClearLensMaterial(mat, child));
+
+    if (hasTintedMaterial) {
+      child.visible = true;
+      child.userData.skipProductionRender = false;
+      child.userData.arLensMode = 'TINTED_RENDERED';
+      child.material = Array.isArray(child.material)
+        ? child.material.map((mat) => createTintedLensMaterialFromGLB(mat, getTintOpacityFromMaterial(mat)))
+        : createTintedLensMaterialFromGLB(child.material, getTintOpacityFromMaterial(child.material));
+      tintedLensMeshes.push(child.name || 'UNNAMED');
+      return;
+    }
+
+    if (isClearLens) {
+      applyClearLensMaterial(child);
+      clearLensMeshes.push(child.name || 'UNNAMED');
+      return;
+    }
+
+    applyClearLensMaterial(child);
+    clearLensMeshes.push(`${child.name || 'UNNAMED'}__FALLBACK_CLEAR`);
+  });
+
+  model.userData.lensAudit = {
+    totalLensCount: lensMeshes.length,
+    clearLensMeshes,
+    tintedLensMeshes,
+    hiddenOverlayMeshes,
+    lensMeshes: lensMeshes.map((mesh) => mesh.name || 'UNNAMED'),
+    lensDetails: lensMeshes.map((mesh) => ({
+      name: mesh.name || 'UNNAMED',
+      mode: mesh.userData.arLensMode || 'UNKNOWN',
+      materialNames: getMeshMaterials(mesh).map((mat) => mat.name || 'NO_MAT'),
+      colors: getMeshMaterials(mesh).map((mat) =>
+        mat.color ? `#${mat.color.getHexString()}` : 'NO_COLOR'
+      ),
+      hasMap: getMeshMaterials(mesh).map((mat) => !!mat.map)
+    }))
+  };
+
+  return model.userData.lensAudit;
+};
+
+const auditArModelMeshes = (model) => {
+  const fullBox = new THREE.Box3().setFromObject(model);
+  const fullSize = fullBox.getSize(new THREE.Vector3());
+  const rows = [];
+
+  model?.traverse((child) => {
+    if (!child.isMesh || !child.geometry?.attributes?.position) return;
+
+    child.geometry.computeBoundingBox();
+    const localBox = child.geometry.boundingBox;
+    const localSize = localBox.getSize(new THREE.Vector3());
+    const localCenter = localBox.getCenter(new THREE.Vector3());
+    const worldBox = new THREE.Box3().setFromObject(child);
+    const worldSize = worldBox.getSize(new THREE.Vector3());
+    const materials = getMeshMaterials(child);
+    const partType = child.userData.partType || 'UNKNOWN';
+
+    rows.push({
+      meshName: child.name || 'NO_NAME',
+      materialName: materials.map((mat) => mat.name || 'NO_MAT').join(' | '),
+      bboxSize: `${localSize.x.toFixed(4)}, ${localSize.y.toFixed(4)}, ${localSize.z.toFixed(4)}`,
+      center: `${localCenter.x.toFixed(4)}, ${localCenter.y.toFixed(4)}, ${localCenter.z.toFixed(4)}`,
+      worldSize: `${worldSize.x.toFixed(4)}, ${worldSize.y.toFixed(4)}, ${worldSize.z.toFixed(4)}`,
+      partType,
+      isLens: partType === 'LENS',
+      isFrontFrame: partType === 'FRONT_FRAME',
+      isLeftTemple: getTempleBasePart(partType) === 'LEFT_TEMPLE',
+      isRightTemple: getTempleBasePart(partType) === 'RIGHT_TEMPLE',
+      isBothTemples: getTempleBasePart(partType) === 'BOTH_TEMPLES',
+      hiddenSource: child.userData.skipProductionRender === true,
+      vertexCount: child.geometry.attributes.position.count,
+      modelSize: `${fullSize.x.toFixed(4)}, ${fullSize.y.toFixed(4)}, ${fullSize.z.toFixed(4)}`
+    });
+  });
+
+  return rows;
+};
+
+const createFaceAttachedTempleGeometry = () => {
+  const vertexCount = (FACE_ATTACHED_TEMPLE_SEGMENTS + 1) * 2;
+  const positions = new Float32Array(vertexCount * 3);
+  const uvs = new Float32Array(vertexCount * 2);
+  const indices = [];
+
+  for (let i = 0; i < FACE_ATTACHED_TEMPLE_SEGMENTS; i++) {
+    const a = i * 2;
+    const b = a + 1;
+    const c = a + 2;
+    const d = a + 3;
+    indices.push(a, c, b, b, c, d);
+  }
+
+  for (let i = 0; i <= FACE_ATTACHED_TEMPLE_SEGMENTS; i++) {
+    const u = i / FACE_ATTACHED_TEMPLE_SEGMENTS;
+    uvs[i * 4] = u;
+    uvs[i * 4 + 1] = 0;
+    uvs[i * 4 + 2] = u;
+    uvs[i * 4 + 3] = 1;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.setDrawRange(0, FACE_ATTACHED_TEMPLE_SEGMENTS * 6);
+  return geometry;
+};
+
+const getFaceAttachedTempleMaterial = (model) => {
+  let sourceMaterial = null;
+  const priorityPartTypes = [
+    'LEFT_TEMPLE',
+    'RIGHT_TEMPLE',
+    'LEFT_TEMPLE_SEG_0',
+    'RIGHT_TEMPLE_SEG_0',
+    'BOTH_TEMPLES',
+    'FRONT_FRAME'
+  ];
+
+  for (let i = 0; i < priorityPartTypes.length && !sourceMaterial; i++) {
+    const partType = priorityPartTypes[i];
+    model?.traverse((child) => {
+      if (sourceMaterial || !child.isMesh || !child.material) return;
+      if (child.userData.partType === partType || child.userData.partType?.startsWith(`${partType}_`)) {
+        sourceMaterial = Array.isArray(child.material) ? child.material[0] : child.material;
+      }
+    });
+  }
+
+  const material = sourceMaterial
+    ? sourceMaterial.clone()
+    : new THREE.MeshStandardMaterial({ color: 0x202020, roughness: 0.38, metalness: 0.05 });
+
+  material.side = THREE.DoubleSide;
+  material.depthTest = true;
+  material.depthWrite = true;
+  material.transparent = material.transparent || false;
+  material.opacity = material.opacity ?? 1.0;
+  return material;
+};
+
+const getOriginalTempleMaterial = (model, side) => {
+  let sourceMaterial = null;
+  const sideBase = `${side}_TEMPLE`;
+  const priorityMatchers = [
+    (part) => part === sideBase,
+    (part) => part?.startsWith(`${sideBase}_SEG_`),
+    (part) => part === 'BOTH_TEMPLES',
+    (part) => part === 'FRONT_FRAME'
+  ];
+
+  for (let i = 0; i < priorityMatchers.length && !sourceMaterial; i++) {
+    const matches = priorityMatchers[i];
+    model?.traverse((child) => {
+      if (sourceMaterial || !child.isMesh || !child.material) return;
+      if (matches(child.userData.partType)) {
+        sourceMaterial = Array.isArray(child.material) ? child.material[0] : child.material;
+      }
+    });
+  }
+
+  return sourceMaterial ? sourceMaterial.clone() : null;
+};
+
+const getMaterialAuditSnapshot = (material) => {
+  if (!material) return null;
+  return {
+    name: material.name || 'NO_MAT',
+    color: material.color ? `#${material.color.getHexString()}` : 'N/A',
+    hasMap: !!material.map,
+    roughness: material.roughness ?? 'N/A',
+    metalness: material.metalness ?? 'N/A',
+    opacity: material.opacity ?? 1,
+    transparent: !!material.transparent
+  };
+};
+
+const collectOriginalTempleSources = (model) => {
+  const sources = {
+    leftSegments: [],
+    rightSegments: [],
+    bothTempleMeshes: [],
+    leftMaterial: getOriginalTempleMaterial(model, 'LEFT'),
+    rightMaterial: getOriginalTempleMaterial(model, 'RIGHT'),
+    leftMaterialAudit: null,
+    rightMaterialAudit: null
+  };
+
+  model?.traverse((child) => {
+    if (!child.isMesh) return;
+    const part = child.userData.partType;
+    const basePart = getTempleBasePart(part);
+    const segmentIndex = getTempleSegment(part);
+
+    if (segmentIndex !== null && basePart === 'LEFT_TEMPLE') {
+      sources.leftSegments.push(child);
+    } else if (segmentIndex !== null && basePart === 'RIGHT_TEMPLE') {
+      sources.rightSegments.push(child);
+    } else if (basePart === 'BOTH_TEMPLES') {
+      sources.bothTempleMeshes.push(child);
+    }
+  });
+
+  sources.leftSegments.sort((a, b) => (a.userData.templeSegmentIndex ?? 0) - (b.userData.templeSegmentIndex ?? 0));
+  sources.rightSegments.sort((a, b) => (a.userData.templeSegmentIndex ?? 0) - (b.userData.templeSegmentIndex ?? 0));
+  sources.leftMaterialAudit = getMaterialAuditSnapshot(sources.leftMaterial);
+  sources.rightMaterialAudit = getMaterialAuditSnapshot(sources.rightMaterial);
+  model.userData.glbTempleSources = sources;
+
+  return sources;
+};
+
+const createFaceAttachedTempleMesh = (side, material) => {
+  const mesh = new THREE.Mesh(createFaceAttachedTempleGeometry(), material.clone());
+  mesh.name = `${side}_FACE_ATTACHED_2_5D_TEMPLE`;
+  mesh.userData.partType = `${side}_FACE_ATTACHED_TEMPLE`;
+  mesh.renderOrder = 0;
+  mesh.frustumCulled = false;
+  mesh.visible = false;
+  return mesh;
+};
+
+const markOriginalTempleMeshesReplaced = (model) => {
+  if (!model || !USE_FACE_ATTACHED_2_5D_TEMPLES) return;
+
+  model.traverse((child) => {
+    if (!child.isMesh) return;
+    if (!isTemplePart(child.userData.partType)) return;
+    if (getTempleSegment(child.userData.partType) !== null) return;
+
+    child.visible = false;
+    child.userData.skipProductionRender = true;
+    child.userData.replacedByGlbDerivedTempleSegments = true;
+
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    materials.forEach((mat) => {
+      if (mat) {
+        mat.transparent = true;
+        mat.opacity = 0;
+        mat.depthWrite = false;
+      }
+    });
+  });
+};
+
+const setFaceAttachedTempleGroupVisible = (group, visible) => {
+  if (!group) return;
+  group.visible = visible;
+};
+
+const makeFaceAttachedTempleCurve = (start, middle, end, side, faceRig, faceWidth) => {
+  const right = faceRig?.basis?.right || new THREE.Vector3(1, 0, 0);
+  const back = faceRig?.basis?.back || new THREE.Vector3(0, 0, -1);
+  const up = faceRig?.basis?.up || new THREE.Vector3(0, 1, 0);
+  const sideSign = side === 'LEFT' ? -1 : 1;
+  const hingeLift = faceWidth * 0.006;
+
+  const p0 = start.clone().addScaledVector(up, hingeLift);
+  const p1 = start.clone()
+    .lerp(middle, 0.58)
+    .addScaledVector(right, sideSign * faceWidth * 0.035)
+    .addScaledVector(back, faceWidth * 0.035);
+  const p2 = middle.clone()
+    .lerp(end, 0.55)
+    .addScaledVector(right, sideSign * faceWidth * 0.018)
+    .addScaledVector(back, faceWidth * 0.018);
+  const p3 = end.clone();
+
+  return new THREE.CatmullRomCurve3([p0, p1, p2, p3], false, 'centripetal', 0.35);
+};
+
+const getFaceAttachedTempleFallbackT = (side, templeSideState, yawAbs, pitchAbs) => {
+  const yawRamp = clamp((yawAbs - YAW_SIDE_THRESHOLD_DEG) / 35, 0, 1);
+  const pitchRamp = clamp((pitchAbs - FACE_ATTACHED_TEMPLE_PITCH_THRESHOLD_DEG) / 22, 0, 1);
+  const isYawMode = yawAbs > YAW_SIDE_THRESHOLD_DEG;
+  const isMixedYawPitchMode = isYawMode && pitchAbs > FACE_ATTACHED_TEMPLE_PITCH_THRESHOLD_DEG;
+  const basePart = `${side}_TEMPLE`;
+  const isNearSide = templeSideState?.nearTemplePart === basePart;
+  const isFarSide = templeSideState?.farTemplePart === basePart;
+
+  if (!isYawMode) {
+    return clamp(FRONTAL_MAX_TEMPLE_VISIBLE_T - pitchRamp * 0.06, MIN_HINGE_VISIBLE_T, FRONTAL_MAX_TEMPLE_VISIBLE_T);
+  }
+
+  if (isFarSide) {
+    const maxT = isMixedYawPitchMode ? MIXED_FAR_MAX_TEMPLE_VISIBLE_T : FAR_SIDE_MAX_TEMPLE_VISIBLE_T;
+    return clamp(0.085 - yawRamp * 0.035 - pitchRamp * 0.02, FAR_SIDE_MIN_TEMPLE_VISIBLE_T, maxT);
+  }
+
+  if (isNearSide) {
+    const maxT = isMixedYawPitchMode ? MIXED_NEAR_MAX_TEMPLE_VISIBLE_T : NEAR_SIDE_MAX_TEMPLE_VISIBLE_T;
+    const nearTargetT = yawRamp < 0.5
+      ? THREE.MathUtils.lerp(NEAR_SIDE_MIN_YAW_VISIBLE_T, NEAR_SIDE_NORMAL_YAW_VISIBLE_T, yawRamp / 0.5)
+      : THREE.MathUtils.lerp(NEAR_SIDE_NORMAL_YAW_VISIBLE_T, NEAR_SIDE_STRONG_YAW_VISIBLE_T, (yawRamp - 0.5) / 0.5);
+    return clamp(nearTargetT - pitchRamp * 0.06, NEAR_SIDE_MIN_YAW_VISIBLE_T, maxT);
+  }
+
+  return FRONTAL_MAX_TEMPLE_VISIBLE_T;
+};
+
+const getNearSideTempleTargetT = (yawAbs) => {
+  const yawRamp = clamp((yawAbs - YAW_SIDE_THRESHOLD_DEG) / 35, 0, 1);
+  return yawRamp < 0.5
+    ? THREE.MathUtils.lerp(NEAR_SIDE_MIN_YAW_VISIBLE_T, NEAR_SIDE_NORMAL_YAW_VISIBLE_T, yawRamp / 0.5)
+    : THREE.MathUtils.lerp(NEAR_SIDE_NORMAL_YAW_VISIBLE_T, NEAR_SIDE_STRONG_YAW_VISIBLE_T, (yawRamp - 0.5) / 0.5);
+};
+
+const getSmoothedTempleVisibleT = (side, targetVisibleT, templeVisibleTRef, options = {}) => {
+  if (!templeVisibleTRef?.current) return targetVisibleT;
+
+  const previous = templeVisibleTRef.current[side];
+
+  if (previous === null || previous === undefined) {
+    templeVisibleTRef.current[side] = targetVisibleT;
+    return targetVisibleT;
+  }
+
+  if (Math.abs(targetVisibleT - previous) < 0.025) {
+    return previous;
+  }
+
+  if (options.forceFastDrop && targetVisibleT < previous) {
+    templeVisibleTRef.current[side] = targetVisibleT;
+    return targetVisibleT;
+  }
+
+  const alpha = targetVisibleT < previous ? 0.32 : 0.22;
+  const smoothed = THREE.MathUtils.lerp(previous, targetVisibleT, alpha);
+
+  templeVisibleTRef.current[side] = smoothed;
+  return smoothed;
+};
+
+const getFaceAttachedTempleVisibleT = ({
+  side,
+  curve,
+  templeSideState,
+  yawDegrees,
+  pitchDegrees,
+  faceMaskModel,
+  start,
+  end
+}) => {
+  const yawAbs = Math.abs(yawDegrees);
+  const pitchAbs = Math.abs(pitchDegrees);
+  const basePart = `${side}_TEMPLE`;
+  const isYawMode = yawAbs > YAW_SIDE_THRESHOLD_DEG;
+  const isNearSide = templeSideState?.nearTemplePart === basePart;
+  const isFarSide = templeSideState?.farTemplePart === basePart;
+  const fallbackT = getFaceAttachedTempleFallbackT(side, templeSideState, yawAbs, pitchAbs);
+  const nearTargetT = isNearSide && isYawMode ? getNearSideTempleTargetT(yawAbs) : fallbackT;
+  const polygon = side === 'LEFT' ? faceMaskModel?.leftPolygon : faceMaskModel?.rightPolygon;
+  const projectFn = faceMaskModel?.projectWorldToScreen;
+
+  let visibleT = fallbackT;
+
+  if (projectFn && start && end) {
+    const start2D = projectFn(start);
+    const end2D = projectFn(end);
+    const boundaryPolygons = isFarSide
+      ? [
+        faceMaskModel?.leftPolygon,
+        faceMaskModel?.rightPolygon
+      ].filter((poly) => Array.isArray(poly) && poly.length >= 3)
+      : [polygon].filter((poly) => Array.isArray(poly) && poly.length >= 3);
+    const intersection = isFarSide
+      ? findEarliestTempleBoundaryIntersectionT(start2D, end2D, boundaryPolygons)
+      : findFirstTempleFaceIntersectionT(start2D, end2D, polygon);
+
+    if (intersection.found) {
+      const margin = isFarSide ? 0.20 : isNearSide ? 0.025 : 0.045;
+      const minVisibleT = isFarSide ? FAR_SIDE_MIN_TEMPLE_VISIBLE_T : MIN_HINGE_VISIBLE_T;
+      const cutT = clamp(intersection.cutT - margin, minVisibleT, 1);
+      if (isFarSide) {
+        visibleT = Math.min(visibleT, cutT);
+      } else if (isNearSide && isYawMode) {
+        visibleT = Math.max(visibleT, nearTargetT);
+        visibleT = Math.min(visibleT, fallbackT);
+      } else {
+        visibleT = Math.min(visibleT, cutT);
+      }
+    } else if (isFarSide && isYawMode) {
+      visibleT = FAR_SIDE_MIN_TEMPLE_VISIBLE_T;
+    }
+  }
+
+  const sideForbiddenPolygon = side === 'LEFT'
+    ? faceMaskModel?.leftEyeForbiddenPolygon
+    : faceMaskModel?.rightEyeForbiddenPolygon;
+  const forbiddenPolygons = [sideForbiddenPolygon].filter((poly) => Array.isArray(poly) && poly.length >= 3);
+  const fallbackForbiddenPolygons = [
+    faceMaskModel?.leftEyeForbiddenPolygon,
+    faceMaskModel?.rightEyeForbiddenPolygon
+  ].filter((poly) => Array.isArray(poly) && poly.length >= 3);
+  const activeForbiddenPolygons = forbiddenPolygons.length ? forbiddenPolygons : fallbackForbiddenPolygons;
+
+  if (projectFn && activeForbiddenPolygons.length && curve) {
+    const forbiddenStartT = isNearSide && isYawMode ? NEAR_SIDE_FORBIDDEN_START_T : 0.12;
+    for (let i = 2; i <= FACE_ATTACHED_TEMPLE_SEGMENTS; i++) {
+      const t = (i / FACE_ATTACHED_TEMPLE_SEGMENTS) * visibleT;
+      if (t < forbiddenStartT) continue;
+      const pt2D = projectFn(curve.getPoint(t));
+      const insideForbiddenZone = activeForbiddenPolygons.some((poly) => isPointInPolygon2D(pt2D, poly));
+      if (insideForbiddenZone) {
+        visibleT = Math.min(visibleT, clamp(t - 0.045, MIN_HINGE_VISIBLE_T, visibleT));
+        break;
+      }
+    }
+  }
+
+  const maxVisibleT = !isYawMode
+    ? FRONTAL_MAX_TEMPLE_VISIBLE_T
+    : isFarSide
+      ? FAR_SIDE_MAX_TEMPLE_VISIBLE_T
+      : NEAR_SIDE_MAX_TEMPLE_VISIBLE_T;
+
+  return clamp(visibleT, isFarSide ? FAR_SIDE_MIN_TEMPLE_VISIBLE_T : MIN_HINGE_VISIBLE_T, maxVisibleT);
+};
+
+const updateFaceAttachedTempleStrip = (mesh, curve, visibleT, faceRig, faceWidth) => {
+  if (!mesh?.geometry || !curve || !faceRig) return;
+
+  const positionAttr = mesh.geometry.attributes.position;
+  const up = faceRig.basis?.up || new THREE.Vector3(0, 1, 0);
+  const halfWidth = clamp(faceWidth * 0.010, 0.012, 0.036);
+
+  for (let i = 0; i <= FACE_ATTACHED_TEMPLE_SEGMENTS; i++) {
+    const segmentRatio = i / FACE_ATTACHED_TEMPLE_SEGMENTS;
+    const curveT = clamp(segmentRatio * visibleT, 0, 1);
+    const center = curve.getPoint(curveT);
+    const taper = 1 - smoothstep(0.72, 1.0, segmentRatio) * 0.45;
+    const sideOffset = up.clone().multiplyScalar(halfWidth * taper);
+    const left = center.clone().add(sideOffset);
+    const right = center.clone().sub(sideOffset);
+    const vertexIndex = i * 2;
+
+    positionAttr.setXYZ(vertexIndex, left.x, left.y, left.z);
+    positionAttr.setXYZ(vertexIndex + 1, right.x, right.y, right.z);
+  }
+
+  positionAttr.needsUpdate = true;
+  mesh.geometry.computeBoundingSphere();
+  mesh.visible = visibleT >= MIN_HINGE_VISIBLE_T;
+};
+
+const updateFaceAttachedTemples = ({
+  group,
+  leftMesh,
+  rightMesh,
+  templeBoundaryModel,
+  templeSideState,
+  faceMaskModel,
+  yawDegrees,
+  pitchDegrees,
+  faceRig
+}) => {
+  if (!USE_FACE_ATTACHED_2_5D_TEMPLES || !group || !leftMesh || !rightMesh || !templeBoundaryModel || !faceRig) {
+    setFaceAttachedTempleGroupVisible(group, false);
+    return;
+  }
+
+  const faceWidth = faceRig.metrics?.faceWidth3D || 1;
+  const specs = [
+    {
+      side: 'LEFT',
+      mesh: leftMesh,
+      start: templeBoundaryModel.leftHingeApprox,
+      middle: templeBoundaryModel.leftFaceBoundary,
+      end: templeBoundaryModel.leftEstimatedEar
+    },
+    {
+      side: 'RIGHT',
+      mesh: rightMesh,
+      start: templeBoundaryModel.rightHingeApprox,
+      middle: templeBoundaryModel.rightFaceBoundary,
+      end: templeBoundaryModel.rightEstimatedEar
+    }
+  ];
+
+  specs.forEach((spec) => {
+    if (!spec.start || !spec.middle || !spec.end) {
+      spec.mesh.visible = false;
+      return;
+    }
+
+    const curve = makeFaceAttachedTempleCurve(spec.start, spec.middle, spec.end, spec.side, faceRig, faceWidth);
+    const visibleT = getFaceAttachedTempleVisibleT({
+      side: spec.side,
+      curve,
+      templeSideState,
+      yawDegrees,
+      pitchDegrees,
+      faceMaskModel,
+      start: spec.start,
+      end: spec.end
+    });
+
+    updateFaceAttachedTempleStrip(spec.mesh, curve, visibleT, faceRig, faceWidth);
+    spec.mesh.userData.visibleEndT = visibleT;
+    spec.mesh.userData.yawDegrees = yawDegrees;
+    spec.mesh.userData.pitchDegrees = pitchDegrees;
+  });
+
+  group.visible = true;
+};
+
+const setGlbTempleSegmentMaterialState = (mesh, opacity) => {
+  if (!mesh?.material) return;
+  if (!mesh.userData.originalTempleMaterialState) {
+    const firstMat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    mesh.userData.originalTempleMaterialState = {
+      transparent: !!firstMat?.transparent,
+      opacity: firstMat?.opacity ?? 1,
+      depthWrite: firstMat?.depthWrite ?? true
+    };
+  }
+
+  const original = mesh.userData.originalTempleMaterialState;
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  materials.forEach((mat) => {
+    if (!mat) return;
+    mat.side = THREE.DoubleSide;
+    mat.depthTest = true;
+    mat.depthWrite = opacity > 0.92 ? original.depthWrite : false;
+    mat.transparent = original.transparent || opacity < 0.999;
+    mat.opacity = (original.opacity ?? 1) * opacity;
+    mat.clippingPlanes = [];
+  });
+};
+
+const getGlbTempleSegmentOpacity = (segmentT, visibleT, fadeWidth = 0.10) => {
+  if (segmentT <= visibleT) return 1;
+  return clamp(1 - smoothstep(visibleT, visibleT + fadeWidth, segmentT), 0, 1);
+};
+
+const updateGlbTempleSideVisibility = ({ segments, visibleT, isFarSide = false }) => {
+  const visibleMeshes = [];
+
+  segments.forEach((mesh) => {
+    const segmentIndex = mesh.userData.templeSegmentIndex ?? getTempleSegment(mesh.userData.partType) ?? 0;
+    const segmentT = clamp(segmentIndex / Math.max(1, TEMPLE_SEGMENT_COUNT - 1), 0, 1);
+    const opacity = getGlbTempleSegmentOpacity(segmentT, visibleT, isFarSide ? FAR_SIDE_TEMPLE_FADE_T : 0.10);
+    const shouldShow = opacity > (isFarSide ? 0.20 : 0.03);
+
+    mesh.userData.glbDerivedTempleVisible = shouldShow;
+    mesh.userData.glbDerivedTempleOpacity = opacity;
+    mesh.userData.glbDerivedTempleSegmentT = segmentT;
+    mesh.userData.skipProductionRender = false;
+    mesh.visible = shouldShow;
+    mesh.renderOrder = 0;
+    mesh.frustumCulled = false;
+    setGlbTempleSegmentMaterialState(mesh, opacity);
+
+    if (shouldShow) {
+      visibleMeshes.push(`${mesh.name || 'UNNAMED'} (${mesh.userData.partType || 'UNKNOWN'} @ ${segmentT.toFixed(3)})`);
+    }
+  });
+
+  return visibleMeshes;
+};
+
+const updateGlbDerivedTempleVisibility = ({
+  model,
+  templeBoundaryModel,
+  templeSideState,
+  faceMaskModel,
+  yawDegrees,
+  pitchDegrees,
+  faceRig,
+  templeVisibleTRef
+}) => {
+  if (!USE_FACE_ATTACHED_2_5D_TEMPLES || !model || !templeBoundaryModel || !faceRig) return null;
+
+  const sources = model.userData.glbTempleSources || collectOriginalTempleSources(model);
+  const faceWidth = faceRig.metrics?.faceWidth3D || 1;
+  const sideSpecs = [
+    {
+      side: 'LEFT',
+      segments: sources.leftSegments,
+      start: templeBoundaryModel.leftHingeApprox,
+      middle: templeBoundaryModel.leftFaceBoundary,
+      end: templeBoundaryModel.leftEstimatedEar
+    },
+    {
+      side: 'RIGHT',
+      segments: sources.rightSegments,
+      start: templeBoundaryModel.rightHingeApprox,
+      middle: templeBoundaryModel.rightFaceBoundary,
+      end: templeBoundaryModel.rightEstimatedEar
+    }
+  ];
+
+  const visibility = {
+    mode: 'GLB_DERIVED_2_5D_TEMPLES',
+    leftVisibleT: 0,
+    rightVisibleT: 0,
+    leftVisibleMeshes: [],
+    rightVisibleMeshes: [],
+    leftSegmentCount: sources.leftSegments.length,
+    rightSegmentCount: sources.rightSegments.length,
+    bothTempleMeshCount: sources.bothTempleMeshes.length,
+    leftMaterialAudit: sources.leftMaterialAudit,
+    rightMaterialAudit: sources.rightMaterialAudit
+  };
+
+  sideSpecs.forEach((spec) => {
+    if (!spec.start || !spec.middle || !spec.end || !spec.segments.length) return;
+
+    const curve = makeFaceAttachedTempleCurve(spec.start, spec.middle, spec.end, spec.side, faceRig, faceWidth);
+    const targetVisibleT = getFaceAttachedTempleVisibleT({
+      side: spec.side,
+      curve,
+      templeSideState,
+      yawDegrees,
+      pitchDegrees,
+      faceMaskModel,
+      start: spec.start,
+      end: spec.end
+    });
+    const isFarSide = templeSideState?.farSide === spec.side;
+    const visibleT = getSmoothedTempleVisibleT(spec.side, targetVisibleT, templeVisibleTRef, {
+      forceFastDrop: isFarSide
+    });
+
+    const visibleMeshes = updateGlbTempleSideVisibility({
+      segments: spec.segments,
+      visibleT,
+      isFarSide
+    });
+
+    if (spec.side === 'LEFT') {
+      visibility.leftVisibleT = visibleT;
+      visibility.leftVisibleMeshes = visibleMeshes;
+    } else {
+      visibility.rightVisibleT = visibleT;
+      visibility.rightVisibleMeshes = visibleMeshes;
+    }
+  });
+
+  sources.bothTempleMeshes.forEach((mesh) => {
+    mesh.visible = false;
+    mesh.userData.skipProductionRender = true;
+    mesh.userData.glbDerivedTempleVisible = false;
+  });
+
+  model.userData.glbTempleVisibility = visibility;
+  return visibility;
+};
+
 export default function VirtualTryOn({
   product,
   allArProducts,
@@ -867,177 +1958,37 @@ export default function VirtualTryOn({
   setActiveARProduct,
   onClose
 }) {
+  const navigate = useNavigate();
+
   // ==========================================
   // 1. QUẢN LÝ TRẠNG THÁI (STATE)
   // ==========================================
   const [isAiLoading, setIsAiLoading] = useState(true);
   const [showGlassesMenu, setShowGlassesMenu] = useState(false);
-  const [showArDiopterControl, setShowArDiopterControl] = useState(false);
-  const [arDiopter, setArDiopter] = useState(0);
-
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugPanelInfo, setDebugPanelInfo] = useState(null);
   const [capturedImage, setCapturedImage] = useState(null);
   const [recordedVideoUrl, setRecordedVideoUrl] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+  const [toast, setToast] = useState({
+    show: false,
+    message: '',
+    type: 'success'
+  });
   const [faceFitHint, setFaceFitHint] = useState('');
-
-  // IN-APP DEBUGGER
-  const [debugLogs, setDebugLogs] = useState([]);
-  const [showDebugPane, setShowDebugPane] = useState(false);
-  const [activeTest, setActiveTest] = useState("NONE"); // "NONE", "A", "B", "C"
-  const [showOccluderDebug, setShowOccluderDebug] = useState(false);
-  const [showTempleOccluderDebug, setShowTempleOccluderDebug] = useState(false);
-  const [showFullGlbTest, setShowFullGlbTest] = useState(false);
-  const [showCleanFullOccluder, setShowCleanFullOccluder] = useState(false);
-  const [showProduction2Pass, setShowProduction2Pass] = useState(false);
-  const [showPass1MeshAudit, setShowPass1MeshAudit] = useState(false);
-  const [showPass2Interference, setShowPass2Interference] = useState(false);
-  const [pass1OnlyFreeze, setPass1OnlyFreeze] = useState(false);
-  const [pass1ThenPass2NoClear, setPass1ThenPass2NoClear] = useState(false);
-  const [showOccluderWireframe, setShowOccluderWireframe] = useState(false);
-  const [showTempleAnchorDebug, setShowTempleAnchorDebug] = useState(false);
-  const [showFullOccluderDebug, setShowFullOccluderDebug] = useState(false);
-  const [showSideOccluderDebug, setShowSideOccluderDebug] = useState(false);
-  const [showNarrowOccluderDebug, setShowNarrowOccluderDebug] = useState(false);
-
-  // MESH CLASSIFICATION DIAGNOSTIC FOR MOBILE
-  const [meshDebugData, setMeshDebugData] = useState([]);
-  const [showMeshDebug, setShowMeshDebug] = useState(false);
-  const [gltfTree, setGltfTree] = useState("");
-  const [gltfWarning, setGltfWarning] = useState("");
-
-  const [liveDiagnosticSpecs, setLiveDiagnosticSpecs] = useState([]);
-  const [helperStatus, setHelperStatus] = useState({
-    redOrigin: 'NOT_CREATED',
-    greenCenter: 'NOT_CREATED',
-    blueCentroid: 'NOT_CREATED',
-    yellowBbox: 'NOT_CREATED',
-    axes: 'NOT_CREATED'
-  });
-  const [totalHelpers, setTotalHelpers] = useState(0);
-  const [debugTarget, setDebugTarget] = useState("Object_7");
-  const debugTargetRef = useRef("Object_7");
-  const [fittingDiagnostics, setFittingDiagnostics] = useState({
-    faceWidth: 0,
-    glassesWidth: 0,
-    finalScale: 0,
-    finalPos: "0, 0, 0",
-    finalRot: "0, 0, 0",
-    fittingBoxType: "Full Model Bounding Box (including handles)",
-    rawModelSize: "0, 0, 0",
-    rawSizeExcludingTemples: "0, 0, 0"
-  });
-  const [box3Diagnostics, setBox3Diagnostics] = useState({
-    includedExcludingTemples: "",
-    excludedExcludingTemples: "",
-    sizeObj5: "N/A",
-    sizeObj7: "N/A",
-    sizeObj9: "N/A",
-    size59: "N/A",
-    size579: "N/A"
-  });
-  const [anchorDiagnostics, setAnchorDiagnostics] = useState({
-    lm6Pos: "0, 0, 0",
-    lm168Pos: "0, 0, 0",
-    lm197Pos: "0, 0, 0",
-    glassesAnchorPos: "0, 0, 0",
-    offset197: "0, 0, 0",
-    offset168: "0, 0, 0",
-    drivingLandmark: "Landmark 168 (noseBridge) blends with Eye Center"
-  });
-  const [positionBreakdown, setPositionBreakdown] = useState({
-    rawAnchor: "0, 0, 0",
-    afterNoseOffset: "0, 0, 0",
-    afterVerticalOffset: "0, 0, 0",
-    afterDepthOffset: "0, 0, 0",
-    afterSmoothing: "0, 0, 0",
-    finalPosition: "0, 0, 0",
-    offsetY: 0,
-    offsetZ: 0,
-    forwardOffset: 0,
-    upOffset: 0
-  });
-  const [anchorWeightAnalysis, setAnchorWeightAnalysis] = useState({
-    lm168Pos: "0, 0, 0",
-    lm197Pos: "0, 0, 0",
-    lm6Pos: "0, 0, 0",
-    formula: "",
-    weight168: 0,
-    weight197: 0,
-    dist168: 0,
-    dist197: 0,
-    dominantDriver: "",
-    pred168: "0, 0, 0",
-    pred197: "0, 0, 0",
-    currentAnchor: "0, 0, 0"
-  });
-  const [anatomicalBridgeDiagnostics, setAnatomicalBridgeDiagnostics] = useState({
-    anchorYBefore: "0.0000",
-    anchorYAfter: "0.0000",
-    appliedDrop: "0.0000",
-    bridgeOffsetYOld: "0.0000",
-    bridgeOffsetYNew: "0.0000",
-    deltaWorldY: "0.0000",
-    dist168Before: "0.0000",
-    dist168After: "0.0000",
-    dist197Before: "0.0000",
-    dist197After: "0.0000",
-    lensTopY: "0.0000",
-    lensBottomY: "0.0000",
-    pupilY: "0.0000",
-    eyeVerticalRatio: "0.0000",
-    suggestedAdjustmentLocal: "0.0000",
-    suggestedBridgeOffsetY: "0.0000",
-    deltaWorldYReq: "0.0000",
-    // Dynamic tracking metrics
-    posDeltaX: "0.0000",
-    posDeltaY: "0.0000",
-    posDeltaZ: "0.0000",
-    rotDelta: "0.0000",
-    lerpX: "0.0000",
-    lerpY: "0.0000",
-    lerpZ: "0.0000",
-    slerpRot: "0.0000",
-    // Occlusion diagnostics
-    occluderVisible: "false",
-    fullOccluderVisible: "false",
-    occluderRenderOrder: "0",
-    fullOccluderRenderOrder: "0",
-    occluderDepthWrite: "false",
-    occluderDepthTest: "false",
-    occluderColorWrite: "false",
-    // Temple detection and diagnostics
-    leftTempleMeshes: "TEMPLE_DETECTION_FAILED",
-    rightTempleMeshes: "TEMPLE_DETECTION_FAILED",
-    bothTempleMeshes: "None",
-    templeDiagnosticsText: "TEMPLE_DETECTION_FAILED",
-    // Dynamic adaptive LERP/SLERP targets
-    targetLerpX: "0.0000",
-    targetLerpY: "0.0000",
-    targetLerpZ: "0.0000",
-    targetSlerp: "0.0000",
-    // Temple Fade Debug
-    yawDegrees: "0.0000",
-    templeFadeFactor: "0.0000",
-    object7Opacity: "1.0000",
-    object7ForcedHidden: "true",
-    occluderMode: OCCLUDER_MODE.NARROW_SIDE,
-    nearSide: "BOTH",
-    farSide: "NONE",
-    visibleTempleLengthLeft: "1.0000",
-    visibleTempleLengthRight: "1.0000"
-  });
-  const [templeAnchorDiagnostics, setTempleAnchorDiagnostics] = useState({
-    faceWidth: "0.0000",
-    yawDegrees: "0.0000",
-    leftTempleApprox: "0.0000, 0.0000, 0.0000",
-    rightTempleApprox: "0.0000, 0.0000, 0.0000",
-    sideOffset: "0.0000",
-    backOffset: "0.0000"
-  });
+  const setGltfWarning = () => { };
+  const setGltfTree = () => { };
+  const setMeshDebugData = () => { };
+  const setLiveDiagnosticSpecs = () => { };
+  const setHelperStatus = () => { };
+  const setTotalHelpers = () => { };
+  const setFittingDiagnostics = () => { };
+  const setBox3Diagnostics = () => { };
+  const setAnatomicalBridgeDiagnostics = () => { };
+  const setTempleAnchorDiagnostics = () => { };
 
   // ==========================================
   // 2. CÁC THAM CHIẾU (REFS)
@@ -1060,9 +2011,14 @@ export default function VirtualTryOn({
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const glassesModelRef = useRef(null);
+  const debugBoxHelperGroupRef = useRef(null);
+  const debugBoxHelpersRef = useRef([]);
   const occluderRef = useRef(null);
   const fullOccluderRef = useRef(null);
   const narrowOccluderRef = useRef(null);
+  const faceAttachedTempleGroupRef = useRef(null);
+  const leftFaceTempleRef = useRef(null);
+  const rightFaceTempleRef = useRef(null);
   const reflectionLightRef = useRef(null);
   const helperGroupRef = useRef(null);
   const meshRefs = useRef({
@@ -1078,90 +2034,30 @@ export default function VirtualTryOn({
   const activeARProductRef = useRef(null);
   const activeTestRef = useRef("NONE");
   const faceFitHintRef = useRef('');
-
-  useEffect(() => {
-    activeTestRef.current = SHOW_AR_DEBUG_UI ? activeTest : "NONE";
-  }, [activeTest]);
-
   const showOccluderDebugRef = useRef(false);
-  useEffect(() => {
-    showOccluderDebugRef.current = SHOW_AR_DEBUG_UI && showOccluderDebug;
-  }, [showOccluderDebug]);
-
   const showTempleOccluderDebugRef = useRef(false);
-  useEffect(() => {
-    showTempleOccluderDebugRef.current = SHOW_AR_DEBUG_UI && showTempleOccluderDebug;
-  }, [showTempleOccluderDebug]);
-
   const showFullGlbTestRef = useRef(false);
-  useEffect(() => {
-    showFullGlbTestRef.current = SHOW_AR_DEBUG_UI && showFullGlbTest;
-  }, [showFullGlbTest]);
-
   const showCleanFullOccluderRef = useRef(false);
-  useEffect(() => {
-    showCleanFullOccluderRef.current = SHOW_AR_DEBUG_UI && showCleanFullOccluder;
-  }, [showCleanFullOccluder]);
-
   const showProduction2PassRef = useRef(false);
-  useEffect(() => {
-    showProduction2PassRef.current = SHOW_AR_DEBUG_UI && showProduction2Pass;
-  }, [showProduction2Pass]);
-
   const showPass1MeshAuditRef = useRef(false);
-  useEffect(() => {
-    showPass1MeshAuditRef.current = SHOW_AR_DEBUG_UI && showPass1MeshAudit;
-  }, [showPass1MeshAudit]);
-
   const showPass2InterferenceRef = useRef(false);
-  useEffect(() => {
-    showPass2InterferenceRef.current = SHOW_AR_DEBUG_UI && showPass2Interference;
-  }, [showPass2Interference]);
-
   const pass1OnlyFreezeRef = useRef(false);
-  useEffect(() => {
-    pass1OnlyFreezeRef.current = SHOW_AR_DEBUG_UI && pass1OnlyFreeze;
-  }, [pass1OnlyFreeze]);
-
   const pass1ThenPass2NoClearRef = useRef(false);
-  useEffect(() => {
-    pass1ThenPass2NoClearRef.current = SHOW_AR_DEBUG_UI && pass1ThenPass2NoClear;
-  }, [pass1ThenPass2NoClear]);
-
   const showOccluderWireframeRef = useRef(false);
-  useEffect(() => {
-    showOccluderWireframeRef.current = SHOW_AR_DEBUG_UI && showOccluderWireframe;
-  }, [showOccluderWireframe]);
-
   const showTempleAnchorDebugRef = useRef(false);
-  useEffect(() => {
-    showTempleAnchorDebugRef.current = SHOW_AR_DEBUG_UI && showTempleAnchorDebug;
-  }, [showTempleAnchorDebug]);
-
   const showFullOccluderDebugRef = useRef(false);
-  useEffect(() => {
-    showFullOccluderDebugRef.current = SHOW_AR_DEBUG_UI && showFullOccluderDebug;
-  }, [showFullOccluderDebug]);
-
   const showSideOccluderDebugRef = useRef(false);
-  useEffect(() => {
-    showSideOccluderDebugRef.current = SHOW_AR_DEBUG_UI && showSideOccluderDebug;
-  }, [showSideOccluderDebug]);
-
   const showNarrowOccluderDebugRef = useRef(false);
-  useEffect(() => {
-    showNarrowOccluderDebugRef.current = SHOW_AR_DEBUG_UI && showNarrowOccluderDebug;
-  }, [showNarrowOccluderDebug]);
-
   const showMeshDebugRef = useRef(false);
-  useEffect(() => {
-    showMeshDebugRef.current = SHOW_AR_DEBUG_UI && showMeshDebug;
-  }, [showMeshDebug]);
 
   // SMOOTHING REFS
   const prevQuatRef = useRef(new THREE.Quaternion());
   const prevPositionRef = useRef(new THREE.Vector3());
   const prevScaleRef = useRef(1.0);
+  const templeVisibleTRef = useRef({
+    LEFT: null,
+    RIGHT: null
+  });
 
   useEffect(() => {
     activeARProductRef.current = activeARProduct;
@@ -1172,8 +2068,8 @@ export default function VirtualTryOn({
   // ==========================================
   const addLog = (...args) => {
     const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
-    setDebugLogs(prev => [...prev, msg]);
-    if (ENABLE_AR_DIAGNOSTIC_LOGS) console.log(...args);
+    if (args[0]?.startsWith?.('?')) console.warn(msg);
+
   };
 
   const showToast = (message, type = 'success') => {
@@ -1185,192 +2081,6 @@ export default function VirtualTryOn({
     if (faceFitHintRef.current === hint) return;
     faceFitHintRef.current = hint;
     setFaceFitHint(hint);
-  };
-
-  const handleCopyCalibration = () => {
-    let allMeshesStr = "";
-    const pass1List = [];
-    const pass2List = [];
-    let obj7State = null;
-
-    let obj5Geom = "Object_5 not found";
-    let obj7Geom = "Object_7 not found";
-    let obj9Geom = "Object_9 not found";
-    let obj7VsFullModel = "N/A";
-
-    if (glassesModelRef.current) {
-      const fullModelBox = new THREE.Box3().setFromObject(glassesModelRef.current);
-      const fullSize = new THREE.Vector3();
-      fullModelBox.getSize(fullSize);
-      const fullCenter = new THREE.Vector3();
-      fullModelBox.getCenter(fullCenter);
-
-      glassesModelRef.current.traverse((child) => {
-        if (child.isMesh) {
-          const part = child.userData.partType || 'UNDEFINED';
-          allMeshesStr += `${child.name || 'UNNAMED'} | ${part} | ${child.visible} | ${child.renderOrder}\n`;
-          
-          if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
-            pass1List.push(child.name);
-          } else if (part === 'FRONT_FRAME' || part === 'LENS') {
-            pass2List.push(child.name);
-          }
-
-          if (child.name === 'Object_5' || child.name === 'Object_7' || child.name === 'Object_9') {
-            child.geometry.computeBoundingBox();
-            const localBox = child.geometry.boundingBox;
-            const localSize = new THREE.Vector3();
-            localBox.getSize(localSize);
-            const localCenter = new THREE.Vector3();
-            localBox.getCenter(localCenter);
-
-            const worldBox = new THREE.Box3().setFromObject(child);
-            const worldSize = new THREE.Vector3();
-            worldBox.getSize(worldSize);
-            const worldCenter = new THREE.Vector3();
-            worldBox.getCenter(worldCenter);
-
-            const vertexCount = child.geometry.attributes.position ? child.geometry.attributes.position.count : 0;
-            let triCount = 0;
-            if (child.geometry.index) {
-              triCount = child.geometry.index.count / 3;
-            } else if (child.geometry.attributes.position) {
-              triCount = child.geometry.attributes.position.count / 3;
-            }
-
-            const diagnosticText = `Mesh Name: ${child.name}
-  - Parent: ${child.parent ? (child.parent.name || child.parent.type) : 'None'}
-  - PartType: ${part}
-  - Visible: ${child.visible}
-  - RenderOrder: ${child.renderOrder}
-  - BBox Local Size: X=${localSize.x.toFixed(6)}, Y=${localSize.y.toFixed(6)}, Z=${localSize.z.toFixed(6)}
-  - BBox Local Center: X=${localCenter.x.toFixed(6)}, Y=${localCenter.y.toFixed(6)}, Z=${localCenter.z.toFixed(6)}
-  - BBox World Size: X=${worldSize.x.toFixed(6)}, Y=${worldSize.y.toFixed(6)}, Z=${worldSize.z.toFixed(6)}
-  - BBox World Center: X=${worldCenter.x.toFixed(6)}, Y=${worldCenter.y.toFixed(6)}, Z=${worldCenter.z.toFixed(6)}
-  - Vertex Count: ${vertexCount}
-  - Triangle Count: ${triCount.toFixed(0)}`;
-
-            if (child.name === 'Object_5') obj5Geom = diagnosticText;
-            else if (child.name === 'Object_7') {
-              obj7Geom = diagnosticText;
-              
-              const xRatio = (localSize.x / fullSize.x) * 100;
-              const yRatio = (localSize.y / fullSize.y) * 100;
-              const zRatio = (localSize.z / fullSize.z) * 100;
-              obj7VsFullModel = `Object_7 vs Full Model Dimensions Ratio:
-  - Width (X) Ratio: ${xRatio.toFixed(2)}% (${localSize.x.toFixed(4)} vs ${fullSize.x.toFixed(4)})
-  - Height (Y) Ratio: ${yRatio.toFixed(2)}% (${localSize.y.toFixed(4)} vs ${fullSize.y.toFixed(4)})
-  - Depth (Z) Ratio: ${zRatio.toFixed(2)}% (${localSize.z.toFixed(4)} vs ${fullSize.z.toFixed(4)})`;
-            }
-            else if (child.name === 'Object_9') obj9Geom = diagnosticText;
-          }
-        }
-      });
-    }
-
-    let fullGlbTestDiagnosticsStr = "";
-    if (glassesModelRef.current) {
-      glassesModelRef.current.traverse((child) => {
-        if (child.isMesh) {
-          let vertexCount = 0;
-          if (child.geometry && child.geometry.attributes && child.geometry.attributes.position) {
-            vertexCount = child.geometry.attributes.position.count;
-          }
-          let triCount = 0;
-          if (child.geometry && child.geometry.index) {
-            triCount = child.geometry.index.count / 3;
-          } else if (child.geometry && child.geometry.attributes && child.geometry.attributes.position) {
-            triCount = child.geometry.attributes.position.count / 3;
-          }
-          const parentName = child.parent ? (child.parent.name || child.parent.type) : "None";
-          const materialName = child.material ? (child.material.name || "NO_MAT") : "NO_MAT";
-          
-          fullGlbTestDiagnosticsStr += `Mesh: ${child.name || "UNNAMED"} | Parent: ${parentName} | Material: ${materialName} | Vertices: ${vertexCount} | Triangles: ${triCount.toFixed(0)} | Visible: ${child.visible.toString()}\n`;
-        }
-      });
-    }
-
-    let mainOccDiag = "NOT_CREATED";
-    if (occluderRef.current) {
-      occluderRef.current.geometry.computeBoundingBox();
-      const oBox = occluderRef.current.geometry.boundingBox;
-      const oSize = new THREE.Vector3();
-      oBox.getSize(oSize);
-      const oCenter = new THREE.Vector3();
-      oBox.getCenter(oCenter);
-      mainOccDiag = `Main Occluder:
-  - World Size: X=${oSize.x.toFixed(6)}, Y=${oSize.y.toFixed(6)}, Z=${oSize.z.toFixed(6)}
-  - World Center: X=${oCenter.x.toFixed(6)}, Y=${oCenter.y.toFixed(6)}, Z=${oCenter.z.toFixed(6)}`;
-    }
-
-    let fullOccDiag = "NOT_CREATED";
-    if (fullOccluderRef.current) {
-      fullOccluderRef.current.geometry.computeBoundingBox();
-      const fBox = fullOccluderRef.current.geometry.boundingBox;
-      const fSize = new THREE.Vector3();
-      fBox.getSize(fSize);
-      const fCenter = new THREE.Vector3();
-      fBox.getCenter(fCenter);
-      fullOccDiag = `Full Face Occluder:
-  - World Size: X=${fSize.x.toFixed(6)}, Y=${fSize.y.toFixed(6)}, Z=${fSize.z.toFixed(6)}
-  - World Center: X=${fCenter.x.toFixed(6)}, Y=${fCenter.y.toFixed(6)}, Z=${fCenter.z.toFixed(6)}`;
-    }
-
-    let distanceDiag = "N/A";
-    if (occluderRef.current && glassesModelRef.current) {
-      const gCenter = new THREE.Vector3();
-      new THREE.Box3().setFromObject(glassesModelRef.current).getCenter(gCenter);
-      const oCenter = new THREE.Vector3();
-      occluderRef.current.geometry.computeBoundingSphere();
-      if (occluderRef.current.geometry.boundingSphere) {
-        oCenter.copy(occluderRef.current.geometry.boundingSphere.center);
-      }
-      const dist = gCenter.distanceTo(oCenter);
-      distanceDiag = `Distance between glasses center and occluder center: ${dist.toFixed(6)} units`;
-    }
-
-    const payload = `--- AR GLASSES CALIBRATION EXPORT ---
-Timestamp: ${new Date().toISOString()}
-Product Name: ${activeARProduct?.name || 'N/A'}
-Product ID: ${activeARProduct?._id || 'N/A'}
-Scale: ${glassesModelRef.current ? glassesModelRef.current.scale.x.toFixed(6) : 'N/A'}
-Position: ${glassesModelRef.current ? `${glassesModelRef.current.position.x.toFixed(6)}, ${glassesModelRef.current.position.y.toFixed(6)}, ${glassesModelRef.current.position.z.toFixed(6)}` : 'N/A'}
-Rotation: ${glassesModelRef.current ? `${glassesModelRef.current.rotation.x.toFixed(6)}, ${glassesModelRef.current.position.y.toFixed(6)}, ${glassesModelRef.current.position.z.toFixed(6)}` : 'N/A'}
-
---- EXPERIMENT 1: FULL GLB VISIBILITY TEST ---
-FULL_GLB_TEST: ${showFullGlbTest}
-Mesh Hierarchical Diagnostics:
-${fullGlbTestDiagnosticsStr}
-
---- GEOMETRY DIAGNOSTICS ---
-${obj5Geom}
-----------------------------------
-${obj7Geom}
-----------------------------------
-${obj9Geom}
-----------------------------------
-${obj7VsFullModel}
-
---- TEMPLE OCCLUDER SPATIAL EXPERIMENT ---
-TEMPLE_OCCLUDER_DEBUG = ${showTempleOccluderDebug}
-${mainOccDiag}
-----------------------------------
-${fullOccDiag}
-----------------------------------
-${distanceDiag}
-
---- RUNTIME PASS CLASSIFICATION ---
-ALL MESHES RENDER-ORDER AND PART-TYPE:
-${allMeshesStr}
-PASS 1 (Render first, behind head):
-${JSON.stringify(pass1List, null, 2)}
-PASS 2 (Render second, in front):
-${JSON.stringify(pass2List, null, 2)}
-`;
-
-    navigator.clipboard.writeText(payload)
-      .then(() => showToast("Đã copy dữ liệu căn chỉnh vào Clipboard!", "success"))
-      .catch(() => showToast("Không thể copy vào clipboard!", "error"));
   };
 
   // ==========================================
@@ -1404,6 +2114,8 @@ ${JSON.stringify(pass2List, null, 2)}
     const renderer = new THREE.WebGLRenderer({ canvas: canvasRef.current, alpha: true, antialias: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.NoToneMapping;
     renderer.sortObjects = true;
     renderer.autoClear = false;
     renderer.localClippingEnabled = false;
@@ -1416,14 +2128,14 @@ ${JSON.stringify(pass2List, null, 2)}
     camera.position.z = 10;
     cameraRef.current = camera;
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
-    directionalLight.position.set(0, 10, 10);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(0, 6, 8);
     scene.add(directionalLight);
 
-    const reflectionLight = new THREE.DirectionalLight(0xffffff, 2.0);
-    reflectionLight.position.set(0, 5, 15);
+    const reflectionLight = new THREE.DirectionalLight(0xffffff, 0.15);
+    reflectionLight.position.set(0, 5, 12);
     scene.add(reflectionLight);
     reflectionLightRef.current = reflectionLight;
 
@@ -1529,6 +2241,11 @@ ${JSON.stringify(pass2List, null, 2)}
     fullOccluder.visible = false;
     scene.add(fullOccluder);
     fullOccluderRef.current = fullOccluder;
+
+    const debugBoxHelperGroup = new THREE.Group();
+    debugBoxHelperGroup.renderOrder = 1000;
+    scene.add(debugBoxHelperGroup);
+    debugBoxHelperGroupRef.current = debugBoxHelperGroup;
   };
 
   const loadGlassesModel = (prod) => {
@@ -1542,14 +2259,41 @@ ${JSON.stringify(pass2List, null, 2)}
       axes: 'NOT_CREATED'
     });
     setTotalHelpers(0);
+    templeVisibleTRef.current = {
+      LEFT: null,
+      RIGHT: null
+    };
     if (!sceneRef.current || !prod || !prod.arUrl) return;
 
     if (glassesModelRef.current) {
+      glassesModelRef.current.traverse((child) => {
+        if (child.isMesh && child.userData.debugHelper) {
+          sceneRef.current.remove(child.userData.debugHelper);
+          child.userData.debugHelper.dispose?.();
+          child.userData.debugHelper = null;
+        }
+      });
+      const glbTempleSources = glassesModelRef.current.userData?.glbTempleSources;
+      glbTempleSources?.leftMaterial?.dispose?.();
+      glbTempleSources?.rightMaterial?.dispose?.();
       sceneRef.current.remove(glassesModelRef.current);
       glassesModelRef.current = null;
     }
+    if (faceAttachedTempleGroupRef.current) {
+      sceneRef.current.remove(faceAttachedTempleGroupRef.current);
+      faceAttachedTempleGroupRef.current.traverse((child) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          materials.forEach((mat) => mat?.dispose?.());
+        }
+      });
+      faceAttachedTempleGroupRef.current = null;
+      leftFaceTempleRef.current = null;
+      rightFaceTempleRef.current = null;
+    }
 
-    if (ENABLE_AR_DIAGNOSTIC_LOGS) console.log("🚀 [AR BUILD_VERSION] 1.0.5 - PREMIUM RIGID TEMPLES ACTIVATED");
+
     addLog("🚀 [AR BUILD] Version 1.0.5 - Premium Rigid Temples");
     addLog(`Đang tải file 3D: ${prod.arUrl}`);
     const loader = new GLTFLoader();
@@ -1558,20 +2302,28 @@ ${JSON.stringify(pass2List, null, 2)}
       prod.arUrl,
       (gltf) => {
         const model = gltf.scene;
+        const fitOverride = getModelFitOverride(prod.arUrl);
+        model.userData.fitOverride = fitOverride;
+        const singleMeshSplitAudit = splitSingleMeshGlassesByDepth(model, fitOverride);
+        model.userData.singleMeshSplitAudit = singleMeshSplitAudit;
+        if (singleMeshSplitAudit) {
+          setGltfWarning(`INFO: Single-mesh GLB split into AR parts for ${fitOverride.id}: ${singleMeshSplitAudit.createdMeshes.join(', ')}`);
+        }
+
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
         const center = box.getCenter(new THREE.Vector3());
 
-        if (ENABLE_AR_DIAGNOSTIC_LOGS) console.log('====== [AR DIAGNOSTIC] BẮT ĐẦU ĐỌC CẤU TRÚC MODEL GLTF ======');
+
         let meshIndex = 0;
         const diagList = [];
         const mergedTempleSplitCandidates = [];
 
         model.traverse((child) => {
           if (child.isMesh) {
-            child.material.side = THREE.DoubleSide;
-            child.material.depthWrite = true;
-            child.material.depthTest = true;
+            if (child.userData.skipMeshClassification) return;
+
+            cloneMeshMaterials(child);
             child.renderOrder = 1;
 
             meshIndex++;
@@ -1586,20 +2338,25 @@ ${JSON.stringify(pass2List, null, 2)}
             const relativeZ = (childCenter.z - box.min.z) / zRange;
 
             const meshName = (child.name || '').toLowerCase();
-            const matName = (child.material && child.material.name ? child.material.name : '').toLowerCase();
+            const materials = getMeshMaterials(child);
+            const matName = materials.map((mat) => mat.name || '').join(' ').toLowerCase();
+            const preassignedPartType = child.userData.partType;
             const isLensMesh = meshName.includes('lens') || meshName.includes('glass') || meshName.includes('kính') || matName.includes('lens') || matName.includes('glass') || matName.includes('kính');
             const isTempleMesh = meshName.includes('handle') || meshName.includes('temple') || meshName.includes('càng') || meshName.includes('object_7') ||
-                                 matName.includes('handle') || matName.includes('temple') || matName.includes('càng');
+              matName.includes('handle') || matName.includes('temple') || matName.includes('càng');
 
             const isNearCenter = Math.abs(childCenter.x) < 0.35 * size.x;
+            const physicalGlassMaterial = materials.some(isPhysicalGlassMaterial);
+            const isLikelyCenterGlass =
+              isNearCenter &&
+              physicalGlassMaterial &&
+              childSize.x < size.x * 0.85 &&
+              childSize.y < size.y * 0.85;
 
-            if (isLensMesh) {
+            if (preassignedPartType === 'FRONT_FRAME' || preassignedPartType === 'LENS' || isTemplePart(preassignedPartType)) {
+              child.userData.partType = preassignedPartType;
+            } else if (isLensMesh || isLikelyCenterGlass) {
               child.userData.partType = 'LENS';
-              child.material.transparent = true;
-              child.material.opacity = 0.30;
-              if (child.material.roughness !== undefined) child.material.roughness = 0.08;
-              if (child.material.metalness !== undefined) child.material.metalness = 0.05;
-              child.material.depthWrite = false;
             } else if (isTempleMesh) {
               if (childCenter.x < -0.01) {
                 child.userData.partType = 'LEFT_TEMPLE';
@@ -1608,18 +2365,33 @@ ${JSON.stringify(pass2List, null, 2)}
               } else {
                 child.userData.partType = 'BOTH_TEMPLES';
               }
-              child.material.transparent = true;
-              child.material.opacity = 1.0;
+              getMeshMaterials(child).forEach((mat) => {
+                mat.side = THREE.DoubleSide;
+                mat.depthWrite = true;
+                mat.depthTest = true;
+                mat.transparent = true;
+                mat.opacity = 1.0;
+              });
             } else if (relativeZ > 0.60 || isNearCenter) {
               child.userData.partType = 'FRONT_FRAME';
+              getMeshMaterials(child).forEach((mat) => {
+                mat.side = THREE.DoubleSide;
+                mat.depthWrite = true;
+                mat.depthTest = true;
+              });
             } else {
               if (childCenter.x < 0) {
                 child.userData.partType = 'LEFT_TEMPLE';
               } else {
                 child.userData.partType = 'RIGHT_TEMPLE';
               }
-              child.material.transparent = true;
-              child.material.opacity = 1.0;
+              getMeshMaterials(child).forEach((mat) => {
+                mat.side = THREE.DoubleSide;
+                mat.depthWrite = true;
+                mat.depthTest = true;
+                mat.transparent = true;
+                mat.opacity = 1.0;
+              });
             }
 
             let vertexCount = 0;
@@ -1628,6 +2400,7 @@ ${JSON.stringify(pass2List, null, 2)}
             }
             const parentName = child.parent ? child.parent.name || child.parent.type : 'None';
             const childCount = child.children ? child.children.length : 0;
+            const diagMaterial = getMeshMaterials(child)[0];
 
             const isTemple = child.userData.partType === 'LEFT_TEMPLE' || child.userData.partType === 'RIGHT_TEMPLE';
             const tag = isTemple ? `⚠️ [${child.userData.partType}]` : `✅ [${child.userData.partType}]`;
@@ -1636,14 +2409,14 @@ ${JSON.stringify(pass2List, null, 2)}
               "Index": meshIndex,
               "Status": tag,
               "Mesh Name": child.name || 'NO_NAME',
-              "Material Name": child.material ? (child.material.name || 'NO_MAT') : 'NO_MAT',
+              "Material Name": diagMaterial ? (diagMaterial.name || 'NO_MAT') : 'NO_MAT',
               "Parent Name": parentName,
               "RenderOrder": child.renderOrder,
               "Visible": child.visible.toString(),
-              "DepthTest": child.material ? child.material.depthTest.toString() : 'false',
-              "DepthWrite": child.material ? child.material.depthWrite.toString() : 'false',
-              "Transparent": child.material ? child.material.transparent.toString() : 'false',
-              "Opacity": child.material ? child.material.opacity.toString() : '1.0',
+              "DepthTest": diagMaterial ? diagMaterial.depthTest.toString() : 'false',
+              "DepthWrite": diagMaterial ? diagMaterial.depthWrite.toString() : 'false',
+              "Transparent": diagMaterial ? diagMaterial.transparent.toString() : 'false',
+              "Opacity": diagMaterial ? diagMaterial.opacity.toString() : '1.0',
               "BBox Size X": childSize.x.toFixed(4),
               "BBox Size Y": childSize.y.toFixed(4),
               "BBox Size Z": childSize.z.toFixed(4),
@@ -1652,6 +2425,11 @@ ${JSON.stringify(pass2List, null, 2)}
               "Center Z": childCenter.z.toFixed(4),
               "Relative Z": relativeZ.toFixed(4),
               "PartType": child.userData.partType,
+              "Is Lens": (child.userData.partType === 'LENS').toString(),
+              "Is Front Frame": (child.userData.partType === 'FRONT_FRAME').toString(),
+              "Is Left Temple": (getTempleBasePart(child.userData.partType) === 'LEFT_TEMPLE').toString(),
+              "Is Right Temple": (getTempleBasePart(child.userData.partType) === 'RIGHT_TEMPLE').toString(),
+              "Is Both Temples": (getTempleBasePart(child.userData.partType) === 'BOTH_TEMPLES').toString(),
               "PosX": child.position.x.toFixed(4),
               "PosY": child.position.y.toFixed(4),
               "PosZ": child.position.z.toFixed(4),
@@ -1777,9 +2555,23 @@ ${JSON.stringify(pass2List, null, 2)}
             warningText += ` WARNING: segmentCount < 10, may look jagged.`;
           }
           setGltfWarning(warningText);
-          if (ENABLE_AR_DIAGNOSTIC_LOGS) {
-            console.log('AR_TEMPLE_SEGMENTS_CREATED', createdTempleSegments);
-          }
+
+        }
+        if (USE_FACE_ATTACHED_2_5D_TEMPLES) {
+          markOriginalTempleMeshesReplaced(model);
+          setGltfWarning("INFO: Using GLB-derived temple segments controlled by face-attached 2.5D visibility.");
+        }
+
+        const lensAudit = auditLensMeshes(model);
+        const modelAudit = auditArModelMeshes(model);
+        if (typeof window !== 'undefined') {
+          window.__arLensAudit = lensAudit;
+          window.__arModelAudit = modelAudit;
+          window.__arSingleMeshSplitAudit = singleMeshSplitAudit;
+        }
+        console.table(modelAudit);
+        if (import.meta.env && import.meta.env.DEV && lensAudit?.lensDetails?.length) {
+          console.table(lensAudit.lensDetails);
         }
 
         const buildGLTFTree = (node, prefix = '') => {
@@ -1802,10 +2594,7 @@ ${JSON.stringify(pass2List, null, 2)}
         const treeStr = buildGLTFTree(model);
         setGltfTree(treeStr);
 
-        if (ENABLE_AR_DIAGNOSTIC_LOGS) {
-          console.log("====== 📊 [AR GLTF SCENE DIAGNOSTICS] ======");
-          console.table(diagList);
-        }
+
         setMeshDebugData(diagList);
 
         if (helperGroupRef.current) {
@@ -2059,10 +2848,97 @@ ${JSON.stringify(pass2List, null, 2)}
 
         const anchorGroup = new THREE.Group();
         anchorGroup.add(model);
-        anchorGroup.userData.originalWidth = 2;
+        anchorGroup.userData.originalWidth = 2 / (fitOverride.scaleMultiplier || 1);
+        anchorGroup.userData.lensAudit = lensAudit;
+        anchorGroup.userData.fitOverride = fitOverride;
+        anchorGroup.userData.singleMeshSplitAudit = singleMeshSplitAudit;
 
         sceneRef.current.add(anchorGroup);
         glassesModelRef.current = anchorGroup;
+
+        if (USE_FACE_ATTACHED_2_5D_TEMPLES) {
+          anchorGroup.userData.glbTempleSources = collectOriginalTempleSources(anchorGroup);
+        }
+
+        // --- DEBUG DUMP ---
+        console.group("=== GLB MESH DUMP ===");
+        console.log("GLB URL:", prod.arUrl);
+        const dumpTableData = [];
+        model.traverse((child) => {
+          if (child.isMesh) {
+            child.geometry.computeBoundingBox();
+            const bbox = child.geometry.boundingBox;
+            const sizeVec = new THREE.Vector3();
+            bbox.getSize(sizeVec);
+
+            const vertexCount = child.geometry.attributes.position ? child.geometry.attributes.position.count : 0;
+            const triangleCount = child.geometry.index ? child.geometry.index.count / 3 : vertexCount / 3;
+
+            dumpTableData.push({
+              meshName: child.name || 'UNNAMED',
+              partType: child.userData.partType || 'NONE',
+              vertexCount,
+              triangleCount: Math.floor(triangleCount),
+              bboxMin: `${bbox.min.x.toFixed(4)}, ${bbox.min.y.toFixed(4)}, ${bbox.min.z.toFixed(4)}`,
+              bboxMax: `${bbox.max.x.toFixed(4)}, ${bbox.max.y.toFixed(4)}, ${bbox.max.z.toFixed(4)}`,
+              bboxSize: `${sizeVec.x.toFixed(4)}, ${sizeVec.y.toFixed(4)}, ${sizeVec.z.toFixed(4)}`
+            });
+          }
+        });
+        console.table(dumpTableData);
+        console.groupEnd();
+
+        // --- CREATE BOXHELPERS ---
+        anchorGroup.traverse((child) => {
+          if (child.isMesh) {
+            const helper = new THREE.BoxHelper(child, 0x00ffff);
+            helper.visible = debugMode;
+            sceneRef.current.add(helper);
+            child.userData.debugHelper = helper;
+          }
+        });
+
+        // --- COMPUTE DEBUG PANEL DATA ---
+        let meshCount = 0;
+        let frontFrameCount = 0;
+        let leftTempleCount = 0;
+        let rightTempleCount = 0;
+        let lensCount = 0;
+        let templeSegmentsCount = 0;
+
+        anchorGroup.traverse((child) => {
+          if (child.isMesh) {
+            if (child.userData.skipProductionRender) return;
+            meshCount++;
+            const partType = child.userData.partType || '';
+            if (partType === 'FRONT_FRAME') {
+              frontFrameCount++;
+            } else if (partType === 'LENS') {
+              lensCount++;
+            } else if (partType === 'LEFT_TEMPLE' || partType.startsWith('LEFT_TEMPLE_')) {
+              leftTempleCount++;
+              if (partType.includes('_SEG_')) {
+                templeSegmentsCount++;
+              }
+            } else if (partType === 'RIGHT_TEMPLE' || partType.startsWith('RIGHT_TEMPLE_')) {
+              rightTempleCount++;
+              if (partType.includes('_SEG_')) {
+                templeSegmentsCount++;
+              }
+            }
+          }
+        });
+
+        setDebugPanelInfo({
+          modelName: prod.name || prod.arUrl?.split('/').pop() || 'N/A',
+          meshCount,
+          frontFrameCount,
+          leftTempleCount,
+          rightTempleCount,
+          lensCount,
+          isSingleMesh: singleMeshSplitAudit ? 'YES' : 'NO',
+          templeSegmentsCount
+        });
 
         addLog('✅ Kính 3D loaded — pivot tại nose bridge và đã phân loại bộ phận');
       },
@@ -2202,16 +3078,7 @@ ${JSON.stringify(pass2List, null, 2)}
           }
         }
 
-        if (ENABLE_AR_DIAGNOSTIC_LOGS && diagnosticFrameCountRef.current % 60 === 0) {
-          console.log('AR_TEMPLE_SIDE_STATE', {
-            yawDegrees: debugYawDegrees.toFixed(4),
-            nearSide: templeSideState.nearSide,
-            farSide: templeSideState.farSide,
-            nearTemplePart: templeSideState.nearTemplePart,
-            farTemplePart: templeSideState.farTemplePart,
-            narrowOccluderActiveSide
-          });
-        }
+
 
         let activeFadeFactor = 0.0;
         let activeOpacity = 1.0;
@@ -2285,8 +3152,8 @@ ${JSON.stringify(pass2List, null, 2)}
         const rightHingeApprox = toW(landmarks[263]).addScaledVector(headRightVector, faceWidth3D * 0.05);
 
         // Estimated ears (raw)
-        const estSideOffset = faceWidth3D * 0.08;
-        const estBackOffset = faceWidth3D * 0.28;
+        const estSideOffset = faceWidth3D * 0.13;
+        const estBackOffset = faceWidth3D * 0.36;
         const leftEstimatedEarRaw = leftFaceBoundary.clone()
           .addScaledVector(headRightVector, -estSideOffset)
           .addScaledVector(headBackVector, estBackOffset);
@@ -2419,6 +3286,8 @@ ${JSON.stringify(pass2List, null, 2)}
 
         const leftFaceMaskPolygon = buildFaceMaskPolygon(LEFT_FACE_MASK_LANDMARKS);
         const rightFaceMaskPolygon = buildFaceMaskPolygon(RIGHT_FACE_MASK_LANDMARKS);
+        const leftEyeForbiddenPolygon = buildFaceMaskPolygon(LEFT_EYE_FORBIDDEN_LANDMARKS);
+        const rightEyeForbiddenPolygon = buildFaceMaskPolygon(RIGHT_EYE_FORBIDDEN_LANDMARKS);
 
         const buildEyeBand = () => {
           // Normalized screen Y: 0 = top, 1 = bottom.
@@ -2481,6 +3350,8 @@ ${JSON.stringify(pass2List, null, 2)}
         glassesModelRef.current.userData.faceMaskModel = {
           leftPolygon: leftFaceMaskPolygon,
           rightPolygon: rightFaceMaskPolygon,
+          leftEyeForbiddenPolygon,
+          rightEyeForbiddenPolygon,
           eyeBand,
           pitchDegrees,
           pitchTempleHideStrength,
@@ -2489,6 +3360,19 @@ ${JSON.stringify(pass2List, null, 2)}
           leftLandmarkCount: leftFaceMaskPolygon.length,
           rightLandmarkCount: rightFaceMaskPolygon.length
         };
+
+
+
+        updateGlbDerivedTempleVisibility({
+          model: glassesModelRef.current,
+          templeBoundaryModel: glassesModelRef.current.userData.templeBoundaryModel,
+          templeSideState,
+          faceMaskModel: glassesModelRef.current.userData.faceMaskModel,
+          yawDegrees: debugYawDegrees,
+          pitchDegrees,
+          faceRig,
+          templeVisibleTRef
+        });
 
         if (narrowOccluderRef.current) {
           const occlusionRamp = templeSideState.farSide === 'NONE'
@@ -2575,13 +3459,16 @@ ${JSON.stringify(pass2List, null, 2)}
         if (showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current) {
           anchorX = -anchorX;
         }
-        const anchorY = -((lm197.y * 0.70 + lm168.y * 0.25 + eyeMidY * 0.05) - 0.5) * visibleHeight;
+        const anchorY = -(lm168.y - 0.5) * visibleHeight;
+
         const ANATOMICAL_BRIDGE_DROP = 0.005;
         const anchorYBeforeDrop = anchorY;
         const anchorYAfterDrop = anchorY - ANATOMICAL_BRIDGE_DROP * s;
 
         const pitchOffsetY = pitch * 0.005 * s;
-        const adjustedAnchorY = anchorYAfterDrop + pitchOffsetY;
+        const modelFitOverride = glassesModelRef.current.userData.fitOverride || DEFAULT_MODEL_FIT_OVERRIDE;
+        const modelVerticalOffset = targetWidth * (modelFitOverride.verticalOffsetRatio || 0);
+        const adjustedAnchorY = anchorYAfterDrop + pitchOffsetY + modelVerticalOffset;
 
         const pitchOffsetZ = Math.max(0, -pitch) * 0.003 * s;
 
@@ -2641,14 +3528,13 @@ ${JSON.stringify(pass2List, null, 2)}
                 if (mat) {
                   const part = child.userData.partType;
                   if (part === 'LENS') {
-                    mat.transparent = true;
-                    mat.opacity = 0.35;
+                    applyArLensRenderState(child);
                   } else {
                     mat.transparent = false;
                     mat.opacity = 1.0;
+                    mat.side = THREE.DoubleSide;
+                    mat.clippingPlanes = [];
                   }
-                  mat.side = THREE.DoubleSide;
-                  mat.clippingPlanes = [];
                 }
               });
             }
@@ -2875,7 +3761,7 @@ ${JSON.stringify(pass2List, null, 2)}
           let dist197Before = 0;
           let dist197After = 0;
 
-          setFittingDiagnostics({
+          const fitDiagnosticsSnapshot = {
             faceWidth: faceWidth3D.toFixed(4),
             glassesWidth: targetWidth.toFixed(4),
             finalScale: s.toFixed(4),
@@ -2883,8 +3769,15 @@ ${JSON.stringify(pass2List, null, 2)}
             finalRot: rotDeg,
             fittingBoxType: "IPD + face width blend",
             rawModelSize: rawSizeStr,
-            rawSizeExcludingTemples: rawExclStr
-          });
+            rawSizeExcludingTemples: rawExclStr,
+            modelFitOverride: glassesModelRef.current.userData.fitOverride?.id || 'default',
+            verticalOffsetRatio: (glassesModelRef.current.userData.fitOverride?.verticalOffsetRatio || 0).toFixed(4),
+            scaleMultiplier: (glassesModelRef.current.userData.fitOverride?.scaleMultiplier || 1).toFixed(4)
+          };
+          setFittingDiagnostics(fitDiagnosticsSnapshot);
+          if (typeof window !== 'undefined') {
+            window.__arFitDiagnostics = fitDiagnosticsSnapshot;
+          }
 
           const templeAnchorSnapshot = {
             faceWidth: faceWidth3D.toFixed(4),
@@ -2896,139 +3789,27 @@ ${JSON.stringify(pass2List, null, 2)}
           };
           setTempleAnchorDiagnostics(templeAnchorSnapshot);
 
-          if (ENABLE_AR_DIAGNOSTIC_LOGS && showTempleAnchorDebugRef.current && diagnosticFrameCountRef.current % 60 === 0) {
-            console.log('TEMPLE_ANCHOR_DEBUG', templeAnchorSnapshot);
-          }
 
-          if (ENABLE_AR_DIAGNOSTIC_LOGS && diagnosticFrameCountRef.current % 60 === 0) {
-            if (leftTempleLineSlopeY > faceWidth3D * 0.02) {
-              console.warn('[AR] Left temple line is sloping upward too much:', leftTempleLineSlopeY.toFixed(6));
-            }
-            if (rightTempleLineSlopeY > faceWidth3D * 0.02) {
-              console.warn('[AR] Right temple line is sloping upward too much:', rightTempleLineSlopeY.toFixed(6));
-            }
-            console.log('AR_TEMPLE_DIRECTION_DEBUG', {
-              yawDegrees: parseFloat(debugYawDegrees.toFixed(4)),
-              leftHingeApprox: { x: leftHingeApprox.x, y: leftHingeApprox.y, z: leftHingeApprox.z },
-              rightHingeApprox: { x: rightHingeApprox.x, y: rightHingeApprox.y, z: rightHingeApprox.z },
-              leftEstimatedEarRaw: { x: leftEstimatedEarRaw.x, y: leftEstimatedEarRaw.y, z: leftEstimatedEarRaw.z },
-              rightEstimatedEarRaw: { x: rightEstimatedEarRaw.x, y: rightEstimatedEarRaw.y, z: rightEstimatedEarRaw.z },
-              leftEstimatedEarClamped: { x: leftEstimatedEar.x, y: leftEstimatedEar.y, z: leftEstimatedEar.z },
-              rightEstimatedEarClamped: { x: rightEstimatedEar.x, y: rightEstimatedEar.y, z: rightEstimatedEar.z },
-              leftTempleLineSlopeY: parseFloat(leftTempleLineSlopeY.toFixed(6)),
-              rightTempleLineSlopeY: parseFloat(rightTempleLineSlopeY.toFixed(6))
-            });
-          }
 
-          if (ENABLE_AR_DIAGNOSTIC_LOGS && diagnosticFrameCountRef.current % 60 === 0) {
-            const isLeftFar = templeSideState.farSide === 'LEFT';
-            const farHinge = isLeftFar ? leftHingeApprox : rightHingeApprox;
-            const farEar = isLeftFar ? leftEstimatedEar : rightEstimatedEar;
-            const farBoundary = isLeftFar ? leftFaceBoundary : rightFaceBoundary;
-            let farBoundaryT = 0;
-            if (farHinge && farEar && farBoundary) {
-              const fDir = new THREE.Vector3().subVectors(farEar, farHinge);
-              const fLengthSq = fDir.lengthSq();
-              if (fLengthSq > 0.00001) {
-                const fToBoundary = new THREE.Vector3().subVectors(farBoundary, farHinge);
-                farBoundaryT = clamp(fToBoundary.dot(fDir) / fLengthSq, 0.15, 0.85);
-              }
-            }
 
-            const segmentOpacitySamples = [];
-            for (let i = 0; i < TEMPLE_SEGMENT_COUNT; i++) {
-              const segName = getTempleSegmentPartType(templeSideState.farTemplePart || 'LEFT_TEMPLE', i);
-              const op = getTempleSegmentOpacity(segName, templeSideState, debugYawDegrees, glassesModelRef.current.userData.templeBoundaryModel, glassesModelRef.current.userData.faceMaskModel, null);
-              segmentOpacitySamples.push({ segment: i, opacity: parseFloat(op.toFixed(4)) });
-            }
 
-            console.log('AR_FACE_BOUNDARY_TEMPLE_MODEL', {
-              yawDegrees: parseFloat(debugYawDegrees.toFixed(4)),
-              nearSide: templeSideState.nearSide,
-              farSide: templeSideState.farSide,
-              leftFaceBoundary: leftFaceBoundary ? { x: leftFaceBoundary.x, y: leftFaceBoundary.y, z: leftFaceBoundary.z } : null,
-              rightFaceBoundary: rightFaceBoundary ? { x: rightFaceBoundary.x, y: rightFaceBoundary.y, z: rightFaceBoundary.z } : null,
-              leftHingeApprox: leftHingeApprox ? { x: leftHingeApprox.x, y: leftHingeApprox.y, z: leftHingeApprox.z } : null,
-              rightHingeApprox: rightHingeApprox ? { x: rightHingeApprox.x, y: rightHingeApprox.y, z: rightHingeApprox.z } : null,
-              leftEstimatedEar: leftEstimatedEar ? { x: leftEstimatedEar.x, y: leftEstimatedEar.y, z: leftEstimatedEar.z } : null,
-              rightEstimatedEar: rightEstimatedEar ? { x: rightEstimatedEar.x, y: rightEstimatedEar.y, z: rightEstimatedEar.z } : null,
-              farBoundaryT: parseFloat(farBoundaryT.toFixed(4)),
-              segmentOpacitySamples
-            });
 
-            // Face mask occlusion debug
-            const faceMaskModel = glassesModelRef.current.userData.faceMaskModel;
-            if (faceMaskModel) {
-              const farSide = templeSideState.farSide;
-              const farBasePart = templeSideState.farTemplePart || 'LEFT_TEMPLE';
-              const isLeftFarMask = farSide === 'LEFT';
-              const farPolygon = isLeftFarMask ? faceMaskModel.leftPolygon : faceMaskModel.rightPolygon;
 
-              const sampleSegments = [];
-              glassesModelRef.current.traverse((child) => {
-                if (child.isMesh && child.userData.partType && getTempleBasePart(child.userData.partType) === farBasePart) {
-                  const segIdx = getTempleSegment(child.userData.partType);
-                  if (segIdx !== null && child.geometry) {
-                    if (!child.geometry.boundingSphere) child.geometry.computeBoundingSphere();
-                    if (child.geometry.boundingSphere && faceMaskModel.projectWorldToScreen) {
-                      const center3D = child.geometry.boundingSphere.center.clone();
-                      child.localToWorld(center3D);
-                      const screenPt = faceMaskModel.projectWorldToScreen(center3D);
-                      const insideMask = screenPt && farPolygon && farPolygon.length >= 3 ? isPointInPolygon2D(screenPt, farPolygon) : false;
-                      const boundaryOp = getTempleSegmentOpacity(child.userData.partType, templeSideState, debugYawDegrees, glassesModelRef.current.userData.templeBoundaryModel, null, null);
-                      const maskOp = getTempleSegmentOpacity(child.userData.partType, templeSideState, debugYawDegrees, null, faceMaskModel, child);
-                      const finalOp = getTempleSegmentOpacity(child.userData.partType, templeSideState, debugYawDegrees, glassesModelRef.current.userData.templeBoundaryModel, faceMaskModel, child);
-                      sampleSegments.push({
-                        partType: child.userData.partType,
-                        segmentIndex: segIdx,
-                        screenPoint: screenPt ? { x: parseFloat(screenPt.x.toFixed(4)), y: parseFloat(screenPt.y.toFixed(4)) } : null,
-                        insideFaceMask: insideMask,
-                        boundaryOpacity: parseFloat(boundaryOp.toFixed(4)),
-                        maskOpacity: parseFloat(maskOp.toFixed(4)),
-                        finalOpacity: parseFloat(finalOp.toFixed(4))
-                      });
-                    }
-                  }
-                }
-              });
 
-              console.log('AR_FACE_MASK_OCCLUSION_DEBUG', {
-                yawDegrees: parseFloat(debugYawDegrees.toFixed(4)),
-                nearSide: templeSideState.nearSide,
-                farSide: templeSideState.farSide,
-                farFaceMaskLandmarks: isLeftFarMask ? LEFT_FACE_MASK_LANDMARKS : RIGHT_FACE_MASK_LANDMARKS,
-                farFaceMaskPolygonSize: farPolygon ? farPolygon.length : 0,
-                sampleSegments
-              });
-            }
-          }
-
-          if (ENABLE_AR_DIAGNOSTIC_LOGS && diagnosticFrameCountRef.current % 60 === 0) {
-            console.log('AR_TEMPLE_VISIBILITY_STATE', {
-              yawDegrees: debugYawDegrees.toFixed(4),
-              nearSide: templeSideState.nearSide,
-              farSide: templeSideState.farSide,
-              nearTemplePart: templeSideState.nearTemplePart,
-              farTemplePart: templeSideState.farTemplePart,
-              visibleTempleLengthLeft: templeVisibleLengths.left.toFixed(4),
-              visibleTempleLengthRight: templeVisibleLengths.right.toFixed(4),
-              occluderMode: OCCLUDER_MODE.NARROW_SIDE
-            });
-          }
 
           if (modelNode) {
             bridgeOffsetYOld = modelNode.userData.bridgeOffsetYOld;
             bridgeOffsetYNew = modelNode.userData.bridgeOffsetYNew;
-            
+
             const totalScaleY = glassesModelRef.current.scale.y;
             deltaWorldY = (bridgeOffsetYNew - bridgeOffsetYOld) * totalScaleY;
 
             const lm168W = toW(landmarks[168]);
             const lm197W = toW(landmarks[197]);
-            
+
             const bridgeCenterWorldNew = new THREE.Vector3();
             modelNode.localToWorld(bridgeCenterWorldNew.set(0, 0, 0));
-            
+
             const bridgeCenterWorldOld = new THREE.Vector3();
             modelNode.localToWorld(bridgeCenterWorldOld.set(0, bridgeOffsetYOld - bridgeOffsetYNew, 0));
 
@@ -3119,10 +3900,11 @@ ${JSON.stringify(pass2List, null, 2)}
             });
           }
 
-          setAnatomicalBridgeDiagnostics({
+          const bridgeDiagnosticsSnapshot = {
             anchorYBefore: anchorYBeforeDrop.toFixed(6),
             anchorYAfter: anchorYAfterDrop.toFixed(6),
             appliedDrop: (ANATOMICAL_BRIDGE_DROP * s).toFixed(6),
+            modelVerticalOffset: modelVerticalOffset.toFixed(6),
             bridgeOffsetYOld: bridgeOffsetYOld.toFixed(6),
             bridgeOffsetYNew: bridgeOffsetYNew.toFixed(6),
             deltaWorldY: deltaWorldY.toFixed(6),
@@ -3169,11 +3951,25 @@ ${JSON.stringify(pass2List, null, 2)}
             farSide: templeSideState.farSide,
             visibleTempleLengthLeft: templeVisibleLengths.left.toFixed(4),
             visibleTempleLengthRight: templeVisibleLengths.right.toFixed(4)
-          });
+          };
+          setAnatomicalBridgeDiagnostics(bridgeDiagnosticsSnapshot);
+          if (typeof window !== 'undefined') {
+            window.__arTempleDiagnostics = {
+              anchor: templeAnchorSnapshot,
+              temples: templeDiagnosticsList,
+              bridge: bridgeDiagnosticsSnapshot,
+              split: glassesModelRef.current.userData.singleMeshSplitAudit || null
+            };
+          }
         }
 
         glassesModelRef.current.traverse((child) => {
           if (child.isMesh) {
+            if (child.userData.partType === 'LENS') {
+              applyArLensRenderState(child);
+              return;
+            }
+
             if (child.material) {
               if (!child.userData.isMaterialCloned) {
                 if (Array.isArray(child.material)) {
@@ -3311,157 +4107,323 @@ ${JSON.stringify(pass2List, null, 2)}
         addLog(`DISTANCE_TO_GLASSES_CENTER: ${dist.toFixed(4)}`);
       }
 
-      if (ENABLE_AR_DIAGNOSTIC_LOGS && (!window.lastOcclusionLogTime || Date.now() - window.lastOcclusionLogTime > 4000)) {
-        window.lastOcclusionLogTime = Date.now();
-        console.log("=== 🛡️ [AR RUNTIME OCCLUSION PASS VERIFICATION] ===");
-        
-        console.log("1. ALL MESHES OF GLB:");
-        const allMeshes = [];
+
+
+      setFaceAttachedTempleGroupVisible(faceAttachedTempleGroupRef.current, false);
+
+      if (debugMode) {
+        // --- DEBUG MODE RENDER PASS ---
         glassesModelRef.current.traverse((child) => {
           if (child.isMesh) {
-            allMeshes.push({
-              name: child.name || 'UNNAMED',
-              partType: child.userData.partType || 'UNDEFINED',
-              visible: child.visible,
-              renderOrder: child.renderOrder
-            });
-          }
-        });
-        console.table(allMeshes);
-
-        let obj7State = null;
-        const pass1List = [];
-        const pass2List = [];
-
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            const part = child.userData.partType;
-            if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
-              pass1List.push(child.name + ` (${part})`);
-            } else if (part === 'FRONT_FRAME' || part === 'LENS') {
-              pass2List.push(child.name + ` (${part})`);
+            if (child.userData.debugHelper) {
+              child.userData.debugHelper.visible = child.visible;
+              if (child.userData.debugHelper.visible) {
+                child.userData.debugHelper.update();
+              }
             }
-
-            if (child.name === 'Object_7') {
-              obj7State = {
-                name: child.name,
-                parent: child.parent ? (child.parent.name || child.parent.type) : 'None',
-                partType: part,
-                visible: child.visible,
-                renderOrder: child.renderOrder,
-                depthTest: child.material ? child.material.depthTest : false,
-                depthWrite: child.material ? child.material.depthWrite : false,
-                transparent: child.material ? child.material.transparent : false,
-                opacity: child.material ? child.material.opacity : 1.0
-              };
+            if (!child.userData.originalMaterial) {
+              child.userData.originalMaterial = child.material;
             }
-          }
-        });
-
-        console.log("\nPASS1 TEMPLES:");
-        console.log(JSON.stringify(pass1List, null, 2));
-
-        console.log("\nPASS2 FRAME:");
-        console.log(JSON.stringify(pass2List, null, 2));
-
-        console.log("\nOBJECT_7 STATE:");
-        console.log(JSON.stringify(obj7State || { error: "Object_7 not found" }, null, 2));
-        console.log("==================================================");
-      }
-
-      if (showFullGlbTestRef.current) {
-        if (occluderRef.current) occluderRef.current.visible = false;
-        if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
-
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
             child.visible = true;
-            child.renderOrder = 0;
-            child.frustumCulled = false;
-            if (child.material) {
-              const materials = Array.isArray(child.material) ? child.material : [child.material];
-              materials.forEach((mat) => {
-                if (mat) {
-                  const part = child.userData.partType;
-                  if (part === 'LENS') {
-                    mat.transparent = true;
-                    mat.opacity = 0.35;
-                  } else {
-                    mat.transparent = false;
-                    mat.opacity = 1.0;
-                  }
-                  mat.side = THREE.DoubleSide;
-                  mat.clippingPlanes = [];
-                }
+
+            const partType = child.userData.partType;
+            const debugColor = getDebugColorForPartType(partType);
+            if (!child.userData.debugMaterial) {
+              child.userData.debugMaterial = new THREE.MeshBasicMaterial({
+                color: debugColor,
+                side: THREE.DoubleSide
               });
             }
+            child.material = child.userData.debugMaterial;
           }
         });
 
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-      } else if (showPass2InterferenceRef.current) {
-        // Mode: PASS2_INTERFERENCE_AUDIT
-        const autoClearVal = rendererRef.current.autoClear;
-
-        // Clear before PASS 1
         rendererRef.current.clear();
-        const clearBeforePass1Called = true;
-
-        if (occluderRef.current) occluderRef.current.visible = false;
-        if (fullOccluderRef.current) {
-          fullOccluderRef.current.visible = true;
-          fullOccluderRef.current.material.colorWrite = false;
-          fullOccluderRef.current.material.depthWrite = true;
-          fullOccluderRef.current.material.depthTest = true;
-          fullOccluderRef.current.material.side = THREE.DoubleSide;
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+      } else {
+        // Restore original materials if they were overridden
+        if (glassesModelRef.current) {
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              if (child.userData.originalMaterial) {
+                child.material = child.userData.originalMaterial;
+              }
+              if (child.userData.debugHelper) {
+                child.userData.debugHelper.visible = false;
+              }
+            }
+          });
         }
 
-        const pass1Visible = [];
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            const part = child.userData.partType;
-            if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
-              child.visible = true;
-              pass1Visible.push(child.name || "UNNAMED");
-            } else {
-              child.visible = false;
-            }
-            if (child.material) {
-              const materials = Array.isArray(child.material) ? child.material : [child.material];
-              materials.forEach((mat) => {
-                if (mat) {
-                  mat.transparent = false;
-                  mat.opacity = 1.0;
-                  mat.side = THREE.DoubleSide;
-                  mat.clippingPlanes = [];
-                }
-              });
-            }
-          }
-        });
+        if (showFullGlbTestRef.current) {
+          if (occluderRef.current) occluderRef.current.visible = false;
+          if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
 
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-
-        if (pass1OnlyFreezeRef.current) {
-          // Restore all meshes to visible for other systems
           glassesModelRef.current.traverse((child) => {
-            if (child.isMesh) child.visible = true;
+            if (child.isMesh) {
+              child.visible = true;
+              child.renderOrder = 0;
+              child.frustumCulled = false;
+              if (child.material) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((mat) => {
+                  if (mat) {
+                    const part = child.userData.partType;
+                    if (part === 'LENS') {
+                      applyArLensRenderState(child);
+                    } else {
+                      mat.transparent = false;
+                      mat.opacity = 1.0;
+                      mat.side = THREE.DoubleSide;
+                      mat.clippingPlanes = [];
+                    }
+                  }
+                });
+              }
+            }
           });
-          if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
+
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+        } else if (showPass2InterferenceRef.current) {
+          // Mode: PASS2_INTERFERENCE_AUDIT
+          const autoClearVal = rendererRef.current.autoClear;
+
+          // Clear before PASS 1
+          rendererRef.current.clear();
+          const clearBeforePass1Called = true;
+
+          if (occluderRef.current) occluderRef.current.visible = false;
+          if (fullOccluderRef.current) {
+            fullOccluderRef.current.visible = true;
+            fullOccluderRef.current.material.colorWrite = false;
+            fullOccluderRef.current.material.depthWrite = true;
+            fullOccluderRef.current.material.depthTest = true;
+            fullOccluderRef.current.material.side = THREE.DoubleSide;
+          }
+
+          const pass1Visible = [];
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              const part = child.userData.partType;
+              if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
+                child.visible = true;
+                pass1Visible.push(child.name || "UNNAMED");
+              } else {
+                child.visible = false;
+              }
+              if (child.material) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((mat) => {
+                  if (mat) {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                    mat.side = THREE.DoubleSide;
+                    mat.clippingPlanes = [];
+                  }
+                });
+              }
+            }
+          });
+
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+          if (pass1OnlyFreezeRef.current) {
+            // Restore all meshes to visible for other systems
+            glassesModelRef.current.traverse((child) => {
+              if (child.isMesh) child.visible = true;
+            });
+            if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
+
+            if (diagnosticFrameCountRef.current % 150 === 0) {
+              addLog("--- PASS2 INTERFERENCE AUDIT (PASS1 ONLY FREEZE) ---");
+              addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(pass1Visible)}`);
+              addLog("PASS 2 was skipped (frozen after PASS 1).");
+            }
+            diagnosticFrameCountRef.current++;
+          } else {
+            // Clear depth or skip based on pass1ThenPass2NoClear
+            let clearDepthBetweenPassesCalled = false;
+            if (!pass1ThenPass2NoClearRef.current) {
+              rendererRef.current.clearDepth();
+              clearDepthBetweenPassesCalled = true;
+            }
+
+            if (fullOccluderRef.current) fullOccluderRef.current.visible = showOccluderWireframeRef.current;
+            if (occluderRef.current) occluderRef.current.visible = false;
+
+            const pass2Visible = [];
+            glassesModelRef.current.traverse((child) => {
+              if (child.isMesh) {
+                const part = child.userData.partType;
+                if (part === 'FRONT_FRAME' || part === 'LENS') {
+                  child.visible = true;
+
+                  const materials = Array.isArray(child.material) ? child.material : [child.material];
+                  const matDetails = materials.map((mat) => mat ? {
+                    transparent: mat.transparent,
+                    opacity: mat.opacity,
+                    depthTest: mat.depthTest,
+                    depthWrite: mat.depthWrite,
+                    colorWrite: mat.colorWrite
+                  } : null);
+
+                  pass2Visible.push({
+                    name: child.name || "UNNAMED",
+                    materials: matDetails,
+                    renderOrder: child.renderOrder
+                  });
+                } else {
+                  child.visible = false;
+                }
+                if (child.material) {
+                  const materials = Array.isArray(child.material) ? child.material : [child.material];
+                  materials.forEach((mat) => {
+                    if (mat) {
+                      if (part === 'LENS') {
+                        applyArLensRenderState(child);
+                      } else {
+                        mat.transparent = false;
+                        mat.opacity = 1.0;
+                        mat.side = THREE.DoubleSide;
+                        mat.clippingPlanes = [];
+                      }
+                    }
+                  });
+                }
+              }
+            });
+
+            const clearOrClearColorCalledBeforePass2 = false;
+
+            rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+            // Restore all meshes to visible for other systems
+            glassesModelRef.current.traverse((child) => {
+              if (child.isMesh) child.visible = true;
+            });
+            if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
+
+            if (diagnosticFrameCountRef.current % 150 === 0) {
+              addLog("--- PASS2 INTERFERENCE AUDIT ---");
+              addLog(`renderer.autoClear: ${autoClearVal}`);
+              addLog(`clearBeforePass1Called: ${clearBeforePass1Called}`);
+              addLog(`clearDepthCalledBetweenPasses: ${clearDepthBetweenPassesCalled}`);
+              addLog(`clearOrClearColorCalledBeforePass2: ${clearOrClearColorCalledBeforePass2}`);
+              addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(pass1Visible)}`);
+              addLog(`PASS2_VISIBLE_MESHES: ${JSON.stringify(pass2Visible, null, 2)}`);
+            }
+            diagnosticFrameCountRef.current++;
+          }
+        } else if (showPass1MeshAuditRef.current) {
+          // Mode: PASS1_MESH_AUDIT
+          rendererRef.current.clear();
+
+          if (occluderRef.current) occluderRef.current.visible = false;
+          if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
+
+          const auditMeshes = [];
+          const auditBounds = [];
+
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              const part = child.userData.partType;
+              if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
+                child.visible = true;
+
+                // Calculate bounding box in world space
+                child.geometry.computeBoundingBox();
+                const box = new THREE.Box3().copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+                const min = { x: box.min.x, y: box.min.y, z: box.min.z };
+                const max = { x: box.max.x, y: box.max.y, z: box.max.z };
+                const sizeVec = new THREE.Vector3();
+                box.getSize(sizeVec);
+                const size = { x: sizeVec.x, y: sizeVec.y, z: sizeVec.z };
+
+                auditBounds.push({
+                  name: child.name || "UNNAMED",
+                  min,
+                  max,
+                  size
+                });
+
+                // Material count
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((mat) => {
+                  if (mat) {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                    mat.side = THREE.DoubleSide;
+                    mat.clippingPlanes = [];
+                  }
+                });
+
+                auditMeshes.push({
+                  name: child.name || "UNNAMED",
+                  parent: child.parent ? (child.parent.name || "UNNAMED") : "NONE",
+                  visible: child.visible,
+                  vertexCount: child.geometry.attributes.position.count,
+                  materialCount: materials.length
+                });
+              } else {
+                child.visible = false;
+              }
+            }
+          });
+
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              child.visible = true;
+            }
+          });
 
           if (diagnosticFrameCountRef.current % 150 === 0) {
-            addLog("--- PASS2 INTERFERENCE AUDIT (PASS1 ONLY FREEZE) ---");
-            addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(pass1Visible)}`);
-            addLog("PASS 2 was skipped (frozen after PASS 1).");
+            addLog("--- PASS1 MESH AUDIT DIAGNOSTICS ---");
+            addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(auditMeshes, null, 2)}`);
+            addLog(`PASS1_WORLD_BOUNDS: ${JSON.stringify(auditBounds, null, 2)}`);
           }
           diagnosticFrameCountRef.current++;
-        } else {
-          // Clear depth or skip based on pass1ThenPass2NoClear
-          let clearDepthBetweenPassesCalled = false;
-          if (!pass1ThenPass2NoClearRef.current) {
-            rendererRef.current.clearDepth();
-            clearDepthBetweenPassesCalled = true;
+        } else if (showProduction2PassRef.current) {
+          // Mode: PRODUCTION 2-PASS
+          rendererRef.current.clear();
+
+          if (occluderRef.current) occluderRef.current.visible = false;
+          if (fullOccluderRef.current) {
+            fullOccluderRef.current.visible = true;
+            fullOccluderRef.current.material.colorWrite = false;
+            fullOccluderRef.current.material.depthWrite = true;
+            fullOccluderRef.current.material.depthTest = true;
+            fullOccluderRef.current.material.side = THREE.DoubleSide;
           }
+
+          const pass1Visible = [];
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              const part = child.userData.partType;
+              if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
+                child.visible = true;
+                pass1Visible.push(child.name || "UNNAMED");
+              } else {
+                child.visible = false;
+              }
+              if (child.material) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((mat) => {
+                  if (mat) {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                    mat.side = THREE.DoubleSide;
+                    mat.clippingPlanes = [];
+                  }
+                });
+              }
+            }
+          });
+
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+
+          rendererRef.current.clearDepth();
 
           if (fullOccluderRef.current) fullOccluderRef.current.visible = showOccluderWireframeRef.current;
           if (occluderRef.current) occluderRef.current.visible = false;
@@ -3472,21 +4434,7 @@ ${JSON.stringify(pass2List, null, 2)}
               const part = child.userData.partType;
               if (part === 'FRONT_FRAME' || part === 'LENS') {
                 child.visible = true;
-                
-                const materials = Array.isArray(child.material) ? child.material : [child.material];
-                const matDetails = materials.map((mat) => mat ? {
-                  transparent: mat.transparent,
-                  opacity: mat.opacity,
-                  depthTest: mat.depthTest,
-                  depthWrite: mat.depthWrite,
-                  colorWrite: mat.colorWrite
-                } : null);
-
-                pass2Visible.push({
-                  name: child.name || "UNNAMED",
-                  materials: matDetails,
-                  renderOrder: child.renderOrder
-                });
+                pass2Visible.push(child.name || "UNNAMED");
               } else {
                 child.visible = false;
               }
@@ -3495,534 +4443,382 @@ ${JSON.stringify(pass2List, null, 2)}
                 materials.forEach((mat) => {
                   if (mat) {
                     if (part === 'LENS') {
-                      mat.transparent = true;
-                      mat.opacity = 0.35;
+                      applyArLensRenderState(child);
                     } else {
                       mat.transparent = false;
                       mat.opacity = 1.0;
+                      mat.side = THREE.DoubleSide;
+                      mat.clippingPlanes = [];
                     }
-                    mat.side = THREE.DoubleSide;
-                    mat.clippingPlanes = [];
                   }
                 });
               }
             }
           });
 
-          const clearOrClearColorCalledBeforePass2 = false;
-
           rendererRef.current.render(sceneRef.current, cameraRef.current);
 
-          // Restore all meshes to visible for other systems
           glassesModelRef.current.traverse((child) => {
-            if (child.isMesh) child.visible = true;
+            if (child.isMesh) {
+              child.visible = true;
+            }
           });
           if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
 
           if (diagnosticFrameCountRef.current % 150 === 0) {
-            addLog("--- PASS2 INTERFERENCE AUDIT ---");
-            addLog(`renderer.autoClear: ${autoClearVal}`);
-            addLog(`clearBeforePass1Called: ${clearBeforePass1Called}`);
-            addLog(`clearDepthCalledBetweenPasses: ${clearDepthBetweenPassesCalled}`);
-            addLog(`clearOrClearColorCalledBeforePass2: ${clearOrClearColorCalledBeforePass2}`);
+            addLog("--- PRODUCTION 2-PASS DIAGNOSTICS ---");
             addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(pass1Visible)}`);
-            addLog(`PASS2_VISIBLE_MESHES: ${JSON.stringify(pass2Visible, null, 2)}`);
+            addLog(`PASS2_VISIBLE_MESHES: ${JSON.stringify(pass2Visible)}`);
+            addLog(`clearDepthCalledBetweenPasses: true`);
           }
           diagnosticFrameCountRef.current++;
-        }
-      } else if (showPass1MeshAuditRef.current) {
-        // Mode: PASS1_MESH_AUDIT
-        rendererRef.current.clear();
+        } else if (showCleanFullOccluderRef.current) {
+          // Mode B: Clean Full Face Occluder Test
+          rendererRef.current.clear();
 
-        if (occluderRef.current) occluderRef.current.visible = false;
-        if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
+          if (occluderRef.current) occluderRef.current.visible = false;
+          if (fullOccluderRef.current) {
+            fullOccluderRef.current.visible = true;
+            fullOccluderRef.current.material.colorWrite = false;
+            fullOccluderRef.current.material.depthWrite = true;
+            fullOccluderRef.current.material.depthTest = true;
+            fullOccluderRef.current.material.side = THREE.DoubleSide;
+          }
 
-        const auditMeshes = [];
-        const auditBounds = [];
-
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            const part = child.userData.partType;
-            if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
               child.visible = true;
+              child.renderOrder = 0;
+              child.frustumCulled = false;
+              if (child.material) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((mat) => {
+                  if (mat) {
+                    const part = child.userData.partType;
+                    if (part === 'LENS') {
+                      applyArLensRenderState(child);
+                    } else {
+                      mat.transparent = false;
+                      mat.opacity = 1.0;
+                      mat.side = THREE.DoubleSide;
+                      mat.clippingPlanes = [];
+                    }
+                  }
+                });
+              }
+            }
+          });
 
-              // Calculate bounding box in world space
-              child.geometry.computeBoundingBox();
-              const box = new THREE.Box3().copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
-              const min = { x: box.min.x, y: box.min.y, z: box.min.z };
-              const max = { x: box.max.x, y: box.max.y, z: box.max.z };
-              const sizeVec = new THREE.Vector3();
-              box.getSize(sizeVec);
-              const size = { x: sizeVec.x, y: sizeVec.y, z: sizeVec.z };
+          // 1st pass: render only depth-only fullOccluder
+          glassesModelRef.current.visible = false;
+          if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
 
-              auditBounds.push({
-                name: child.name || "UNNAMED",
-                min,
-                max,
-                size
-              });
-
-              // Material count
-              const materials = Array.isArray(child.material) ? child.material : [child.material];
-              materials.forEach((mat) => {
-                if (mat) {
-                  mat.transparent = false;
-                  mat.opacity = 1.0;
-                  mat.side = THREE.DoubleSide;
-                  mat.clippingPlanes = [];
-                }
-              });
-
-              auditMeshes.push({
-                name: child.name || "UNNAMED",
-                parent: child.parent ? (child.parent.name || "UNNAMED") : "NONE",
-                visible: child.visible,
-                vertexCount: child.geometry.attributes.position.count,
-                materialCount: materials.length
-              });
-            } else {
-              child.visible = false;
+          // 2nd pass: render glasses model normally, without clearDepth()
+          glassesModelRef.current.visible = true;
+          if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+        } else if (showTempleOccluderDebugRef.current) {
+          if (occluderRef.current) {
+            occluderRef.current.visible = true;
+            if (occluderRef.current.material) {
+              occluderRef.current.material.colorWrite = true;
+              occluderRef.current.material.transparent = false;
+              occluderRef.current.material.opacity = 1.0;
+              occluderRef.current.material.color.setHex(0xff0000);
+              occluderRef.current.material.depthWrite = true;
+              occluderRef.current.material.depthTest = true;
             }
           }
-        });
-
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            child.visible = true;
-          }
-        });
-
-        if (diagnosticFrameCountRef.current % 150 === 0) {
-          addLog("--- PASS1 MESH AUDIT DIAGNOSTICS ---");
-          addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(auditMeshes, null, 2)}`);
-          addLog(`PASS1_WORLD_BOUNDS: ${JSON.stringify(auditBounds, null, 2)}`);
-        }
-        diagnosticFrameCountRef.current++;
-      } else if (showProduction2PassRef.current) {
-        // Mode: PRODUCTION 2-PASS
-        rendererRef.current.clear();
-
-        if (occluderRef.current) occluderRef.current.visible = false;
-        if (fullOccluderRef.current) {
-          fullOccluderRef.current.visible = true;
-          fullOccluderRef.current.material.colorWrite = false;
-          fullOccluderRef.current.material.depthWrite = true;
-          fullOccluderRef.current.material.depthTest = true;
-          fullOccluderRef.current.material.side = THREE.DoubleSide;
-        }
-
-        const pass1Visible = [];
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            const part = child.userData.partType;
-            if (part === 'LEFT_TEMPLE' || part === 'RIGHT_TEMPLE' || part === 'BOTH_TEMPLES') {
-              child.visible = true;
-              pass1Visible.push(child.name || "UNNAMED");
-            } else {
-              child.visible = false;
-            }
-            if (child.material) {
-              const materials = Array.isArray(child.material) ? child.material : [child.material];
-              materials.forEach((mat) => {
-                if (mat) {
-                  mat.transparent = false;
-                  mat.opacity = 1.0;
-                  mat.side = THREE.DoubleSide;
-                  mat.clippingPlanes = [];
-                }
-              });
+          if (fullOccluderRef.current) {
+            fullOccluderRef.current.visible = true;
+            if (fullOccluderRef.current.material) {
+              fullOccluderRef.current.material.colorWrite = true;
+              fullOccluderRef.current.material.transparent = false;
+              fullOccluderRef.current.material.opacity = 1.0;
+              fullOccluderRef.current.material.color.setHex(0x0000ff);
+              fullOccluderRef.current.material.depthWrite = true;
+              fullOccluderRef.current.material.depthTest = true;
             }
           }
-        });
 
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              if (child.userData.partType === 'LENS') {
+                applyArLensRenderState(child);
+                return;
+              }
 
-        rendererRef.current.clearDepth();
-
-        if (fullOccluderRef.current) fullOccluderRef.current.visible = showOccluderWireframeRef.current;
-        if (occluderRef.current) occluderRef.current.visible = false;
-
-        const pass2Visible = [];
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            const part = child.userData.partType;
-            if (part === 'FRONT_FRAME' || part === 'LENS') {
               child.visible = true;
-              pass2Visible.push(child.name || "UNNAMED");
-            } else {
-              child.visible = false;
-            }
-            if (child.material) {
-              const materials = Array.isArray(child.material) ? child.material : [child.material];
-              materials.forEach((mat) => {
-                if (mat) {
-                  if (part === 'LENS') {
-                    mat.transparent = true;
-                    mat.opacity = 0.35;
-                  } else {
+              if (child.material) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((mat) => {
+                  if (mat) {
+                    if (child.name === 'Object_7') {
+                      if (!child.userData.originalColorHex) {
+                        child.userData.originalColorHex = mat.color.getHex();
+                      }
+                      mat.color.setHex(0x00ff00);
+                    } else {
+                      if (child.userData.originalColorHex) {
+                        mat.color.setHex(child.userData.originalColorHex);
+                      }
+                    }
                     mat.transparent = false;
                     mat.opacity = 1.0;
                   }
-                  mat.side = THREE.DoubleSide;
-                  mat.clippingPlanes = [];
-                }
-              });
+                });
+              }
+            }
+          });
+
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+        } else {
+          if (glassesModelRef.current) {
+            glassesModelRef.current.traverse((child) => {
+              if (child.isMesh && child.userData.originalColorHex && child.material) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((mat) => {
+                  if (mat) {
+                    mat.color.setHex(child.userData.originalColorHex);
+                  }
+                });
+              }
+            });
+          }
+        }
+
+        if (showFullGlbTestRef.current || showCleanFullOccluderRef.current || showProduction2PassRef.current || showPass1MeshAuditRef.current || showPass2InterferenceRef.current || showTempleOccluderDebugRef.current) {
+          // Render was already handled above
+        } else if (
+          showOccluderDebugRef.current ||
+          showFullOccluderDebugRef.current ||
+          showSideOccluderDebugRef.current ||
+          showNarrowOccluderDebugRef.current
+        ) {
+          const shouldShowSideOccluder = showOccluderDebugRef.current || showSideOccluderDebugRef.current;
+          const shouldShowFullOccluder = showOccluderDebugRef.current || showFullOccluderDebugRef.current;
+          const shouldShowNarrowOccluder = showNarrowOccluderDebugRef.current;
+
+          if (occluderRef.current) {
+            occluderRef.current.visible = shouldShowSideOccluder;
+            if (occluderRef.current.material) {
+              occluderRef.current.material.colorWrite = true;
+              occluderRef.current.material.transparent = true;
+              occluderRef.current.material.opacity = 0.25;
+              occluderRef.current.material.color.setHex(0xff0000);
+              occluderRef.current.material.depthWrite = false;
+              occluderRef.current.material.depthTest = true;
             }
           }
-        });
-
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            child.visible = true;
+          if (fullOccluderRef.current) {
+            fullOccluderRef.current.visible = shouldShowFullOccluder;
+            if (fullOccluderRef.current.material) {
+              fullOccluderRef.current.material.colorWrite = true;
+              fullOccluderRef.current.material.transparent = true;
+              fullOccluderRef.current.material.opacity = 0.22;
+              fullOccluderRef.current.material.color.setHex(0x0000ff);
+              fullOccluderRef.current.material.depthWrite = false;
+              fullOccluderRef.current.material.depthTest = true;
+            }
           }
-        });
-        if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
+          if (narrowOccluderRef.current) {
+            narrowOccluderRef.current.visible = shouldShowNarrowOccluder;
+            if (narrowOccluderRef.current.material) {
+              narrowOccluderRef.current.material.colorWrite = true;
+              narrowOccluderRef.current.material.transparent = true;
+              narrowOccluderRef.current.material.opacity = 0.28;
+              narrowOccluderRef.current.material.color.setHex(0x00ff66);
+              narrowOccluderRef.current.material.depthWrite = false;
+              narrowOccluderRef.current.material.depthTest = true;
+            }
+          }
 
-        if (diagnosticFrameCountRef.current % 150 === 0) {
-          addLog("--- PRODUCTION 2-PASS DIAGNOSTICS ---");
-          addLog(`PASS1_VISIBLE_MESHES: ${JSON.stringify(pass1Visible)}`);
-          addLog(`PASS2_VISIBLE_MESHES: ${JSON.stringify(pass2Visible)}`);
-          addLog(`clearDepthCalledBetweenPasses: true`);
-        }
-        diagnosticFrameCountRef.current++;
-      } else if (showCleanFullOccluderRef.current) {
-        // Mode B: Clean Full Face Occluder Test
-        rendererRef.current.clear();
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              if (child.userData.partType === 'LENS') {
+                applyArLensRenderState(child);
+                return;
+              }
 
-        if (occluderRef.current) occluderRef.current.visible = false;
-        if (fullOccluderRef.current) {
-          fullOccluderRef.current.visible = true;
-          fullOccluderRef.current.material.colorWrite = false;
-          fullOccluderRef.current.material.depthWrite = true;
-          fullOccluderRef.current.material.depthTest = true;
-          fullOccluderRef.current.material.side = THREE.DoubleSide;
-        }
+              child.visible = true;
+              if (child.material) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach((mat) => {
+                  if (mat) {
+                    mat.transparent = false;
+                    mat.opacity = 1.0;
+                  }
+                });
+              }
+            }
+          });
 
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            child.visible = true;
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+        } else if (activeTestRef.current !== "NONE") {
+          if (occluderRef.current) {
+            occluderRef.current.visible = false;
+            if (occluderRef.current.material) {
+              occluderRef.current.material.colorWrite = false;
+              occluderRef.current.material.transparent = false;
+              occluderRef.current.material.opacity = 1.0;
+            }
+          }
+          if (fullOccluderRef.current) {
+            fullOccluderRef.current.visible = false;
+            if (fullOccluderRef.current.material) {
+              fullOccluderRef.current.material.colorWrite = false;
+              fullOccluderRef.current.material.transparent = false;
+              fullOccluderRef.current.material.opacity = 1.0;
+            }
+          }
+
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
+        } else {
+          const productionTempleSideState = glassesModelRef.current.userData.templeSideState || getTempleSideState(0);
+          const isFrontalPass = productionTempleSideState.nearSide === 'BOTH';
+          const useGlbDerivedTemples = USE_FACE_ATTACHED_2_5D_TEMPLES;
+          let hasSplitTempleMeshes = false;
+
+          glassesModelRef.current.traverse((child) => {
+            if (child.isMesh) {
+              const basePart = getTempleBasePart(child.userData.partType);
+              if (basePart === 'LEFT_TEMPLE' || basePart === 'RIGHT_TEMPLE') {
+                hasSplitTempleMeshes = true;
+              }
+            }
+          });
+
+          const prepareProductionMesh = (child) => {
+            const part = child.userData.partType;
             child.renderOrder = 0;
             child.frustumCulled = false;
             if (child.material) {
               const materials = Array.isArray(child.material) ? child.material : [child.material];
               materials.forEach((mat) => {
                 if (mat) {
-                  const part = child.userData.partType;
                   if (part === 'LENS') {
+                    applyArLensRenderState(child);
+                    return;
+                  } else if (useGlbDerivedTemples && isTemplePart(part)) {
+                    const opacity = child.userData.glbDerivedTempleOpacity ?? 1;
+                    mat.transparent = child.userData.originalTempleMaterialState?.transparent || opacity < 0.999;
+                    mat.opacity = (child.userData.originalTempleMaterialState?.opacity ?? 1) * opacity;
+                    mat.depthWrite = opacity > 0.92;
+                    mat.depthTest = true;
+                  } else if (isTemplePart(part)) {
+                    const segmentOpacity = getTempleSegmentOpacity(
+                      part,
+                      productionTempleSideState,
+                      debugYawDegrees,
+                      glassesModelRef.current?.userData?.templeBoundaryModel,
+                      glassesModelRef.current?.userData?.faceMaskModel,
+                      child
+                    );
                     mat.transparent = true;
-                    mat.opacity = 0.35;
+                    mat.opacity = segmentOpacity;
+                    mat.depthWrite = segmentOpacity > 0.85;
+                    mat.depthTest = true;
                   } else {
                     mat.transparent = false;
                     mat.opacity = 1.0;
+                    mat.depthTest = true;
+                    mat.depthWrite = true;
                   }
                   mat.side = THREE.DoubleSide;
                   mat.clippingPlanes = [];
                 }
               });
             }
-          }
-        });
+          };
 
-        // 1st pass: render only depth-only fullOccluder
-        glassesModelRef.current.visible = false;
-        if (fullOccluderRef.current) fullOccluderRef.current.visible = true;
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-
-        // 2nd pass: render glasses model normally, without clearDepth()
-        glassesModelRef.current.visible = true;
-        if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-      } else if (showTempleOccluderDebugRef.current) {
-        if (occluderRef.current) {
-          occluderRef.current.visible = true;
-          if (occluderRef.current.material) {
-            occluderRef.current.material.colorWrite = true;
-            occluderRef.current.material.transparent = false;
-            occluderRef.current.material.opacity = 1.0;
-            occluderRef.current.material.color.setHex(0xff0000);
-            occluderRef.current.material.depthWrite = true;
-            occluderRef.current.material.depthTest = true;
-          }
-        }
-        if (fullOccluderRef.current) {
-          fullOccluderRef.current.visible = true;
-          if (fullOccluderRef.current.material) {
-            fullOccluderRef.current.material.colorWrite = true;
-            fullOccluderRef.current.material.transparent = false;
-            fullOccluderRef.current.material.opacity = 1.0;
-            fullOccluderRef.current.material.color.setHex(0x0000ff);
-            fullOccluderRef.current.material.depthWrite = true;
-            fullOccluderRef.current.material.depthTest = true;
-          }
-        }
-
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            child.visible = true;
-            if (child.material) {
-              const materials = Array.isArray(child.material) ? child.material : [child.material];
-              materials.forEach((mat) => {
-                if (mat) {
-                  if (child.name === 'Object_7') {
-                    if (!child.userData.originalColorHex) {
-                      child.userData.originalColorHex = mat.color.getHex();
-                    }
-                    mat.color.setHex(0x00ff00);
-                  } else {
-                    if (child.userData.originalColorHex) {
-                      mat.color.setHex(child.userData.originalColorHex);
-                    }
-                  }
-                  mat.transparent = false;
-                  mat.opacity = 1.0;
-                }
-              });
+          const shouldRenderProductionMesh = (child, pass) => {
+            const part = child.userData.partType;
+            if (child.userData.skipProductionRender || part === 'MERGED_TEMPLE_SOURCE') return false;
+            if (useGlbDerivedTemples && isTemplePart(part)) {
+              return pass === 1 && child.userData.glbDerivedTempleVisible === true;
             }
-          }
-        });
 
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-      } else {
-        if (glassesModelRef.current) {
-          glassesModelRef.current.traverse((child) => {
-            if (child.isMesh && child.userData.originalColorHex && child.material) {
-              const materials = Array.isArray(child.material) ? child.material : [child.material];
-              materials.forEach((mat) => {
-                if (mat) {
-                  mat.color.setHex(child.userData.originalColorHex);
-                }
-              });
+            if (pass === 1) {
+              if (isFrontalPass || part === 'BOTH_TEMPLES') return false;
+              return shouldRenderTempleInPass(part, productionTempleSideState, 1);
             }
-          });
-        }
-      }
 
-      if (showFullGlbTestRef.current || showCleanFullOccluderRef.current || showProduction2PassRef.current || showPass1MeshAuditRef.current || showPass2InterferenceRef.current || showTempleOccluderDebugRef.current) {
-        // Render was already handled above
-      } else if (
-        showOccluderDebugRef.current ||
-        showFullOccluderDebugRef.current ||
-        showSideOccluderDebugRef.current ||
-        showNarrowOccluderDebugRef.current
-      ) {
-        const shouldShowSideOccluder = showOccluderDebugRef.current || showSideOccluderDebugRef.current;
-        const shouldShowFullOccluder = showOccluderDebugRef.current || showFullOccluderDebugRef.current;
-        const shouldShowNarrowOccluder = showNarrowOccluderDebugRef.current;
-
-        if (occluderRef.current) {
-          occluderRef.current.visible = shouldShowSideOccluder;
-          if (occluderRef.current.material) {
-            occluderRef.current.material.colorWrite = true;
-            occluderRef.current.material.transparent = true;
-            occluderRef.current.material.opacity = 0.25;
-            occluderRef.current.material.color.setHex(0xff0000);
-            occluderRef.current.material.depthWrite = false;
-            occluderRef.current.material.depthTest = true;
-          }
-        }
-        if (fullOccluderRef.current) {
-          fullOccluderRef.current.visible = shouldShowFullOccluder;
-          if (fullOccluderRef.current.material) {
-            fullOccluderRef.current.material.colorWrite = true;
-            fullOccluderRef.current.material.transparent = true;
-            fullOccluderRef.current.material.opacity = 0.22;
-            fullOccluderRef.current.material.color.setHex(0x0000ff);
-            fullOccluderRef.current.material.depthWrite = false;
-            fullOccluderRef.current.material.depthTest = true;
-          }
-        }
-        if (narrowOccluderRef.current) {
-          narrowOccluderRef.current.visible = shouldShowNarrowOccluder;
-          if (narrowOccluderRef.current.material) {
-            narrowOccluderRef.current.material.colorWrite = true;
-            narrowOccluderRef.current.material.transparent = true;
-            narrowOccluderRef.current.material.opacity = 0.28;
-            narrowOccluderRef.current.material.color.setHex(0x00ff66);
-            narrowOccluderRef.current.material.depthWrite = false;
-            narrowOccluderRef.current.material.depthTest = true;
-          }
-        }
-
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            child.visible = true;
-            if (child.material) {
-              const materials = Array.isArray(child.material) ? child.material : [child.material];
-              materials.forEach((mat) => {
-                if (mat) {
-                  mat.transparent = false;
-                  mat.opacity = 1.0;
-                }
-              });
+            if (part === 'FRONT_FRAME' || part === 'LENS') return true;
+            if (part === 'BOTH_TEMPLES') return isFrontalPass && !hasSplitTempleMeshes;
+            if (isFrontalPass) {
+              const basePart = getTempleBasePart(part);
+              return basePart === 'LEFT_TEMPLE' || basePart === 'RIGHT_TEMPLE';
             }
-          }
-        });
+            return shouldRenderTempleInPass(part, productionTempleSideState, 2);
+          };
 
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-      } else if (activeTestRef.current !== "NONE") {
-        if (occluderRef.current) {
-          occluderRef.current.visible = false;
-          if (occluderRef.current.material) {
+          const setProductionPassVisibility = (pass) => {
+            const visibleMeshes = [];
+            glassesModelRef.current.traverse((child) => {
+              if (child.isMesh) {
+                const shouldShow = shouldRenderProductionMesh(child, pass);
+                child.visible = shouldShow;
+                prepareProductionMesh(child);
+                if (shouldShow) {
+                  visibleMeshes.push(`${child.name || 'UNNAMED'} (${child.userData.partType || 'UNKNOWN'})`);
+                }
+              }
+            });
+            return visibleMeshes;
+          };
+
+          if (occluderRef.current && occluderRef.current.material) {
             occluderRef.current.material.colorWrite = false;
             occluderRef.current.material.transparent = false;
             occluderRef.current.material.opacity = 1.0;
           }
-        }
-        if (fullOccluderRef.current) {
-          fullOccluderRef.current.visible = false;
-          if (fullOccluderRef.current.material) {
+          if (fullOccluderRef.current && fullOccluderRef.current.material) {
             fullOccluderRef.current.material.colorWrite = false;
             fullOccluderRef.current.material.transparent = false;
             fullOccluderRef.current.material.opacity = 1.0;
           }
-        }
-
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
-      } else {
-        const productionTempleSideState = glassesModelRef.current.userData.templeSideState || getTempleSideState(0);
-        const isFrontalPass = productionTempleSideState.nearSide === 'BOTH';
-        let hasSplitTempleMeshes = false;
-
-        glassesModelRef.current.traverse((child) => {
-          if (child.isMesh) {
-            const basePart = getTempleBasePart(child.userData.partType);
-            if (basePart === 'LEFT_TEMPLE' || basePart === 'RIGHT_TEMPLE') {
-              hasSplitTempleMeshes = true;
-            }
-          }
-        });
-
-        const prepareProductionMesh = (child) => {
-          const part = child.userData.partType;
-          child.renderOrder = 0;
-          child.frustumCulled = false;
-          if (child.material) {
-            const materials = Array.isArray(child.material) ? child.material : [child.material];
-            materials.forEach((mat) => {
-              if (mat) {
-                if (part === 'LENS') {
-                  mat.transparent = true;
-                  mat.opacity = 0.35;
-                  mat.depthTest = true;
-                  mat.depthWrite = true;
-                } else if (isTemplePart(part)) {
-                  const segmentOpacity = getTempleSegmentOpacity(
-                    part,
-                    productionTempleSideState,
-                    debugYawDegrees,
-                    glassesModelRef.current?.userData?.templeBoundaryModel,
-                    glassesModelRef.current?.userData?.faceMaskModel,
-                    child
-                  );
-                  mat.transparent = true;
-                  mat.opacity = segmentOpacity;
-                  mat.depthWrite = segmentOpacity > 0.85;
-                  mat.depthTest = true;
-                } else {
-                  mat.transparent = false;
-                  mat.opacity = 1.0;
-                  mat.depthTest = true;
-                  mat.depthWrite = true;
-                }
-                mat.side = THREE.DoubleSide;
-                mat.clippingPlanes = [];
-              }
-            });
-          }
-        };
-
-        const shouldRenderProductionMesh = (child, pass) => {
-          const part = child.userData.partType;
-          if (child.userData.skipProductionRender || part === 'MERGED_TEMPLE_SOURCE') return false;
-
-          if (pass === 1) {
-            if (isFrontalPass || part === 'BOTH_TEMPLES') return false;
-            return shouldRenderTempleInPass(part, productionTempleSideState, 1);
-          }
-
-          if (part === 'FRONT_FRAME' || part === 'LENS') return true;
-          if (part === 'BOTH_TEMPLES') return isFrontalPass && !hasSplitTempleMeshes;
-          if (isFrontalPass) {
-            const basePart = getTempleBasePart(part);
-            return basePart === 'LEFT_TEMPLE' || basePart === 'RIGHT_TEMPLE';
-          }
-          return shouldRenderTempleInPass(part, productionTempleSideState, 2);
-        };
-
-        const setProductionPassVisibility = (pass) => {
-          const visibleMeshes = [];
-          glassesModelRef.current.traverse((child) => {
-            if (child.isMesh) {
-              const shouldShow = shouldRenderProductionMesh(child, pass);
-              child.visible = shouldShow;
-              prepareProductionMesh(child);
-              if (shouldShow) {
-                visibleMeshes.push(`${child.name || 'UNNAMED'} (${child.userData.partType || 'UNKNOWN'})`);
-              }
-            }
-          });
-          return visibleMeshes;
-        };
-
-        if (occluderRef.current && occluderRef.current.material) {
-          occluderRef.current.material.colorWrite = false;
-          occluderRef.current.material.transparent = false;
-          occluderRef.current.material.opacity = 1.0;
-        }
-        if (fullOccluderRef.current && fullOccluderRef.current.material) {
-          fullOccluderRef.current.material.colorWrite = false;
-          fullOccluderRef.current.material.transparent = false;
-          fullOccluderRef.current.material.opacity = 1.0;
-        }
-        if (narrowOccluderRef.current && narrowOccluderRef.current.material) {
-          narrowOccluderRef.current.material.colorWrite = false;
-          narrowOccluderRef.current.material.transparent = false;
-          narrowOccluderRef.current.material.opacity = 1.0;
-        }
-
-        rendererRef.current.clear();
-        glassesModelRef.current.visible = true;
-        if (occluderRef.current) occluderRef.current.visible = false;
-        if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
-        if (narrowOccluderRef.current) {
-          narrowOccluderRef.current.visible = !isFrontalPass;
-          narrowOccluderRef.current.position.set(0, 0, 0);
-          if (narrowOccluderRef.current.material) {
+          if (narrowOccluderRef.current && narrowOccluderRef.current.material) {
             narrowOccluderRef.current.material.colorWrite = false;
-            narrowOccluderRef.current.material.depthWrite = true;
-            narrowOccluderRef.current.material.depthTest = true;
-            narrowOccluderRef.current.material.wireframe = false;
             narrowOccluderRef.current.material.transparent = false;
             narrowOccluderRef.current.material.opacity = 1.0;
-            narrowOccluderRef.current.material.side = THREE.DoubleSide;
           }
-        }
 
-        const pass1VisibleMeshes = setProductionPassVisibility(1);
-        if (!isFrontalPass && pass1VisibleMeshes.length > 0) {
+          rendererRef.current.clear();
+          glassesModelRef.current.visible = true;
+          setFaceAttachedTempleGroupVisible(faceAttachedTempleGroupRef.current, false);
+          if (occluderRef.current) occluderRef.current.visible = false;
+          if (fullOccluderRef.current) fullOccluderRef.current.visible = false;
+          if (narrowOccluderRef.current) {
+            narrowOccluderRef.current.visible = !isFrontalPass;
+            narrowOccluderRef.current.position.set(0, 0, 0);
+            if (narrowOccluderRef.current.material) {
+              narrowOccluderRef.current.material.colorWrite = false;
+              narrowOccluderRef.current.material.depthWrite = true;
+              narrowOccluderRef.current.material.depthTest = true;
+              narrowOccluderRef.current.material.wireframe = false;
+              narrowOccluderRef.current.material.transparent = false;
+              narrowOccluderRef.current.material.opacity = 1.0;
+              narrowOccluderRef.current.material.side = THREE.DoubleSide;
+            }
+          }
+
+          const pass1VisibleMeshes = setProductionPassVisibility(1);
+          if (pass1VisibleMeshes.length > 0) {
+            rendererRef.current.render(sceneRef.current, cameraRef.current);
+          }
+
+          rendererRef.current.clearDepth();
+          setFaceAttachedTempleGroupVisible(faceAttachedTempleGroupRef.current, false);
+          if (narrowOccluderRef.current) narrowOccluderRef.current.visible = false;
+          const pass2VisibleMeshes = setProductionPassVisibility(2);
           rendererRef.current.render(sceneRef.current, cameraRef.current);
-        }
 
-        rendererRef.current.clearDepth();
-        if (narrowOccluderRef.current) narrowOccluderRef.current.visible = false;
-        const pass2VisibleMeshes = setProductionPassVisibility(2);
-        rendererRef.current.render(sceneRef.current, cameraRef.current);
 
-        if (ENABLE_AR_DIAGNOSTIC_LOGS && diagnosticFrameCountRef.current % 60 === 0) {
-          console.log('AR_PRODUCTION_PASS_STATE', {
-            yawDegrees: debugYawDegrees.toFixed(4),
-            nearTemplePart: productionTempleSideState.nearTemplePart,
-            farTemplePart: productionTempleSideState.farTemplePart,
-            pass1VisibleMeshes,
-            pass2VisibleMeshes
-          });
         }
       }
     } else {
+      setFaceAttachedTempleGroupVisible(faceAttachedTempleGroupRef.current, false);
       if (faceFitHintRef.current) updateFaceFitHint('');
       rendererRef.current.render(sceneRef.current, cameraRef.current);
     }
@@ -4089,20 +4885,35 @@ ${JSON.stringify(pass2List, null, 2)}
   // ==========================================
   // 6. CAMERA & CAPTURE LOGIC
   // ==========================================
+  const resetCapturePreviewState = () => {
+    if (recordedVideoUrlRef.current) {
+      URL.revokeObjectURL(recordedVideoUrlRef.current);
+    }
+    setCapturedImage(null);
+    setRecordedVideoUrl(null);
+    setIsDownloading(false);
+    setDownloadProgress(0);
+    capturedImageRef.current = null;
+    recordedVideoUrlRef.current = null;
+    recordedBlobRef.current = null;
+    chunksRef.current = [];
+  };
+
   const startCamera = () => {
-    setCapturedImage(null); setRecordedVideoUrl(null); recordedBlobRef.current = null;
-    capturedImageRef.current = null; recordedVideoUrlRef.current = null;
+    resetCapturePreviewState();
     isAROpenRef.current = true;
-    setShowGlassesMenu(false); setShowArDiopterControl(false);
+    setShowGlassesMenu(false);
   };
 
   const stopCamera = () => {
     if (videoRef.current?.srcObject) videoRef.current.srcObject.getTracks().forEach(track => track.stop());
     if (isRecording) stopRecording();
     isAROpenRef.current = false;
-    setCapturedImage(null); capturedImageRef.current = null;
-    setRecordedVideoUrl(null); recordedVideoUrlRef.current = null;
-    recordedBlobRef.current = null;
+    resetCapturePreviewState();
+    if (requestRef.current) {
+      cancelAnimationFrame(requestRef.current);
+      requestRef.current = null;
+    }
     clearInterval(timerIntervalRef.current);
     if (onClose) onClose();
   };
@@ -4110,7 +4921,7 @@ ${JSON.stringify(pass2List, null, 2)}
   useEffect(() => {
     // Tự động khởi chạy camera khi component được mount
     startCamera();
-    
+
     if (videoRef.current) {
       navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true })
         .then((stream) => {
@@ -4134,7 +4945,8 @@ ${JSON.stringify(pass2List, null, 2)}
             recordingCanvasRef.current = recCanvas;
 
             initThreeJS(w, h);
-            loadGlassesModel(activeARProduct);
+            loadGlassesModel(activeARProductRef.current || activeARProduct);
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
             requestRef.current = requestAnimationFrame(predictWebcam);
           };
         })
@@ -4149,10 +4961,52 @@ ${JSON.stringify(pass2List, null, 2)}
       if (videoRef.current?.srcObject) {
         videoRef.current.srcObject.getTracks().forEach(track => track.stop());
       }
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
       clearInterval(timerIntervalRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    if (!sceneRef.current || !rendererRef.current || !activeARProduct) return;
+    loadGlassesModel(activeARProduct);
   }, [activeARProduct]);
+
+  useEffect(() => {
+    if (!glassesModelRef.current) return;
+    glassesModelRef.current.traverse((child) => {
+      if (child.isMesh) {
+        if (debugMode) {
+          if (child.userData.debugHelper) {
+            child.userData.debugHelper.visible = child.visible;
+            child.userData.debugHelper.update();
+          }
+          if (!child.userData.originalMaterial) {
+            child.userData.originalMaterial = child.material;
+          }
+          child.visible = true;
+          const partType = child.userData.partType;
+          const debugColor = getDebugColorForPartType(partType);
+          if (!child.userData.debugMaterial) {
+            child.userData.debugMaterial = new THREE.MeshBasicMaterial({
+              color: debugColor,
+              side: THREE.DoubleSide
+            });
+          }
+          child.material = child.userData.debugMaterial;
+        } else {
+          if (child.userData.debugHelper) {
+            child.userData.debugHelper.visible = false;
+          }
+          if (child.userData.originalMaterial) {
+            child.material = child.userData.originalMaterial;
+          }
+        }
+      }
+    });
+  }, [debugMode]);
 
   const capturePhoto = () => {
     if (!liveCanvasRef.current) return;
@@ -4162,29 +5016,46 @@ ${JSON.stringify(pass2List, null, 2)}
     showToast('Đã chụp ảnh!', 'success');
   };
 
+  const handleRetake = () => {
+    if (requestRef.current) {
+      cancelAnimationFrame(requestRef.current);
+      requestRef.current = null;
+    }
+    if (isRecordingRef.current) {
+      stopRecording();
+    }
+    resetCapturePreviewState();
+    setShowGlassesMenu(false);
+    setIsRecording(false);
+    isRecordingRef.current = false;
+    isAROpenRef.current = true;
+    requestRef.current = requestAnimationFrame(predictWebcam);
+  };
+
   const startRecording = () => {
     if (!recordingCanvasRef.current) return;
     chunksRef.current = [];
     recordedBlobRef.current = null;
-    
-    const stream = recordingCanvasRef.current.captureStream(30);
 
-    if (videoRef.current?.srcObject) {
-      const audioTracks = videoRef.current.srcObject.getAudioTracks();
-      if (audioTracks.length > 0) {
-        stream.addTrack(audioTracks[0].clone());
-      }
-    }
+    // 1. Lấy luồng hình ảnh từ Canvas
+    const canvasStream = recordingCanvasRef.current.captureStream(30);
 
-    const options = { mimeType: 'video/webm;codecs=vp9,opus' };
+    // 2. Lấy luồng âm thanh từ Micro
+    const audioTracks = videoRef.current?.srcObject?.getAudioTracks() || [];
+
+    // FIX 2: Trở về cách gộp Stream an toàn, KHÔNG dùng .clone() gây rè tiếng
+    const combinedStream = new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks]);
+
+    // FIX 3: Ưu tiên H264 để điện thoại dùng phần cứng nén video (chống lag)
+    let mimeType = 'video/webm';
+    if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) mimeType = 'video/webm;codecs=h264';
+    else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) mimeType = 'video/webm;codecs=vp8';
+    else if (MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/mp4';
+
     try {
-      mediaRecorderRef.current = new MediaRecorder(stream, options);
+      mediaRecorderRef.current = new MediaRecorder(combinedStream, { mimeType });
     } catch (e) {
-      try {
-        mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8,opus' });
-      } catch (e2) {
-        mediaRecorderRef.current = new MediaRecorder(stream);
-      }
+      mediaRecorderRef.current = new MediaRecorder(combinedStream);
     }
 
     mediaRecorderRef.current.ondataavailable = (e) => {
@@ -4194,14 +5065,17 @@ ${JSON.stringify(pass2List, null, 2)}
     };
 
     mediaRecorderRef.current.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+      // Đảm bảo tạo Blob đúng định dạng nén
+      const blob = new Blob(chunksRef.current, { type: mimeType.split(';')[0] });
       recordedBlobRef.current = blob;
       const url = URL.createObjectURL(blob);
       setRecordedVideoUrl(url);
       recordedVideoUrlRef.current = url;
     };
 
-    mediaRecorderRef.current.start(10);
+    // FIX 1 CHÍ MẠNG: Xóa số 10 ở đây, để trình duyệt tự quản lý bộ đệm!
+    mediaRecorderRef.current.start();
+
     setIsRecording(true);
     isRecordingRef.current = true;
     setRecordingTime(0);
@@ -4241,7 +5115,7 @@ ${JSON.stringify(pass2List, null, 2)}
         link.href = capturedImage;
         link.download = `anh-ar-${activeARProduct?._id}.jpg`;
         link.click();
-        
+
         clearInterval(interval);
         setDownloadProgress(100);
         setTimeout(() => {
@@ -4253,7 +5127,13 @@ ${JSON.stringify(pass2List, null, 2)}
         setIsDownloading(false);
         showToast('Lỗi tải ảnh!', 'error');
       }
-    } else if (recordedVideoUrl && recordedBlobRef.current) {
+    } else if (recordedVideoUrl || recordedBlobRef.current) {
+      const videoBlob = recordedBlobRef.current;
+      if (!videoBlob || videoBlob.size === 0) {
+        showToast('Chưa có video để lưu', 'error');
+        return;
+      }
+
       setIsDownloading(true);
       setDownloadProgress(10);
 
@@ -4263,7 +5143,7 @@ ${JSON.stringify(pass2List, null, 2)}
 
       try {
         const formData = new FormData();
-        formData.append('video', recordedBlobRef.current);
+        formData.append('video', videoBlob, 'ar-video.webm');
 
         const response = await fetch('/api/ar/convert-video', {
           method: 'POST',
@@ -4276,12 +5156,11 @@ ${JSON.stringify(pass2List, null, 2)}
         if (!response.ok) throw new Error('Conversion failed');
 
         const mp4Blob = await response.blob();
+        if (!mp4Blob || mp4Blob.size === 0) throw new Error('Empty MP4 response');
+
         setDownloadProgress(100);
 
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(mp4Blob);
-        a.download = `video-kinh-ar-${activeARProduct?._id}.mp4`;
-        a.click();
+        downloadBlob(mp4Blob, `video-kinh-ar-${activeARProduct?._id || 'ar'}.mp4`);
 
         setTimeout(() => {
           setIsDownloading(false);
@@ -4289,14 +5168,81 @@ ${JSON.stringify(pass2List, null, 2)}
         }, 500);
       } catch (error) {
         clearInterval(progressInterval);
-        setIsDownloading(false);
-        showToast('Lỗi server, vui lòng thử lại!', 'error');
+        downloadBlob(videoBlob, `video-kinh-ar-${activeARProduct?._id || 'ar'}.webm`);
+        setDownloadProgress(100);
+        setTimeout(() => {
+          setIsDownloading(false);
+          showToast('Không thể convert MP4, đã lưu tạm video WebM', 'error');
+        }, 500);
       }
+    } else {
+      showToast('Chưa có video để lưu', 'error');
     }
   };
 
-  const handleArDiopterChange = (val) => {
-    setArDiopter(val);
+  const downloadBlob = (blob, filename) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  };
+
+  const handleCheckoutFromAR = () => {
+    const selectedProduct = activeARProductRef.current || activeARProduct;
+    if (!selectedProduct?._id) {
+      showToast('Chưa chọn kính để thanh toán', 'error');
+      return;
+    }
+
+    const cartId = `${selectedProduct._id}_std`;
+    const image = Array.isArray(selectedProduct.images)
+      ? selectedProduct.images[0]
+      : selectedProduct.image;
+    const price = selectedProduct.discountPercent > 0
+      ? selectedProduct.salePrice
+      : selectedProduct.price;
+    const newItem = {
+      cartId,
+      productId: selectedProduct._id,
+      name: selectedProduct.name,
+      price,
+      originalPrice: selectedProduct.discountPercent > 0
+        ? selectedProduct.originalPrice
+        : selectedProduct.price,
+      discountPercent: selectedProduct.discountPercent || 0,
+      salePrice: price,
+      image,
+      hasPrescription: false,
+      od: '',
+      os: '',
+      od_sph: null,
+      od_cyl: null,
+      od_axis: null,
+      os_sph: null,
+      os_cyl: null,
+      os_axis: null,
+      pd: null,
+      rxDate: null,
+      rxNote: '',
+      prescriptionMode: 'none',
+      quantity: 1
+    };
+
+    const cartKey = getCartKey();
+    const cart = JSON.parse(localStorage.getItem(cartKey)) || [];
+    const existingIndex = cart.findIndex((item) => item.cartId === cartId);
+    if (existingIndex !== -1) {
+      cart[existingIndex] = { ...cart[existingIndex], ...newItem, quantity: cart[existingIndex].quantity || 1 };
+    } else {
+      cart.push(newItem);
+    }
+
+    localStorage.setItem(cartKey, JSON.stringify(cart));
+    window.dispatchEvent(new Event('cartUpdated'));
+    stopCamera();
+    navigate('/checkout', { state: { selectedItems: [cartId] } });
   };
 
   const formatTime = (seconds) => {
@@ -4308,16 +5254,8 @@ ${JSON.stringify(pass2List, null, 2)}
   return (
     <div className="fixed inset-0 z-[100] bg-black flex flex-col animate-in fade-in duration-300">
       {/* ---------------- IN-APP DEBUGGER ---------------- */}
-      {SHOW_AR_DEBUG_UI && <button onClick={() => setShowDebugPane(!showDebugPane)} className="fixed bottom-4 right-4 z-[9999] bg-yellow-500 text-white p-3 rounded-full shadow-[0_0_15px_rgba(234,179,8,0.5)] active:scale-90">
-        <Bug className="w-6 h-6" />
-      </button>}
-      {SHOW_AR_DEBUG_UI && <div className={`fixed bottom-0 left-0 w-full h-[50vh] bg-black/95 z-[9998] border-t-2 border-green-500 p-4 font-mono text-[10px] sm:text-xs overflow-y-auto transition-transform duration-300 ${showDebugPane ? 'translate-y-0' : 'translate-y-full'}`}>
-        <div className="flex justify-between items-center mb-3 sticky top-0 bg-black pb-2 border-b border-gray-800">
-          <span className="text-green-500 font-bold">TERMINAL DI ĐỘNG v1.0</span>
-          <button onClick={() => setDebugLogs([])} className="text-red-400 hover:text-red-300"><Trash2 className="w-4 h-4" /></button>
-        </div>
-        {debugLogs.map((log, i) => (<div key={i} className="mb-1 border-b border-white/5 pb-1"><span className="text-gray-600 mr-2">[{i + 1}]</span> {log}</div>))}
-      </div>}
+
+
 
       {/* ---------------- TOAST NOTIFICATION ---------------- */}
       <div className={`fixed top-10 left-1/2 transform -translate-x-1/2 z-[999] transition-all duration-300 ${toast.show ? 'translate-y-0 opacity-100' : '-translate-y-10 opacity-0 pointer-events-none'}`}>
@@ -4327,244 +5265,33 @@ ${JSON.stringify(pass2List, null, 2)}
         </div>
       </div>
 
-      <div className="p-6 flex justify-end items-center bg-gradient-to-b from-black/80 to-transparent z-10 text-white absolute top-0 w-full">
-        <button onClick={stopCamera} className="bg-white/20 hover:bg-red-500 text-white p-2 rounded-full transition-colors"><X className="w-8 h-8" /></button>
+      <div className="p-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent z-10 text-white absolute top-0 w-full gap-3">
+        <div className={`min-w-0 pr-4 transition-opacity ${isRecording ? 'opacity-0' : 'opacity-100'}`}>
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-white/55">Đang thử sản phẩm</div>
+          <div className="max-w-[62vw] truncate text-sm font-black text-white drop-shadow-md">
+            {(activeARProductRef.current || activeARProduct || product)?.name || 'Kinh AR'}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setDebugMode(v => !v)}
+            className={`px-3 py-1.5 rounded-full font-black text-[10px] uppercase tracking-wider transition-all shadow-md ${debugMode
+                ? 'bg-red-600 hover:bg-red-700 text-white border border-red-400'
+                : 'bg-white/25 hover:bg-white/35 text-white border border-white/20'
+              }`}
+          >
+            Debug Mode: {debugMode ? 'ON' : 'OFF'}
+          </button>
+          <button onClick={stopCamera} className="bg-white/20 hover:bg-red-500 text-white p-2 rounded-full transition-colors"><X className="w-8 h-8" /></button>
+        </div>
       </div>
 
       <div className="relative flex-1 flex items-center justify-center overflow-hidden">
         {/* BUTTON ẨN/HIỆN MESH DEBUG TRÊN DI ĐỘNG */}
-        {SHOW_AR_DEBUG_UI && (!capturedImage && !recordedVideoUrl) && (
-          <button
-            onClick={() => setShowMeshDebug(!showMeshDebug)}
-            className="absolute top-24 left-6 z-[200] bg-yellow-500 hover:bg-yellow-600 text-black font-black text-[9px] px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1 active:scale-95 transition-all uppercase"
-          >
-            <Bug className="w-3 h-3" />
-            {showMeshDebug ? "Ẩn Mesh Debug" : "Hiện Mesh Debug"}
-          </button>
-        )}
+
 
         {/* BẢNG DIAGNOSTIC OVERLAY CUỘN TRÊN MÀN HÌNH */}
-        {SHOW_AR_DEBUG_UI && (!capturedImage && !recordedVideoUrl) && showMeshDebug && meshDebugData.length > 0 && (
-          <div className="absolute top-[135px] left-6 z-[190] bg-black/95 backdrop-blur-md text-white p-3 rounded-2xl border border-white/20 text-[8px] max-w-[88vw] max-h-[45vh] overflow-y-auto font-mono shadow-2xl">
-            <div className="font-bold border-b border-white/20 pb-1.5 mb-1.5 uppercase text-yellow-400 flex items-center justify-between">
-              <span>📊 MESH DIAGNOSTICS ({meshDebugData.length})</span>
-              <span className="text-[6px] text-gray-400">Vuốt cuộn dọc/ngang</span>
-            </div>
 
-            {/* WARNING ZONE */}
-            {gltfWarning && (
-              <div className="bg-red-950/90 border border-red-500 text-red-200 p-2 rounded-xl text-[7.5px] font-bold animate-pulse mb-3 leading-normal">
-                ⚠️ {gltfWarning}
-              </div>
-            )}
-
-            {/* 🩺 ANATOMICAL FITTING CALIBRATION */}
-            <div className="mb-3 p-2.5 bg-blue-950/90 rounded-xl border border-blue-500/50 animate-in fade-in duration-300">
-              <div className="text-blue-400 font-bold border-b border-blue-500/30 pb-1 mb-2 uppercase text-[8px] tracking-wider flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" />
-                🩺 TIKTOK REALISM EYE FITTING
-              </div>
-              <div className="space-y-1.5 text-[7.5px] leading-relaxed font-mono">
-                <div>
-                  <div className="text-[6.5px] text-gray-400 uppercase font-black">Lens Top Y (World):</div>
-                  <div className="pl-1 text-gray-300 font-bold">{anatomicalBridgeDiagnostics.lensTopY}</div>
-                </div>
-
-                <div>
-                  <div className="text-[6.5px] text-gray-400 uppercase font-black">Lens Bottom Y (World):</div>
-                  <div className="pl-1 text-gray-300 font-bold">{anatomicalBridgeDiagnostics.lensBottomY}</div>
-                </div>
-
-                <div>
-                  <div className="text-[6.5px] text-gray-400 uppercase font-black">Pupil Y (World Center):</div>
-                  <div className="pl-1 text-yellow-400 font-bold">{anatomicalBridgeDiagnostics.pupilY}</div>
-                </div>
-
-                <div>
-                  <div className="text-[6.5px] text-gray-400 uppercase font-black">Pupil Y-Ratio inside Lens:</div>
-                  <div className="pl-1 text-green-400 font-bold">{(anatomicalBridgeDiagnostics.eyeVerticalRatio * 100).toFixed(2)}%</div>
-                  <div className="text-[5.5px] text-gray-400 pl-1 mt-0.5 leading-normal">• Ideal: 55% - 70% (Pupil slightly above physical lens center)</div>
-                </div>
-
-                <div className="pt-1.5 border-t border-white/10 mt-1.5">
-                  <div className="text-[6.5px] text-gray-400 uppercase font-black">Anatomical Y-Drop Applied:</div>
-                  <div className="pl-1 text-gray-300">{anatomicalBridgeDiagnostics.appliedDrop}</div>
-                </div>
-
-                <div>
-                  <div className="text-[6.5px] text-gray-400 uppercase font-black">Required Vertical Shift:</div>
-                  <div className="pl-1 text-orange-400 font-bold">{anatomicalBridgeDiagnostics.deltaWorldYReq}</div>
-                </div>
-
-                <div>
-                  <div className="text-[6.5px] text-gray-400 uppercase font-black">Suggested BridgeOffsetY Adjustment:</div>
-                  <div className="pl-1 text-yellow-400 font-black">Local Offset Shift = {anatomicalBridgeDiagnostics.suggestedAdjustmentLocal}</div>
-                  <div className="pl-1 text-gray-400 text-[6px]">• Current bridgeOffsetY = {anatomicalBridgeDiagnostics.bridgeOffsetYNew}</div>
-                  <div className="pl-1 text-green-400 font-bold">• Optimal bridgeOffsetY = {parseFloat(anatomicalBridgeDiagnostics.suggestedBridgeOffsetY).toFixed(6)}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* 📏 GLTF MODEL BOUNDING BOX DETAILS */}
-            <div className="mb-3 p-2.5 bg-gray-900/90 rounded-xl border border-white/10">
-              <div className="text-gray-300 font-bold border-b border-white/10 pb-1 mb-2 uppercase text-[8px] tracking-wider">
-                📏 GLTF Box3 Measurements
-              </div>
-              <div className="space-y-1 text-[7.5px] leading-relaxed font-mono">
-                <div><span className="text-gray-500">1. Original GLTF size:</span> <span className="text-gray-300 font-bold">{fittingDiagnostics.rawModelSize}</span></div>
-                <div><span className="text-gray-500">2. Original Size (Excluding Temples):</span> <span className="text-yellow-500 font-bold">{fittingDiagnostics.rawSizeExcludingTemples}</span></div>
-                <div className="text-[6px] text-gray-400 pl-1 leading-normal">• In-depth details:</div>
-                <div className="text-[5.5px] text-gray-400 pl-2 leading-tight">- Included: {box3Diagnostics.includedExcludingTemples}</div>
-                <div className="text-[5.5px] text-gray-400 pl-2 leading-tight">- Excluded (Temples): {box3Diagnostics.excludedExcludingTemples}</div>
-                <div className="pt-1.5 border-t border-white/5 mt-1">
-                  <div><span className="text-gray-500">- Object_5 size:</span> {box3Diagnostics.sizeObj5}</div>
-                  <div><span className="text-gray-500">- Object_7 size:</span> {box3Diagnostics.sizeObj7}</div>
-                  <div><span className="text-gray-500">- Object_9 size:</span> {box3Diagnostics.sizeObj9}</div>
-                  <div><span className="text-gray-500">- Combined 5+9 (Frame):</span> {box3Diagnostics.size59}</div>
-                  <div><span className="text-gray-500">- Combined 5+7+9:</span> {box3Diagnostics.size579}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* 🧬 AR ANCHOR WEIGHT DETAILS */}
-            <div className="mb-3 p-2.5 bg-purple-950/90 rounded-xl border border-purple-500/50">
-              <div className="text-purple-400 font-bold border-b border-purple-500/30 pb-1 mb-2 uppercase text-[8px] tracking-wider">
-                🧬 Anchor Blending Weights
-              </div>
-              <div className="space-y-1 text-[7.5px] leading-relaxed font-mono">
-                <div><span className="text-gray-500">Formula:</span> <span className="text-purple-300">{anchorWeightAnalysis.formula}</span></div>
-                <div><span className="text-gray-500">Weight 197 (NoseBridge):</span> <span className="text-gray-300">0.70</span></div>
-                <div><span className="text-gray-500">Weight 168 (Nose Tip):</span> <span className="text-gray-300">0.25</span></div>
-                <div><span className="text-gray-500">Weight EyeCenter:</span> <span className="text-gray-300">0.05</span></div>
-                <div className="pt-1 border-t border-white/5 mt-1">
-                  <div><span className="text-gray-400 font-bold">Anchor Root:</span> {anchorDiagnostics.glassesAnchorPos}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* 📍 REALTIME POSITION BREAKDOWN */}
-            <div className="mb-3 p-2.5 bg-gray-900/90 rounded-xl border border-white/10">
-              <div className="text-gray-300 font-bold border-b border-white/10 pb-1 mb-2 uppercase text-[8px] tracking-wider">
-                📍 Realtime Position Breakdown
-              </div>
-              <div className="space-y-1 text-[7.5px] leading-relaxed font-mono">
-                <div><span className="text-gray-500">1. Blended Anchor:</span> {positionBreakdown.rawAnchor}</div>
-                <div><span className="text-gray-500">2. Nose Fit Offset (Z):</span> {positionBreakdown.afterDepthOffset}</div>
-                <div><span className="text-gray-500">3. Head Yaw Offset:</span> {positionBreakdown.afterNoseOffset}</div>
-                <div><span className="text-gray-500">4. Pitch Offset (Y/Z):</span> {positionBreakdown.afterVerticalOffset}</div>
-                <div className="pt-1 border-t border-white/5 mt-1">
-                  <div className="text-green-400 font-bold">5. Target Pos: {positionBreakdown.afterSmoothing}</div>
-                  <div className="text-yellow-400 font-bold">6. Smooth Lerp: {positionBreakdown.finalPosition}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* 📈 REAL-TIME TRACKING METRICS */}
-            <div className="mb-3 p-2.5 bg-gray-900/90 rounded-xl border border-white/10">
-              <div className="text-gray-300 font-bold border-b border-white/10 pb-1 mb-2 uppercase text-[8px] tracking-wider">
-                📈 Tracking responsiveness
-              </div>
-              <div className="space-y-1 text-[7.5px] leading-relaxed font-mono">
-                <div><span className="text-gray-500">posDeltaX:</span> {anatomicalBridgeDiagnostics.posDeltaX} <span className="text-gray-500">| LERP_X:</span> <span className="text-yellow-400">{anatomicalBridgeDiagnostics.lerpX}</span></div>
-                <div><span className="text-gray-500">posDeltaY:</span> {anatomicalBridgeDiagnostics.posDeltaY} <span className="text-gray-500">| LERP_Y:</span> <span className="text-yellow-400">{anatomicalBridgeDiagnostics.lerpY}</span></div>
-                <div><span className="text-gray-500">posDeltaZ:</span> {anatomicalBridgeDiagnostics.posDeltaZ} <span className="text-gray-500">| LERP_Z:</span> <span className="text-yellow-400">{anatomicalBridgeDiagnostics.lerpZ}</span></div>
-                <div><span className="text-gray-500">rotDelta:</span> {anatomicalBridgeDiagnostics.rotDelta} <span className="text-gray-500">| SLERP:</span> <span className="text-cyan-400">{anatomicalBridgeDiagnostics.slerpRot}</span></div>
-              </div>
-            </div>
-
-            {/* 🛡️ OCCLUSIONS PASSES DIAGNOSTICS */}
-            <div className="mb-3 p-2.5 bg-gray-900/90 rounded-xl border border-white/10">
-              <div className="text-gray-300 font-bold border-b border-white/10 pb-1 mb-2 uppercase text-[8px] tracking-wider">
-                🛡️ Occlusion Rendering Passes
-              </div>
-              <div className="space-y-1 text-[7.5px] leading-relaxed font-mono">
-                <div><span className="text-gray-500">Main Occluder Visible:</span> <span className="text-gray-300">{anatomicalBridgeDiagnostics.occluderVisible}</span></div>
-                <div><span className="text-gray-500">Full Occluder Visible:</span> <span className="text-gray-300">{anatomicalBridgeDiagnostics.fullOccluderVisible}</span></div>
-                <div><span className="text-gray-500">renderOrder:</span> Main={anatomicalBridgeDiagnostics.occluderRenderOrder} Full={anatomicalBridgeDiagnostics.fullOccluderRenderOrder}</div>
-                <div><span className="text-gray-500">depthWrite:</span> Main={anatomicalBridgeDiagnostics.occluderDepthWrite}</div>
-                <div><span className="text-gray-500">colorWrite:</span> Main={anatomicalBridgeDiagnostics.occluderColorWrite}</div>
-                <div className="pt-1 mt-1 border-t border-white/5"><span className="text-gray-500">Mode:</span> <span className="text-green-400 font-bold">{anatomicalBridgeDiagnostics.occluderMode}</span></div>
-                <div><span className="text-gray-500">Near Side:</span> <span className="text-cyan-400 font-bold">{anatomicalBridgeDiagnostics.nearSide}</span></div>
-                <div><span className="text-gray-500">Far Side:</span> <span className="text-orange-400 font-bold">{anatomicalBridgeDiagnostics.farSide}</span></div>
-                <div><span className="text-gray-500">Visible Left:</span> {anatomicalBridgeDiagnostics.visibleTempleLengthLeft} <span className="text-gray-500">| Right:</span> {anatomicalBridgeDiagnostics.visibleTempleLengthRight}</div>
-              </div>
-            </div>
-
-            {/* 🦻 TEMPLE / HANDLES STRUCTURE */}
-            <div className="mb-3 p-2.5 bg-gray-900/90 rounded-xl border border-white/10">
-              <div className="text-gray-300 font-bold border-b border-white/10 pb-1 mb-2 uppercase text-[8px] tracking-wider">
-                🦻 Temple Mesh Detections
-              </div>
-              <div className="space-y-1 text-[7.5px] leading-relaxed font-mono">
-                <div><span className="text-gray-500">Left Temple Mesh:</span> <span className="text-gray-300">{anatomicalBridgeDiagnostics.leftTempleMeshes}</span></div>
-                <div><span className="text-gray-500">Right Temple Mesh:</span> <span className="text-gray-300">{anatomicalBridgeDiagnostics.rightTempleMeshes}</span></div>
-                <div><span className="text-gray-500">Both Temples Mesh:</span> <span className="text-gray-300">{anatomicalBridgeDiagnostics.bothTempleMeshes}</span></div>
-                <div className="text-[6px] text-gray-500 border-t border-white/5 pt-1 mt-1 leading-normal">
-                  Detailed diagnostics: {anatomicalBridgeDiagnostics.templeDiagnosticsText}
-                </div>
-              </div>
-            </div>
-
-            {/* 🧭 ADAPTIVE SMOOTHING TARGETS */}
-            <div className="mb-3 p-2.5 bg-gray-900/90 rounded-xl border border-white/10">
-              <div className="text-gray-300 font-bold border-b border-white/10 pb-1 mb-2 uppercase text-[8px] tracking-wider">
-                🧭 Adaptive Smoothing Targets
-              </div>
-              <div className="space-y-1 text-[7.5px] leading-relaxed font-mono">
-                <div className="pt-1 pb-1 border-b border-white/5 text-red-300 font-bold uppercase">Temple Anchor Debug: {showTempleAnchorDebug ? "ON" : "OFF"}</div>
-                <div><span className="text-gray-500">faceWidth:</span> <span className="text-yellow-400">{templeAnchorDiagnostics.faceWidth}</span></div>
-                <div><span className="text-gray-500">yawDegrees:</span> <span className="text-yellow-400">{templeAnchorDiagnostics.yawDegrees}</span></div>
-                <div><span className="text-gray-500">leftApprox:</span> <span className="text-red-400">{templeAnchorDiagnostics.leftTempleApprox}</span></div>
-                <div><span className="text-gray-500">rightApprox:</span> <span className="text-blue-400">{templeAnchorDiagnostics.rightTempleApprox}</span></div>
-                <div><span className="text-gray-500">sideOffset:</span> {templeAnchorDiagnostics.sideOffset} <span className="text-gray-500">| backOffset:</span> {templeAnchorDiagnostics.backOffset}</div>
-                <div><span className="text-gray-500">Target Lerp X:</span> {anatomicalBridgeDiagnostics.targetLerpX}</div>
-                <div><span className="text-gray-500">Target Lerp Y:</span> {anatomicalBridgeDiagnostics.targetLerpY}</div>
-                <div><span className="text-gray-500">Target Lerp Z:</span> {anatomicalBridgeDiagnostics.targetLerpZ}</div>
-                <div><span className="text-gray-500">Target Slerp:</span> {anatomicalBridgeDiagnostics.targetSlerp}</div>
-              </div>
-            </div>
-
-            {/* 👂 TEMPLE FADE & LOCAL CLIPPING */}
-            <div className="p-2.5 bg-gray-900/90 rounded-xl border border-white/10">
-              <div className="text-gray-300 font-bold border-b border-white/10 pb-1 mb-2 uppercase text-[8px] tracking-wider">
-                👂 Temple Fade & Hiding
-              </div>
-              <div className="space-y-1 text-[7.5px] leading-relaxed font-mono">
-                <div><span className="text-gray-500">Head Yaw:</span> <span className="text-yellow-400 font-bold">{anatomicalBridgeDiagnostics.yawDegrees}°</span></div>
-                <div><span className="text-gray-500">Temple Fade Factor:</span> <span className="text-green-400 font-bold">{anatomicalBridgeDiagnostics.templeFadeFactor}</span></div>
-                <div><span className="text-gray-500">Object_7 Opacity:</span> <span className="text-cyan-400 font-bold">{anatomicalBridgeDiagnostics.object7Opacity}</span></div>
-                <div><span className="text-gray-500">Object_7 Forced Hidden:</span> <span className="text-red-500 font-bold">false</span></div>
-                <div className="text-[6.5px] text-gray-400 mt-1 border-t border-white/5 pt-1 leading-normal">Legacy temple fade is disabled in clean render mode.</div>
-                <div className="text-[6.5px] text-gray-400 leading-normal">• Object_7 Local Clipping: DISABLED (using full handles length)</div>
-                <div className="pt-1.5 border-t border-white/5 mt-1 text-yellow-400 font-bold">🛠️ DEPTH CALIBRATION DETAILS:</div>
-                <div><span className="text-gray-500">Video Mirrored:</span> <span className="text-green-400 font-bold">TRUE (CSS ScaleX)</span></div>
-                <div><span className="text-gray-500">Canvas Mirrored:</span> <span className="text-green-400 font-bold">TRUE (CSS ScaleX)</span></div>
-                <div><span className="text-gray-500">Left Temple Expected:</span> <span className="text-cyan-400 font-bold">{parseFloat(anatomicalBridgeDiagnostics.yawDegrees) > 0 ? "Hidden (False)" : "Visible (True)"}</span></div>
-                <div><span className="text-gray-500">Right Temple Expected:</span> <span className="text-cyan-400 font-bold">{parseFloat(anatomicalBridgeDiagnostics.yawDegrees) > 0 ? "Visible (True)" : "Hidden (False)"}</span></div>
-              </div>
-            </div>
-
-            {/* GLTF TREE */}
-            <div className="mt-3 p-2 bg-black/60 rounded-lg border border-white/10 font-mono text-[7px] text-green-400 leading-tight overflow-x-auto whitespace-pre">
-              <div className="font-bold border-b border-green-500/30 pb-0.5 mb-1 text-[7.5px] text-green-300 uppercase">🌳 GLTF Hierarchical Tree</div>
-              {gltfTree}
-            </div>
-
-            {/* DIAGNOSTIC SCREENSHOT DATA */}
-            <div className="mt-3 p-2.5 bg-blue-950/40 rounded-xl border border-blue-500/30 text-[7px] space-y-1.5 select-all">
-              <div className="text-blue-300 font-bold uppercase text-[7.5px] border-b border-blue-500/20 pb-0.5 mb-1 flex items-center justify-between">
-                <span>📸 SCREENSHOT DATA</span>
-                <span className="text-gray-400 text-[6px]">Sao chép chụp màn hình</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-gray-300">
-                <div>Scale: {glassesModelRef.current ? glassesModelRef.current.scale.x.toFixed(6) : 'N/A'}</div>
-                <div>Pos: {glassesModelRef.current ? `${glassesModelRef.current.position.x.toFixed(3)}, ${glassesModelRef.current.position.y.toFixed(3)}, ${glassesModelRef.current.position.z.toFixed(3)}` : 'N/A'}</div>
-                <div>Yaw: {anatomicalBridgeDiagnostics.yawDegrees}°</div>
-                <div>Obj7 Opacity: {anatomicalBridgeDiagnostics.object7Opacity}</div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* CẦU NỐI WEB CAM FEED VÀ ba CANVAS */}
         {/* video: Nhận luồng webcam thô (ẨN) */}
@@ -4574,7 +5301,7 @@ ${JSON.stringify(pass2List, null, 2)}
         {/* liveCanvas: Hiển thị giao diện thực tế (Composite của video + 3D, lật gương) */}
         <canvas ref={liveCanvasRef} className="w-full h-full object-cover select-none" />
 
-        {SHOW_AR_DEBUG_UI && faceFitHint && !capturedImage && !recordedVideoUrl && !isAiLoading && (
+        {faceFitHint && !capturedImage && !recordedVideoUrl && !isAiLoading && (
           <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 max-w-[82vw] rounded-full bg-black/70 px-4 py-2 text-center text-[11px] font-black uppercase tracking-wide text-white shadow-xl border border-white/15 backdrop-blur-md">
             {faceFitHint}
           </div>
@@ -4597,16 +5324,7 @@ ${JSON.stringify(pass2List, null, 2)}
         )}
 
         {/* SLIDER ĐIỀU CHỈNH ĐỘ CẬN TẠM THỜI TẠI RUNTIME */}
-        {SHOW_AR_OPTIONAL_CONTROLS && showArDiopterControl && (
-          <div className="absolute bottom-36 left-1/2 transform -translate-x-1/2 bg-black/80 backdrop-blur-md px-6 py-4 rounded-[32px] border border-white/20 z-40 flex flex-col items-center w-48 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <button onClick={() => setShowArDiopterControl(false)} className="absolute top-4 right-4 text-white/50 hover:text-white transition"><X className="w-4 h-4" /></button>
-            <p className="text-[10px] font-black tracking-widest opacity-60 mb-2 mt-2 uppercase flex items-center gap-1"><Sparkles className="w-3 h-3 text-blue-400" /> Độ Cận</p>
-            <p className="font-black text-blue-400 text-3xl mb-4 leading-none">{arDiopter > 0 ? `-${arDiopter.toFixed(2)}` : '0.00'}</p>
-            <input type="range" min="0" max="10" step="0.25" value={arDiopter} onChange={(e) => handleArDiopterChange(parseFloat(e.target.value))} className="w-28 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer accent-blue-500 mb-3" />
-            <div className="w-full h-px bg-white/10 mb-2"></div>
-            <p className="text-[9px] font-bold opacity-50 uppercase tracking-widest">MỜ: <span className="text-yellow-400">{arDiopter * 2}PX</span></p>
-          </div>
-        )}
+
 
         {/* MÀN HÌNH PREVIEW SAU KHI CHỤP/QUAY */}
         {capturedImage && <div className="absolute inset-0 z-30 bg-black"><img src={capturedImage} className="w-full h-full object-cover" alt="Captured" /></div>}
@@ -4615,10 +5333,10 @@ ${JSON.stringify(pass2List, null, 2)}
         {/* THANH ĐIỀU KHIỂN CHÍNH (Đổi mẫu, Chụp, Quay, Chỉnh độ cận) */}
         {(!capturedImage && !recordedVideoUrl) && (
           <div className="absolute w-full flex justify-center items-center px-8 z-20 transition-all duration-500 bottom-16 opacity-100">
-            {SHOW_AR_OPTIONAL_CONTROLS && <button onClick={() => setShowGlassesMenu(true)} className={`flex flex-col items-center gap-1 group w-16 transition-opacity ${isRecording ? 'opacity-0' : 'opacity-100'}`}>
+            <button onClick={() => setShowGlassesMenu(true)} className={`flex flex-col items-center gap-1 group w-16 transition-opacity ${isRecording ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
               <div className="w-14 h-14 bg-black/40 backdrop-blur-md rounded-full border border-white/30 flex items-center justify-center text-white group-hover:bg-white/20 transition-all active:scale-95"><Sparkles className="w-6 h-6 text-blue-400" /></div>
-              <span className="text-white text-[10px] font-black tracking-widest uppercase mt-1 drop-shadow-md">Đổi mẫu</span>
-            </button>}
+              <span className="text-white text-[10px] font-black tracking-widest uppercase mt-1 drop-shadow-md">Đổi kính</span>
+            </button>
 
             <div className={`flex items-center gap-6 backdrop-blur-md p-2 rounded-full border transition-all duration-300 ${isRecording ? 'bg-transparent border-transparent' : 'bg-black/40 border-white/20'}`}>
               <button onClick={capturePhoto} className={`flex flex-col items-center group ml-2 transition-all duration-300 ${isRecording ? 'w-0 overflow-hidden opacity-0 mx-0' : 'w-12 h-12 opacity-100'}`}>
@@ -4632,28 +5350,28 @@ ${JSON.stringify(pass2List, null, 2)}
               </button>
             </div>
 
-            {SHOW_AR_OPTIONAL_CONTROLS && <button onClick={() => setShowArDiopterControl(!showArDiopterControl)} className={`flex flex-col items-center gap-1 group w-16 transition-opacity ${isRecording ? 'opacity-0' : 'opacity-100'}`}>
-              <div className={`w-14 h-14 backdrop-blur-md rounded-full border flex items-center justify-center text-white transition-all active:scale-95 ${showArDiopterControl ? 'bg-blue-600 border-blue-400' : 'bg-black/40 border-white/30 group-hover:bg-white/20'}`}><Eye className={`w-6 h-6 ${showArDiopterControl ? 'text-white' : 'text-blue-400'}`} /></div>
-              <span className="text-white text-[10px] font-black tracking-widest uppercase mt-1 drop-shadow-md">Độ cận</span>
-            </button>}
+            <button onClick={handleCheckoutFromAR} className={`flex flex-col items-center gap-1 group w-16 transition-opacity ${isRecording ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+              <div className="w-14 h-14 bg-blue-600/90 backdrop-blur-md rounded-full border border-blue-300/60 flex items-center justify-center text-white group-hover:bg-blue-500 transition-all active:scale-95 shadow-xl"><ShoppingBag className="w-6 h-6" /></div>
+              <span className="text-white text-[10px] font-black tracking-widest uppercase mt-1 drop-shadow-md">Mua ngay</span>
+            </button>
           </div>
         )}
 
         {/* NGĂN KÉO CHỌN MẪU KÍNH 3D */}
-        {SHOW_AR_OPTIONAL_CONTROLS && <div className={`absolute bottom-0 w-full z-30 bg-black/80 backdrop-blur-3xl rounded-t-[40px] pt-6 pb-12 transition-transform duration-500 ease-out ${showGlassesMenu ? 'translate-y-0' : 'translate-y-full'}`}>
+        <div className={`absolute bottom-0 w-full z-30 bg-black/80 backdrop-blur-3xl rounded-t-[40px] pt-6 pb-12 transition-transform duration-500 ease-out ${showGlassesMenu ? 'translate-y-0' : 'translate-y-full'}`}>
           <div className="flex justify-between items-center px-8 mb-6">
-            <span className="text-white text-xs font-black tracking-widest uppercase flex items-center gap-2"><Box className="w-4 h-4 text-blue-400" /> KHO KÍNH 3D ({allArProducts.length})</span>
+            <span className="text-white text-xs font-black tracking-widest uppercase flex items-center gap-2"><Eye className="w-4 h-4 text-blue-400" /> Chọn kính ({allArProducts?.length || 0})</span>
             <button onClick={() => setShowGlassesMenu(false)} className="bg-white/10 p-2 rounded-full text-white"><ChevronDown className="w-5 h-5" /></button>
           </div>
           <div className="flex gap-4 overflow-x-auto px-8 pb-4" style={{ scrollbarWidth: 'none' }}>
-            {allArProducts.map((item) => (
-              <button key={item._id} onClick={() => setActiveARProduct(item)} className={`relative flex-shrink-0 w-32 h-32 rounded-[32px] border-2 transition-all duration-300 ${activeARProduct?._id === item._id ? 'bg-white/10 border-blue-500 scale-105 shadow-2xl' : 'bg-black/20 border-white/5 opacity-40 hover:opacity-100'}`}>
-                <img src={item.images[0]} className="w-full h-full object-cover p-2 rounded-[30px]" alt={item.name} />
+            {(allArProducts || []).map((item) => (
+              <button key={item._id} onClick={() => { setActiveARProduct(item); setShowGlassesMenu(false); }} className={`relative flex-shrink-0 w-32 h-32 rounded-[32px] border-2 transition-all duration-300 ${activeARProduct?._id === item._id ? 'bg-white/10 border-blue-500 scale-105 shadow-2xl' : 'bg-black/20 border-white/5 opacity-70 hover:opacity-100'}`}>
+                <img src={item.images?.[0] || item.image} className="w-full h-full object-cover p-2 rounded-[30px]" alt={item.name} />
                 {activeARProduct?._id === item._id && <div className="absolute bottom-0 w-full bg-blue-600 text-white text-[10px] font-black py-1.5 uppercase tracking-tighter rounded-b-[28px]">ĐANG ĐEO</div>}
               </button>
             ))}
           </div>
-        </div>}
+        </div>
 
         {/* MÀN HÌNH LOADING LƯU FILE */}
         {isDownloading && (
@@ -4670,7 +5388,7 @@ ${JSON.stringify(pass2List, null, 2)}
         {/* NÚT LÀM LẠI HOẶC LƯU VỀ MÁY */}
         {(capturedImage || recordedVideoUrl) && !isDownloading && (
           <div className="absolute bottom-12 w-full px-6 z-40 max-w-md mx-auto grid grid-cols-2 gap-4 animate-in slide-in-from-bottom-10 duration-500">
-            <button onClick={() => { setCapturedImage(null); setRecordedVideoUrl(null); requestRef.current = requestAnimationFrame(predictWebcam); }} className="bg-white/20 backdrop-blur-md text-white py-4 rounded-[24px] font-black flex items-center justify-center gap-2 border border-white/30 hover:bg-white/30 transition-all active:scale-95">
+            <button onClick={handleRetake} className="bg-white/20 backdrop-blur-md text-white py-4 rounded-[24px] font-black flex items-center justify-center gap-2 border border-white/30 hover:bg-white/30 transition-all active:scale-95">
               <RefreshCw className="w-5 h-5" /> LÀM LẠI
             </button>
             <button onClick={handleDownloadTikTokStyle} className="bg-blue-600 text-white py-4 rounded-[24px] font-black flex items-center justify-center gap-2 shadow-xl hover:bg-blue-700 transition-all active:scale-95">
@@ -4680,355 +5398,45 @@ ${JSON.stringify(pass2List, null, 2)}
         )}
 
         {/* 📐 EXPERIMENT 1 UI PANEL */}
-        {SHOW_AR_DEBUG_UI && (!capturedImage && !recordedVideoUrl) && (
-          <div className="absolute top-24 right-6 z-[200] flex flex-col gap-2 max-w-[170px] bg-black/80 backdrop-blur-md p-2 rounded-2xl border border-white/10">
-            <div className="text-[7px] text-gray-400 font-bold uppercase border-b border-white/10 pb-0.5 mb-1">🧪 EXPERIMENTS</div>
-            
-            <button
-              onClick={() => {
-                const nextVal = !showFullGlbTest;
-                setShowFullGlbTest(nextVal);
-                if (nextVal) {
-                  setActiveTest("NONE");
-                  setShowOccluderDebug(false);
-                  setShowTempleOccluderDebug(false);
-                  setShowCleanFullOccluder(false);
-                  setShowProduction2Pass(false);
-                  setShowPass1MeshAudit(false);
-                  setShowPass2Interference(false);
-                  setShowOccluderWireframe(false);
-                  showToast("Kích hoạt EXPERIMENT 1!", "warning");
-                } else {
-                  showToast("Đã tắt EXPERIMENT 1!", "success");
-                }
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showFullGlbTest
-                  ? "bg-orange-600 text-white shadow-md shadow-orange-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              FULL GLB TEST: {showFullGlbTest ? "ON" : "OFF"}
-            </button>
 
-            <button
-              onClick={() => {
-                const nextVal = !showCleanFullOccluder;
-                setShowCleanFullOccluder(nextVal);
-                if (nextVal) {
-                  setShowFullGlbTest(false);
-                  setShowProduction2Pass(false);
-                  setShowPass1MeshAudit(false);
-                  setShowPass2Interference(false);
-                  setShowOccluderWireframe(false);
-                  setActiveTest("NONE");
-                  setShowOccluderDebug(false);
-                  setShowTempleOccluderDebug(false);
-                  showToast("Kích hoạt CLEAN FULL OCCLUDER!", "warning");
-                } else {
-                  showToast("Đã tắt CLEAN FULL OCCLUDER!", "success");
-                }
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showCleanFullOccluder
-                  ? "bg-purple-600 text-white shadow-md shadow-purple-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              CLEAN FULL OCCLUDER: {showCleanFullOccluder ? "ON" : "OFF"}
-            </button>
-
-            <button
-              onClick={() => {
-                const nextVal = !showProduction2Pass;
-                setShowProduction2Pass(nextVal);
-                if (nextVal) {
-                  setShowCleanFullOccluder(false);
-                  setShowFullGlbTest(false);
-                  setShowPass1MeshAudit(false);
-                  setShowPass2Interference(false);
-                  setShowOccluderWireframe(false);
-                  setActiveTest("NONE");
-                  setShowOccluderDebug(false);
-                  setShowTempleOccluderDebug(false);
-                  showToast("Kích hoạt PRODUCTION 2-PASS!", "warning");
-                } else {
-                  showToast("Đã tắt PRODUCTION 2-PASS!", "success");
-                }
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showProduction2Pass
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              PRODUCTION 2-PASS: {showProduction2Pass ? "ON" : "OFF"}
-            </button>
-
-            <button
-              onClick={() => {
-                const nextVal = !showPass1MeshAudit;
-                setShowPass1MeshAudit(nextVal);
-                if (nextVal) {
-                  setShowCleanFullOccluder(false);
-                  setShowFullGlbTest(false);
-                  setShowProduction2Pass(false);
-                  setShowPass2Interference(false);
-                  setShowOccluderWireframe(false);
-                  setActiveTest("NONE");
-                  setShowOccluderDebug(false);
-                  setShowTempleOccluderDebug(false);
-                  showToast("Kích hoạt PASS 1 MESH AUDIT!", "warning");
-                } else {
-                  showToast("Đã tắt PASS 1 MESH AUDIT!", "success");
-                }
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showPass1MeshAudit
-                  ? "bg-cyan-600 text-white shadow-md shadow-cyan-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              PASS1 MESH AUDIT: {showPass1MeshAudit ? "ON" : "OFF"}
-            </button>
-
-            <button
-              onClick={() => {
-                const nextVal = !showPass2Interference;
-                setShowPass2Interference(nextVal);
-                if (nextVal) {
-                  setShowCleanFullOccluder(false);
-                  setShowFullGlbTest(false);
-                  setShowProduction2Pass(false);
-                  setShowPass1MeshAudit(false);
-                  setShowOccluderWireframe(false);
-                  setActiveTest("NONE");
-                  setShowOccluderDebug(false);
-                  setShowTempleOccluderDebug(false);
-                  showToast("Kích hoạt PASS 2 INTERFERENCE AUDIT!", "warning");
-                } else {
-                  showToast("Đã tắt PASS 2 INTERFERENCE AUDIT!", "success");
-                }
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showPass2Interference
-                  ? "bg-red-600 text-white shadow-md shadow-red-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              PASS2 INTERFERENCE: {showPass2Interference ? "ON" : "OFF"}
-            </button>
-
-            {showPass2Interference && (
-              <div className="flex flex-col gap-1 pl-2 border-l border-red-500/30">
-                <button
-                  onClick={() => {
-                    const nextVal = !pass1OnlyFreeze;
-                    setPass1OnlyFreeze(nextVal);
-                    if (nextVal) {
-                      setPass1ThenPass2NoClear(false);
-                      showToast("FREEZE PASS 1 active!", "warning");
-                    }
-                  }}
-                  className={`py-0.5 rounded text-[6px] font-bold uppercase transition-all ${
-                    pass1OnlyFreeze
-                      ? "bg-orange-600 text-white"
-                      : "bg-white/10 text-gray-400 hover:bg-white/20"
-                  }`}
-                >
-                  PASS1 FREEZE: {pass1OnlyFreeze ? "ON" : "OFF"}
-                </button>
-
-                <button
-                  onClick={() => {
-                    const nextVal = !pass1ThenPass2NoClear;
-                    setPass1ThenPass2NoClear(nextVal);
-                    if (nextVal) {
-                      setPass1OnlyFreeze(false);
-                      showToast("NO CLEAR DEPTH active!", "warning");
-                    }
-                  }}
-                  className={`py-0.5 rounded text-[6px] font-bold uppercase transition-all ${
-                    pass1ThenPass2NoClear
-                      ? "bg-yellow-600 text-white"
-                      : "bg-white/10 text-gray-400 hover:bg-white/20"
-                  }`}
-                >
-                  NO CLEAR DEPTH: {pass1ThenPass2NoClear ? "ON" : "OFF"}
-                </button>
-              </div>
-            )}
-
-            <button
-              onClick={() => {
-                const nextVal = !showTempleOccluderDebug;
-                setShowTempleOccluderDebug(nextVal);
-                if (nextVal) {
-                  setActiveTest("NONE");
-                  setShowOccluderDebug(false);
-                  setShowFullGlbTest(false);
-                  setShowCleanFullOccluder(false);
-                  setShowProduction2Pass(false);
-                  setShowPass1MeshAudit(false);
-                  setShowPass2Interference(false);
-                  setShowOccluderWireframe(false);
-                  showToast("Kích hoạt thí nghiệm occluder!", "warning");
-                } else {
-                  showToast("Đã tắt thí nghiệm!", "success");
-                }
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showTempleOccluderDebug
-                  ? "bg-green-600 text-white shadow-md shadow-green-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              TEMPLE DET {showTempleOccluderDebug ? "ON" : "OFF"}
-            </button>
-
-            <button
-              onClick={() => {
-                const nextVal = !showTempleAnchorDebug;
-                setShowTempleAnchorDebug(nextVal);
-                showToast(nextVal ? "TEMPLE ANCHOR DEBUG ON" : "TEMPLE ANCHOR DEBUG OFF", nextVal ? "warning" : "success");
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showTempleAnchorDebug
-                  ? "bg-red-600 text-white shadow-md shadow-red-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              SHOW TEMPLE ANCHORS: {showTempleAnchorDebug ? "ON" : "OFF"}
-            </button>
-
-            <button
-              onClick={() => {
-                const nextVal = !showFullOccluderDebug;
-                setShowFullOccluderDebug(nextVal);
-                if (nextVal) {
-                  setActiveTest("NONE");
-                  setShowFullGlbTest(false);
-                  setShowCleanFullOccluder(false);
-                  setShowProduction2Pass(false);
-                  setShowPass1MeshAudit(false);
-                  setShowPass2Interference(false);
-                  setShowOccluderWireframe(false);
-                }
-                showToast(nextVal ? "SHOW FULL OCCLUDER ON" : "SHOW FULL OCCLUDER OFF", nextVal ? "warning" : "success");
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showFullOccluderDebug
-                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              SHOW FULL OCCLUDER: {showFullOccluderDebug ? "ON" : "OFF"}
-            </button>
-
-            <button
-              onClick={() => {
-                const nextVal = !showSideOccluderDebug;
-                setShowSideOccluderDebug(nextVal);
-                if (nextVal) {
-                  setActiveTest("NONE");
-                  setShowFullGlbTest(false);
-                  setShowCleanFullOccluder(false);
-                  setShowProduction2Pass(false);
-                  setShowPass1MeshAudit(false);
-                  setShowPass2Interference(false);
-                  setShowOccluderWireframe(false);
-                }
-                showToast(nextVal ? "SHOW SIDE OCCLUDER ON" : "SHOW SIDE OCCLUDER OFF", nextVal ? "warning" : "success");
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showSideOccluderDebug
-                  ? "bg-red-600 text-white shadow-md shadow-red-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              SHOW SIDE OCCLUDER: {showSideOccluderDebug ? "ON" : "OFF"}
-            </button>
-
-            <button
-              onClick={() => {
-                const nextVal = !showNarrowOccluderDebug;
-                setShowNarrowOccluderDebug(nextVal);
-                if (nextVal) {
-                  setActiveTest("NONE");
-                  setShowFullGlbTest(false);
-                  setShowCleanFullOccluder(false);
-                  setShowProduction2Pass(false);
-                  setShowPass1MeshAudit(false);
-                  setShowPass2Interference(false);
-                  setShowOccluderWireframe(false);
-                }
-                showToast(nextVal ? "SHOW NARROW OCCLUDER ON" : "SHOW NARROW OCCLUDER OFF", nextVal ? "warning" : "success");
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showNarrowOccluderDebug
-                  ? "bg-green-600 text-white shadow-md shadow-green-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              SHOW NARROW OCCLUDER: {showNarrowOccluderDebug ? "ON" : "OFF"}
-            </button>
-
-            <button
-              onClick={() => {
-                const nextVal = !showOccluderDebug;
-                setShowOccluderDebug(nextVal);
-                if (nextVal) {
-                  setActiveTest("NONE");
-                  setShowTempleOccluderDebug(false);
-                  setShowFullGlbTest(false);
-                  setShowCleanFullOccluder(false);
-                  setShowProduction2Pass(false);
-                  setShowPass1MeshAudit(false);
-                  setShowPass2Interference(false);
-                  setShowOccluderWireframe(false);
-                  showToast("Kích hoạt trực quan hóa occluder!", "warning");
-                } else {
-                  showToast("Đã tắt trực quan hóa!", "success");
-                }
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showOccluderDebug
-                  ? "bg-pink-600 text-white shadow-md shadow-pink-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              SHOW OCC {showOccluderDebug ? "ON" : "OFF"}
-            </button>
-
-            <button
-              onClick={() => {
-                const nextVal = !showOccluderWireframe;
-                setShowOccluderWireframe(nextVal);
-                if (nextVal) {
-                  setShowOccluderDebug(false);
-                  setShowTempleOccluderDebug(false);
-                  showToast("Kích hoạt lưới Occluder Wireframe!", "warning");
-                } else {
-                  showToast("Đã tắt lưới Occluder Wireframe!", "success");
-                }
-              }}
-              className={`py-1 rounded text-[7px] font-bold uppercase transition-all ${
-                showOccluderWireframe
-                  ? "bg-green-500 text-white shadow-md shadow-green-500/20"
-                  : "bg-white/5 text-gray-300 hover:bg-white/10"
-              }`}
-            >
-              OCC WIREFRAME: {showOccluderWireframe ? "ON" : "OFF"}
-            </button>
-
-            <button
-              onClick={handleCopyCalibration}
-              className="py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[7px] font-bold uppercase transition-all flex items-center justify-center gap-0.5 active:scale-95"
-            >
-              <Copy className="w-2.5 h-2.5" /> COPY DATA
-            </button>
+        {debugMode && debugPanelInfo && (
+          <div className="fixed bottom-4 right-4 z-[999] bg-black/85 backdrop-blur-md border border-white/10 rounded-xl p-4 text-xs font-mono text-white shadow-2xl min-w-[240px] pointer-events-none">
+            <div className="font-bold text-yellow-400 mb-2 border-b border-white/15 pb-1">AR GLB DEBUG PANEL</div>
+            <div className="flex justify-between gap-4 py-0.5">
+              <span className="text-white/60">Model Name:</span>
+              <span className="font-semibold text-right max-w-[120px] truncate">{debugPanelInfo.modelName}</span>
+            </div>
+            <div className="flex justify-between gap-4 py-0.5">
+              <span className="text-white/60">Mesh Count:</span>
+              <span className="font-semibold text-green-400">{debugPanelInfo.meshCount}</span>
+            </div>
+            <div className="flex justify-between gap-4 py-0.5">
+              <span className="text-white/60">FRONT_FRAME Count:</span>
+              <span className="font-semibold text-emerald-400">{debugPanelInfo.frontFrameCount}</span>
+            </div>
+            <div className="flex justify-between gap-4 py-0.5">
+              <span className="text-white/60">LEFT_TEMPLE Count:</span>
+              <span className="font-semibold text-red-400">{debugPanelInfo.leftTempleCount}</span>
+            </div>
+            <div className="flex justify-between gap-4 py-0.5">
+              <span className="text-white/60">RIGHT_TEMPLE Count:</span>
+              <span className="font-semibold text-blue-400">{debugPanelInfo.rightTempleCount}</span>
+            </div>
+            <div className="flex justify-between gap-4 py-0.5">
+              <span className="text-white/60">LENS Count:</span>
+              <span className="font-semibold text-yellow-300">{debugPanelInfo.lensCount}</span>
+            </div>
+            <div className="flex justify-between gap-4 py-0.5">
+              <span className="text-white/60">Single Mesh:</span>
+              <span className={`font-semibold ${debugPanelInfo.isSingleMesh === 'YES' ? 'text-orange-400' : 'text-gray-400'}`}>{debugPanelInfo.isSingleMesh}</span>
+            </div>
+            <div className="flex justify-between gap-4 py-0.5">
+              <span className="text-white/60">Temple Segments Count:</span>
+              <span className="font-semibold text-purple-400">{debugPanelInfo.templeSegmentsCount}</span>
+            </div>
           </div>
         )}
+
       </div>
     </div>
   );

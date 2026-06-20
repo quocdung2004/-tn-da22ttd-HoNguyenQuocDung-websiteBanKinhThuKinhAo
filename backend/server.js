@@ -10,6 +10,15 @@ const { isValidPaymentCancelToken } = require('./utils/paymentCancelToken');
 const { verifyToken } = require('./middleware/authMiddleware');
 const mongoose = require('mongoose'); // SỬA 1: Import thư viện mongoose
 
+try {
+  const ffmpegStaticPath = require('ffmpeg-static');
+  if (ffmpegStaticPath) {
+    ffmpeg.setFfmpegPath(ffmpegStaticPath);
+  }
+} catch (error) {
+  console.warn('[AR Video] ffmpeg-static is not installed; falling back to system ffmpeg.');
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json()); 
@@ -204,6 +213,7 @@ app.get('/api/check-payment/:orderCode', async (req, res) => {
             if (product) {
               console.log(`[STOCK_RESTORED] Hoàn lại tồn kho cho sản phẩm ${product.name} (ID: ${product._id}) từ đơn hàng thanh toán online thất bại/hủy, số lượng: ${item.quantity}`);
               product.stock = (product.stock || 0) + item.quantity;
+              product.soldQuantity = Math.max(0, (product.soldQuantity || 0) - item.quantity);
               await product.save();
               
               // Phát socket báo cập nhật stock
@@ -254,33 +264,95 @@ app.get('/api/check-payment/:orderCode', async (req, res) => {
 });
 
 // ==============================================
-// 3. API CHUYỂN ĐỔI VIDEO AR (Giữ nguyên)
+// 3. API CHUYEN DOI VIDEO AR
 // ==============================================
-const upload = multer({ dest: 'uploads/' });
-if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
+const arVideoTempDir = path.join(__dirname, 'tmp', 'ar-video');
+fs.mkdirSync(arVideoTempDir, { recursive: true });
 
-app.post('/api/convert', upload.single('video'), (req, res) => {
-  if (!req.file) return res.status(400).send('Không nhận được file');
-  const inputPath = req.file.path;
-  const outputPath = `${req.file.path}.mp4`;
-  console.log('📥 Đang nhận file WebM. Bắt đầu chuyển đổi sang MP4...');
-
-  ffmpeg(inputPath)
-    .outputOptions(['-c:v libx264', '-preset ultrafast', '-crf 28', '-movflags +faststart'])
-    .save(outputPath)
-    .on('end', () => {
-      console.log('✅ Chuyển đổi thành công! Đang gửi trả về Frontend...');
-      res.download(outputPath, 'video-ar-tryon.mp4', () => {
-        if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-      });
-    })
-    .on('error', (err) => {
-      console.error('❌ Lỗi xử lý video:', err);
-      res.status(500).send('Lỗi máy chủ khi xử lý video');
-      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+const cleanupTempFiles = (...filePaths) => {
+  filePaths.forEach((filePath) => {
+    if (!filePath) return;
+    fs.promises.unlink(filePath).catch((error) => {
+      if (error.code !== 'ENOENT') {
+        console.warn('[AR Video] Could not remove temp file:', filePath, error.message);
+      }
     });
+  });
+};
+
+const arVideoUpload = multer({
+  dest: arVideoTempDir,
+  limits: {
+    files: 1,
+    fileSize: 100 * 1024 * 1024
+  },
+  fileFilter: (req, file, cb) => {
+    const isAllowedVideo =
+      file.mimetype === 'application/octet-stream' ||
+      file.mimetype === 'video/webm' ||
+      file.mimetype.startsWith('video/webm;');
+    if (isAllowedVideo) {
+      cb(null, true);
+      return;
+    }
+    cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'video'));
+  }
 });
+
+const convertArVideoHandler = (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: 'No video file uploaded' });
+  }
+
+  const inputPath = req.file.path;
+  const outputPath = path.join(arVideoTempDir, `${req.file.filename}.mp4`);
+
+  console.log('[AR Video] Received WebM upload. Converting to MP4...');
+
+  ffmpeg.ffprobe(inputPath, (probeError, metadata) => {
+    const hasAudio = !probeError && Array.isArray(metadata?.streams)
+      ? metadata.streams.some((stream) => stream.codec_type === 'audio')
+      : false;
+
+    const outputOptions = [
+      '-c:v libx264',
+      '-preset veryfast',
+      '-pix_fmt yuv420p',
+      '-movflags +faststart'
+    ];
+
+    if (hasAudio) {
+      outputOptions.push('-c:a aac', '-b:a 128k');
+    } else {
+      outputOptions.push('-an');
+    }
+
+    ffmpeg(inputPath)
+      .outputOptions(outputOptions)
+      .save(outputPath)
+      .on('end', () => {
+        console.log('[AR Video] MP4 conversion complete. Sending file to client...');
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Content-Disposition', 'attachment; filename="ar-video.mp4"');
+        res.download(outputPath, 'ar-video.mp4', (error) => {
+          if (error && !res.headersSent) {
+            res.status(500).json({ success: false, message: 'Video conversion failed' });
+          }
+          cleanupTempFiles(inputPath, outputPath);
+        });
+      })
+      .on('error', (error) => {
+        console.error('[AR Video] Video conversion failed:', error.message || error);
+        cleanupTempFiles(inputPath, outputPath);
+        if (!res.headersSent) {
+          res.status(500).json({ success: false, message: 'Video conversion failed' });
+        }
+      });
+  });
+};
+
+app.post('/api/ar/convert-video', arVideoUpload.single('video'), convertArVideoHandler);
+app.post('/api/convert', arVideoUpload.single('video'), convertArVideoHandler);
 
 // ==============================================
 // 4. ROUTES KHÁC
@@ -327,6 +399,25 @@ app.use('/api/prescription', prescriptionRoutes);
 // Đăng ký định tuyến đánh giá sản phẩm (Product Review System)
 const reviewRoutes = require('./routes/reviewRoutes');
 app.use('/api/reviews', reviewRoutes);
+
+// Error middleware phải được đăng ký sau toàn bộ routes.
+app.use((error, req, res, next) => {
+  console.error('Lỗi middleware:', error);
+
+  if (error instanceof multer.MulterError) {
+    return res.status(400).json({
+      success: false,
+      message: error.code === 'LIMIT_FILE_SIZE'
+        ? 'File tải lên vượt quá dung lượng cho phép.'
+        : error.message || 'File tải lên không hợp lệ.'
+    });
+  }
+
+  return res.status(error.statusCode || error.http_code || 500).json({
+    success: false,
+    message: error.message || 'Lỗi máy chủ.'
+  });
+});
 
 
 // Khởi tạo máy chủ HTTP tích hợp Socket.IO Realtime

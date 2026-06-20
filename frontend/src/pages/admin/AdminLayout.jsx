@@ -16,7 +16,7 @@ export default function AdminLayout() {
     { path: '/admin/imports', icon: <PlusCircle className="w-5 h-5" />, label: 'Quản lý Nhập hàng' },
     { path: '/admin/users', icon: <Users className="w-5 h-5" />, label: 'Quản lý Tài khoản' },
     { path: '/admin/reviews', icon: <MessageSquare className="w-5 h-5" />, label: 'Quản lý Đánh giá' },
-    { path: '/admin/banners', icon: <Images className="w-5 h-5" />, label: 'Quan ly Banner' },
+    { path: '/admin/banners', icon: <Images className="w-5 h-5" />, label: 'Quản lý Banner' },
     { path: '/admin/cancel-requests', icon: <XOctagon className="w-5 h-5" />, label: 'Yêu cầu hủy đơn' },
     { path: '/admin/withdraw-requests', icon: <Wallet className="w-5 h-5" />, label: 'Yêu cầu rút tiền' },
   ];

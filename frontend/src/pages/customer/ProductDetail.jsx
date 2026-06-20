@@ -17,6 +17,7 @@ export default function ProductDetail() {
   // ==========================================
   const [product, setProduct] = useState(null);
   const [allArProducts, setAllArProducts] = useState([]);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
 
   const [prescriptionOption, setPrescriptionOption] = useState('none'); // 'none' | 'saved' | 'custom'
   const [savedPrescription, setSavedPrescription] = useState(null);
@@ -201,6 +202,7 @@ export default function ProductDetail() {
     fetchSavedPrescription();
     fetchReviews();
     checkReviewEligibility();
+    setActiveImageIndex(0);
   }, [id]);
 
   useEffect(() => {
@@ -365,13 +367,37 @@ export default function ProductDetail() {
           {/* CỘT TRÁI */}
           <div className="md:w-1/2 flex flex-col gap-6">
             <div className="bg-gray-50 rounded-[40px] p-10 aspect-square flex items-center justify-center relative border border-gray-100 shadow-inner overflow-hidden">
-              <img src={product.images && product.images[0] ? product.images[0] : '/placeholder.png'} alt={product.name} className="w-full h-auto object-contain drop-shadow-2xl" />
+              <img src={product.images && product.images[activeImageIndex] ? product.images[activeImageIndex] : '/placeholder.png'} alt={product.name} className="w-full h-auto object-contain drop-shadow-2xl transition-all duration-300 ease-in-out" />
               {is3DReady && (
                 <div className="absolute top-8 left-8 bg-indigo-600 text-white text-[10px] font-black px-4 py-2 rounded-full flex items-center shadow-lg animate-pulse gap-1">
                   <Box className="w-3 h-3" /> HỖ TRỢ 3D AR
                 </div>
               )}
             </div>
+
+            {/* GALLERY THUMBNAILS */}
+            {product.images && product.images.length > 0 && (
+              <div className="flex gap-3 overflow-x-auto py-2 justify-center scrollbar-thin">
+                {product.images.map((imgUrl, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setActiveImageIndex(idx)}
+                    className={`w-20 h-20 rounded-2xl overflow-hidden border-2 bg-gray-50 p-2 transition-all duration-300 shrink-0 ${
+                      activeImageIndex === idx
+                        ? 'border-blue-600 scale-105 shadow-md'
+                        : 'border-gray-200 hover:border-blue-400'
+                    }`}
+                  >
+                    <img
+                      src={imgUrl}
+                      alt={`thumbnail-${idx}`}
+                      className="w-full h-full object-contain mix-blend-multiply transition-opacity duration-300"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
 
             <button
               onClick={() => setIsAROpen(true)}

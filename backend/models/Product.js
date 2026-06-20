@@ -10,11 +10,15 @@ const productSchema = new mongoose.Schema({
   importPrice: { type: Number, default: 0 }, // Giá nhập hàng
   averageRating: { type: Number, default: 0 }, // Điểm đánh giá trung bình
   totalReviews: { type: Number, default: 0 }, // Tổng số đánh giá
+  soldQuantity: { type: Number, default: 0 }, // Số lượng đã bán
 
   // Liên kết khóa ngoại (Foreign Key)
   brand: { type: mongoose.Schema.Types.ObjectId, ref: 'Brand', required: true },
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
-  isActive: { type: Boolean, default: true }
+  isActive: { type: Boolean, default: true },
+  gender: { type: String, enum: ['nam', 'nu', 'unisex'], default: 'unisex' }
 }, { timestamps: true });
+
+productSchema.index({ gender: 1 });
 
 module.exports = mongoose.model('Product', productSchema);

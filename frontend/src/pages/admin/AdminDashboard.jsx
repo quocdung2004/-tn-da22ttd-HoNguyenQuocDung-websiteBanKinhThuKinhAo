@@ -56,9 +56,9 @@ const initialDashboardData = {
 };
 
 const tabs = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'revenue', label: 'Revenue' },
-  { id: 'inventory', label: 'Inventory' }
+  { id: 'overview', label: 'Tổng quan' },
+  { id: 'revenue', label: 'Doanh thu' },
+  { id: 'inventory', label: 'Tồn kho' }
 ];
 
 const toneClasses = {
@@ -167,12 +167,12 @@ export default function AdminDashboard() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        throw new Error(data.message || 'Không thể tải dữ liệu Dashboard V2.');
+        throw new Error(data.message || 'Không thể tải dữ liệu Bảng điều khiển.');
       }
 
       setDashboardData(mergeDashboardData(data));
     } catch (err) {
-      console.error('Lỗi tải dữ liệu Dashboard V2:', err);
+      console.error('Lỗi tải dữ liệu Bảng điều khiển:', err);
       setError(err.message || 'Không thể kết nối đến máy chủ hoặc tải dữ liệu thống kê.');
     } finally {
       setLoading(false);
@@ -213,9 +213,9 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 p-20 flex flex-col items-center justify-center gap-4">
+      <div className="min-h-screen bg-gray-55 p-20 flex flex-col items-center justify-center gap-4">
         <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
-        <p className="text-gray-500 font-bold">Đang tải Dashboard vận hành...</p>
+        <p className="text-gray-500 font-bold">Đang tải Bảng điều khiển vận hành...</p>
       </div>
     );
   }
@@ -250,7 +250,7 @@ export default function AdminDashboard() {
       <div className="max-w-7xl mx-auto">
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-3xl font-black text-gray-900 tracking-tight">Dashboard vận hành</h1>
+            <h1 className="text-3xl font-black text-gray-900 tracking-tight">Bảng điều khiển vận hành</h1>
             <p className="text-gray-500 mt-1">Theo dõi doanh thu, đơn hàng, tồn kho và chiến dịch bán hàng.</p>
           </div>
 
@@ -312,28 +312,28 @@ function OverviewTab({ revenue, profit, orders, topProducts, topBrands }) {
           tone="blue"
         />
         <MetricCard
-          title="Revenue Month"
+          title="Doanh thu tháng"
           value={formatCurrency(revenue.thisMonth)}
           description="Doanh thu tháng này"
           icon={BarChart3}
           tone="blue"
         />
         <MetricCard
-          title="Revenue Year"
+          title="Doanh thu năm"
           value={formatCurrency(revenue.thisYear)}
           description="Doanh thu năm nay"
           icon={TrendingUp}
           tone="emerald"
         />
         <MetricCard
-          title="Profit Month"
+          title="Lợi nhuận tháng"
           value={formatCurrency(profit.thisMonth)}
           description="Lợi nhuận tháng này"
           icon={TrendingUp}
           tone="emerald"
         />
         <MetricCard
-          title="Profit Year"
+          title="Lợi nhuận năm"
           value={formatCurrency(profit.thisYear)}
           description="Lợi nhuận năm nay"
           icon={Award}
@@ -346,7 +346,7 @@ function OverviewTab({ revenue, profit, orders, topProducts, topBrands }) {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <TopProductsPanel products={topProducts} />
         <ProgressList
-          title="Top Brands By Revenue"
+          title="Thương hiệu hàng đầu theo doanh thu"
           icon={BarChart3}
           items={topBrands.byRevenue || []}
           valueKey="revenue"
@@ -363,28 +363,28 @@ function RevenueTab({ revenue, profit, topCategories, topBrands, campaigns }) {
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <MetricCard
-          title="Lifetime Revenue"
+          title="Tổng doanh thu"
           value={formatCurrency(revenue.lifetime)}
           description="Doanh thu hợp lệ toàn hệ thống"
           icon={DollarSign}
           tone="blue"
         />
         <MetricCard
-          title="Lifetime Profit"
+          title="Tổng lợi nhuận"
           value={formatCurrency(profit.lifetime)}
           description="Lợi nhuận theo giá vốn"
           icon={TrendingUp}
           tone="emerald"
         />
         <MetricCard
-          title="This Month"
+          title="Tháng này"
           value={formatCurrency(revenue.thisMonth)}
           description="Doanh thu tháng hiện tại"
           icon={BarChart3}
           tone="violet"
         />
         <MetricCard
-          title="This Year"
+          title="Năm nay"
           value={formatCurrency(revenue.thisYear)}
           description="Doanh thu năm hiện tại"
           icon={Award}
@@ -394,7 +394,7 @@ function RevenueTab({ revenue, profit, topCategories, topBrands, campaigns }) {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <ProgressList
-          title="Top Categories By Revenue"
+          title="Danh mục hàng đầu theo doanh thu"
           icon={BarChart3}
           items={topCategories.byRevenue || []}
           valueKey="revenue"
@@ -402,7 +402,7 @@ function RevenueTab({ revenue, profit, topCategories, topBrands, campaigns }) {
           accent="blue"
         />
         <ProgressList
-          title="Top Categories By Quantity"
+          title="Danh mục hàng đầu theo số lượng"
           icon={Package}
           items={topCategories.byQuantity || []}
           valueKey="quantitySold"
@@ -410,7 +410,7 @@ function RevenueTab({ revenue, profit, topCategories, topBrands, campaigns }) {
           accent="emerald"
         />
         <ProgressList
-          title="Top Brands By Revenue"
+          title="Thương hiệu hàng đầu theo doanh thu"
           icon={BarChart3}
           items={topBrands.byRevenue || []}
           valueKey="revenue"
@@ -418,7 +418,7 @@ function RevenueTab({ revenue, profit, topCategories, topBrands, campaigns }) {
           accent="violet"
         />
         <ProgressList
-          title="Top Brands By Quantity"
+          title="Thương hiệu hàng đầu theo số lượng"
           icon={Package}
           items={topBrands.byQuantity || []}
           valueKey="quantitySold"
@@ -444,42 +444,42 @@ function InventoryTab({ inventory }) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
         <MetricCard
-          title="Total Products"
+          title="Tổng sản phẩm"
           value={formatNumber(inventory.totalProducts)}
           description="Tổng sản phẩm trong hệ thống"
           icon={Package}
           tone="slate"
         />
         <MetricCard
-          title="Total SKU"
+          title="Tổng SKU"
           value={formatNumber(inventory.totalSKU)}
           description="SKU đang hoạt động"
           icon={Package}
           tone="blue"
         />
         <MetricCard
-          title="Stock Quantity"
+          title="Số lượng tồn kho"
           value={formatNumber(inventory.totalStockQuantity)}
           description="Tổng số lượng tồn"
           icon={ShoppingBag}
           tone="emerald"
         />
         <MetricCard
-          title="Inventory Value"
+          title="Giá trị tồn kho"
           value={formatCurrency(inventory.inventoryValue)}
-          description="stock * importPrice"
+          description="Số lượng tồn * Giá nhập"
           icon={DollarSign}
           tone="violet"
         />
         <MetricCard
-          title="Out Of Stock"
+          title="Hết hàng"
           value={formatNumber(inventory.outOfStockCount)}
           description="Sản phẩm hết hàng"
           icon={AlertCircle}
           tone="red"
         />
         <MetricCard
-          title="Low Stock"
+          title="Sắp hết hàng"
           value={formatNumber(inventory.lowStockCount)}
           description="Tồn kho từ 1 đến 5"
           icon={Clock}
@@ -495,7 +495,7 @@ function InventoryTab({ inventory }) {
           tone="red"
         />
         <StockList
-          title="Low Stock Products"
+          title="Sản phẩm sắp hết hàng"
           products={inventory.lowStockProducts || []}
           emptyText="Không có sản phẩm sắp hết hàng."
           tone="amber"
@@ -526,18 +526,18 @@ function MetricCard({ title, value, description, icon: Icon, tone = 'blue' }) {
 
 function OrderStatusGrid({ orders }) {
   const statuses = [
-    { label: 'Pending Orders', value: orders.pending, icon: Clock, tone: 'amber' },
-    { label: 'Processing Orders', value: orders.processing, icon: ShoppingBag, tone: 'blue' },
-    { label: 'Shipping Orders', value: orders.shipping, icon: Package, tone: 'violet' },
-    { label: 'Completed Orders', value: orders.completed, icon: Award, tone: 'emerald' },
-    { label: 'Cancelled Orders', value: orders.cancelled, icon: AlertCircle, tone: 'red' }
+    { label: 'Đơn hàng chờ xử lý', value: orders.pending, icon: Clock, tone: 'amber' },
+    { label: 'Đơn hàng đang xử lý', value: orders.processing, icon: ShoppingBag, tone: 'blue' },
+    { label: 'Đơn hàng đang giao', value: orders.shipping, icon: Package, tone: 'violet' },
+    { label: 'Đơn hàng đã hoàn thành', value: orders.completed, icon: Award, tone: 'emerald' },
+    { label: 'Đơn hàng đã hủy', value: orders.cancelled, icon: AlertCircle, tone: 'red' }
   ];
 
   return (
     <div className="bg-white border border-gray-100 rounded-lg p-5 shadow-sm">
       <div className="flex items-center justify-between gap-4 mb-4">
-        <h2 className="text-lg font-black text-gray-900">Order Pipeline</h2>
-        <span className="text-sm font-bold text-gray-500">Total: {formatNumber(orders.total)}</span>
+        <h2 className="text-lg font-black text-gray-900">Quy trình xử lý đơn hàng</h2>
+        <span className="text-sm font-bold text-gray-500">Tổng cộng: {formatNumber(orders.total)}</span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
         {statuses.map((status) => (
@@ -581,11 +581,11 @@ function TopProductsPanel({ products }) {
               </div>
               <div className="min-w-0 flex-1">
                 <h3 className="font-black text-gray-900 truncate">{product.name}</h3>
-                <p className="text-xs font-semibold text-gray-500">{formatCurrency(product.revenue)} revenue</p>
+                <p className="text-xs font-semibold text-gray-500">{formatCurrency(product.revenue)} doanh thu</p>
               </div>
               <div className="text-right flex-shrink-0">
                 <p className="text-lg font-black text-blue-600">{formatNumber(product.sold)}</p>
-                <p className="text-[10px] uppercase font-black text-gray-400">sold</p>
+                <p className="text-[10px] uppercase font-black text-gray-400">đã bán</p>
               </div>
             </div>
           ))}
@@ -641,17 +641,17 @@ function CampaignAnalytics({ campaigns }) {
       </h2>
 
       {campaigns.length === 0 ? (
-        <EmptyState text="Chưa có chiến dịch sale để thống kê." />
+        <EmptyState text="Chưa có chiến dịch khuyến mãi để thống kê." />
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 text-left text-xs uppercase tracking-wide text-gray-400">
-                <th className="py-3 pr-4 font-black">Campaign</th>
-                <th className="py-3 px-4 font-black">Used</th>
-                <th className="py-3 px-4 font-black">Remaining</th>
-                <th className="py-3 px-4 font-black">Orders</th>
-                <th className="py-3 pl-4 font-black text-right">Revenue</th>
+                <th className="py-3 pr-4 font-black">Chiến dịch</th>
+                <th className="py-3 px-4 font-black">Đã dùng</th>
+                <th className="py-3 px-4 font-black">Còn lại</th>
+                <th className="py-3 px-4 font-black">Đơn hàng</th>
+                <th className="py-3 pl-4 font-black text-right">Doanh thu</th>
               </tr>
             </thead>
             <tbody>
@@ -709,7 +709,7 @@ function StockList({ title, products, emptyText, tone = 'amber' }) {
                 </p>
               </div>
               <div className={`${toneClass.background} ${toneClass.text} px-3 py-1 rounded-full text-xs font-black flex-shrink-0`}>
-                Stock: {formatNumber(product.stock)}
+                Tồn kho: {formatNumber(product.stock)}
               </div>
             </div>
           ))}

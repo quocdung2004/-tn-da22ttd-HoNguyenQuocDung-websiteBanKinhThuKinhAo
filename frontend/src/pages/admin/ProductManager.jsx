@@ -11,7 +11,7 @@ export default function ProductManager() {
   
   // STATE CỦA FORM
   const [formData, setFormData] = useState({ 
-    name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true 
+    name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true, gender: 'unisex' 
   });
   
   // STATE XỬ LÝ ẢNH & FILE 3D
@@ -117,7 +117,8 @@ export default function ProductManager() {
       stock: prod.stock,
       brand: prod.brand ? prod.brand._id : '',
       category: prod.category ? prod.category._id : '',
-      isActive: prod.isActive !== false // nạp đúng trạng thái
+      isActive: prod.isActive !== false, // nạp đúng trạng thái
+			gender: prod.gender || 'unisex'
     });
     setImagePreviews(prod.images || []); // Hiện mảng ảnh cũ từ DB
     setImageFiles([]); 
@@ -130,7 +131,7 @@ export default function ProductManager() {
     setIsModalOpen(false);
     setEditingId(null);
     // Reset form về trạng thái rỗng
-    setFormData({ name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true });
+    setFormData({ name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true, gender: 'unisex' });
     setImagePreviews([]);
     setImageFiles([]);
     setArFile(null);
@@ -191,6 +192,7 @@ export default function ProductManager() {
     dataToSend.append('stock', formData.stock);
     dataToSend.append('brand', formData.brand);
     dataToSend.append('category', formData.category);
+		dataToSend.append('gender', formData.gender);
     
     // Gửi trạng thái isActive khi đang sửa sản phẩm
     if (editingId) {
@@ -432,6 +434,20 @@ export default function ProductManager() {
                   </div>
                 </div>
 
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Giới tính phù hợp</label>
+                  <select required value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none">
+                    <option value="unisex">Nam & Nữ (Unisex)</option>
+                    <option value="nam">Nam</option>
+                    <option value="nu">Nữ</option>
+                  </select>
+                </div>
+                {/*
+                    </select>
+                  </div>
+                </div>
+
+*/ }
                 {editingId && (
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Trạng thái hoạt động</label>
