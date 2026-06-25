@@ -13,16 +13,17 @@ const productSchema = new mongoose.Schema({
   soldQuantity: { type: Number, default: 0 }, // Số lượng đã bán
 
   // Liên kết khóa ngoại (Foreign Key)
-  brand: { type: mongoose.Schema.Types.ObjectId, ref: 'Brand', required: true },
-  category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
+  brand: { type: mongoose.Schema.Types.ObjectId, ref: 'Brand' },
+  category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' },
   isActive: { type: Boolean, default: true },
+  isDraft: { type: Boolean, default: false },
   gender: { type: String, enum: ['nam', 'nu', 'unisex'], default: 'unisex' },
   arConfig: {
-    splitSingleMeshByDepth: { type: Boolean, default: false },
+    splitSingleMeshByDepth: { type: Boolean, default: true },
     frontDepthStartRatio: { type: Number, default: 0.68 },
     templeDepthEndRatio: { type: Number, default: 0.70 },
     frontCenterKeepRatio: { type: Number, default: 0.23 },
-    verticalOffsetRatio: { type: Number, default: 0 },
+    verticalOffsetRatio: { type: Number, default: -0.08 },
     scaleMultiplier: { type: Number, default: 1 }
   }
 }, { timestamps: true });

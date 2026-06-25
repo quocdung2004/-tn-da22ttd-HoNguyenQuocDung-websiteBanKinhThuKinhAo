@@ -5,7 +5,7 @@ const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const path = require('path');
-const { PayOS } = require('@payos/node'); 
+const { PayOS } = require('@payos/node');
 const { isValidPaymentCancelToken } = require('./utils/paymentCancelToken');
 const { verifyToken } = require('./middleware/authMiddleware');
 const mongoose = require('mongoose'); // SỬA 1: Import thư viện mongoose
@@ -21,7 +21,7 @@ try {
 
 const app = express();
 app.use(cors());
-app.use(express.json()); 
+app.use(express.json());
 
 // ==============================================
 // 0. KẾT NỐI MONGODB
@@ -30,7 +30,7 @@ app.use(express.json());
 mongoose.connect(process.env.MONGODB_URI)
   .then(async () => {
     console.log('🟢 Đã kết nối thành công tới MongoDB Atlas!');
-    
+
     // Thực thi migration 1 lần an toàn để đồng bộ hóa sản phẩm cũ
     try {
       const Product = require('./models/Product');
@@ -53,8 +53,8 @@ mongoose.connect(process.env.MONGODB_URI)
 // 1. CẤU HÌNH PAYOS (Bản V2)
 // ==============================================
 const payos = new PayOS({
-  clientId: process.env.PAYOS_CLIENT_ID, 
-  apiKey: process.env.PAYOS_API_KEY, 
+  clientId: process.env.PAYOS_CLIENT_ID,
+  apiKey: process.env.PAYOS_API_KEY,
   checksumKey: process.env.PAYOS_CHECKSUM_KEY
 });
 
@@ -129,7 +129,7 @@ app.post('/api/create-payment-link', async (req, res, next) => {
 
     const paymentLinkRes = await payos.paymentRequests.create(requestData);
     console.log(`✅ [Backend-PayOS] Tạo link PayOS thành công cho đơn: ${order.orderCode}`);
-    
+
     res.json({
       success: true,
       orderCode: finalOrderCode,
@@ -161,9 +161,9 @@ app.get('/api/check-payment/:orderCode', async (req, res) => {
         return res.status(403).json({ status: 'FORBIDDEN', message: 'Yeu cau huy thanh toan khong hop le.' });
       }
     }
-    
-    console.log(`\n⏳ Lính canh đang kiểm tra trạng thái đơn: ${orderCode} (Tìm trong MongoDB dạng: DH${orderCode})`); 
-    
+
+    console.log(`\n⏳ Lính canh đang kiểm tra trạng thái đơn: ${orderCode} (Tìm trong MongoDB dạng: DH${orderCode})`);
+
     // Gọi PayOS
     let paymentInfo = null;
     let status = null;
@@ -174,8 +174,8 @@ app.get('/api/check-payment/:orderCode', async (req, res) => {
     } catch (payosError) {
       console.error(`⚠️ Không tìm thấy link thanh toán trên PayOS hoặc lỗi PayOS:`, payosError.message);
     }
-    
-    console.log(`🎯 Trạng thái chốt lại:`, status, `Cancel requested:`, cancelRequested); 
+
+    console.log(`🎯 Trạng thái chốt lại:`, status, `Cancel requested:`, cancelRequested);
 
     const Order = require('./models/Order');
     const Product = require('./models/Product');
@@ -185,11 +185,11 @@ app.get('/api/check-payment/:orderCode', async (req, res) => {
       console.log(`✍️ Tiến hành cập nhật MongoDB đơn ${targetCode} sang 'paid'...`);
       const updateResult = await Order.findOneAndUpdate({ orderCode: targetCode }, { status: 'paid' }, { new: true });
       console.log(`🔎 Kết quả cập nhật MongoDB:`, updateResult ? `Thành công (Trạng thái mới: ${updateResult.status})` : 'Thất bại (Không tìm thấy đơn)');
-      
+
       return res.json({ status: 'PAID' });
     } else if (status === 'CANCELLED' || status === 'EXPIRED' || cancelRequested) {
       console.log(`✍️ Tiến hành hủy đơn hàng ${targetCode} do thanh toán thất bại/hủy...`);
-      
+
       // Nếu cancelRequested là true và PayOS đang pending, hãy thử cancel trên PayOS
       if (cancelRequested && status === 'PENDING') {
         try {
@@ -205,7 +205,7 @@ app.get('/api/check-payment/:orderCode', async (req, res) => {
       if (order && order.status === 'pending') {
         order.status = 'cancelled';
         order.cancelReason = cancelRequested ? 'Khách hàng chủ động hủy thanh toán' : 'Thanh toán thất bại/hết hạn trên PayOS';
-        
+
         // 1. Hoàn trả tồn kho (stock)
         if (!order.stockRestored) {
           for (const item of order.items) {
@@ -215,7 +215,7 @@ app.get('/api/check-payment/:orderCode', async (req, res) => {
               product.stock = (product.stock || 0) + item.quantity;
               product.soldQuantity = Math.max(0, (product.soldQuantity || 0) - item.quantity);
               await product.save();
-              
+
               // Phát socket báo cập nhật stock
               const { getIO } = require('./socket');
               const io = getIO();
@@ -236,7 +236,7 @@ app.get('/api/check-payment/:orderCode', async (req, res) => {
           for (const item of order.items) {
             if (item.saleIdAtPurchase) {
               await Sale.findOneAndUpdate(
-                { _id: item.saleIdAtPurchase, usageLimitType: 'limited' },
+                { _id: item.saleIdAtPurchase },
                 { $inc: { usedCount: -item.quantity } }
               );
             }
@@ -359,8 +359,8 @@ app.post('/api/convert', arVideoUpload.single('video'), convertArVideoHandler);
 // ==============================================
 const authRoutes = require('./routes/authRoutes');
 app.use('/api/auth', authRoutes);
-const userRoutes = require('./routes/userRoutes'); 
-app.use('/api/users', userRoutes); 
+const userRoutes = require('./routes/userRoutes');
+app.use('/api/users', userRoutes);
 const brandRoutes = require('./routes/brandRoutes');
 app.use('/api/brands', brandRoutes);
 const categoryRoutes = require('./routes/categoryRoutes');

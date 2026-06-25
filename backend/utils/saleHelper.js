@@ -55,7 +55,7 @@ function calculateBestSaleForProduct(product, activeSales) {
       if (sale.discountType === 'percent') {
         discountAmount = originalPrice * (sale.discountValue / 100);
       } else if (sale.discountType === 'fixed') {
-        discountAmount = sale.discountValue;
+        discountAmount = Math.max(0, originalPrice - sale.discountValue);
       }
 
       // Giới hạn số tiền giảm tối đa không vượt quá giá gốc của sản phẩm

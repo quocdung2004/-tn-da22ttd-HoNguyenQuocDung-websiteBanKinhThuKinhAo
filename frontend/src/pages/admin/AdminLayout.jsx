@@ -1,10 +1,21 @@
 import React from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Package, Tag, LogOut, LayoutDashboard, ListTree, PlusCircle, Users, XOctagon, Wallet, Percent, MessageSquare, Images } from 'lucide-react';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { Package, Tag, LogOut, LayoutDashboard, ListTree, PlusCircle, Users, XOctagon, Wallet, Percent, MessageSquare, Images, Home } from 'lucide-react';
 import NotificationBell from '../../components/NotificationBell';
+import { useAuth } from '../../context/AuthContext';
 
 export default function AdminLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+
+  const handleLogout = () => {
+    const confirmLogout = window.confirm("Bạn có chắc chắn muốn đăng xuất khỏi hệ thống không?");
+    if (confirmLogout) {
+      logout();
+      navigate('/');
+    }
+  };
 
   // Đưa tất cả các chức năng chính của Admin vào chung 1 mảng
   const menuItems = [
@@ -51,10 +62,16 @@ export default function AdminLayout() {
         </nav>
 
         {/* Khu vực dưới cùng: Nút thoát */}
-        <div className="p-4 border-t border-gray-800">
+        <div className="p-4 border-t border-gray-800 space-y-2">
           <Link to="/" className="flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-500 hover:text-white rounded-xl transition-all font-medium">
-            <LogOut className="w-5 h-5" /> Về trang Khách hàng
+            <Home className="w-5 h-5" /> Về trang Khách hàng
           </Link>
+          <button 
+            onClick={handleLogout} 
+            className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-500 hover:text-white rounded-xl transition-all font-medium text-left outline-none"
+          >
+            <LogOut className="w-5 h-5" /> Đăng xuất
+          </button>
         </div>
       </aside>
 

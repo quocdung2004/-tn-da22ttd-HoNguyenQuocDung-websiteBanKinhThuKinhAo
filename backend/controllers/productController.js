@@ -156,7 +156,7 @@ exports.getProductsShop = async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     // Xây dựng bộ lọc tĩnh cho MongoDB
-    const query = { isActive: { $ne: false } };
+    const query = { isActive: { $ne: false }, isDraft: { $ne: true } };
 
     if (search) {
       query.name = { $regex: search, $options: 'i' };
@@ -256,7 +256,10 @@ exports.getProducts = async (req, res) => {
     if (req.query.all === 'true' && !isAdmin) {
       return res.status(403).json({ success: false, message: 'Chỉ Admin được xem toàn bộ sản phẩm.' });
     }
-    const filter = isAdmin && req.query.all === 'true' ? {} : { isActive: { $ne: false } };
+    let filter = isAdmin && req.query.all === 'true' ? {} : { isActive: { $ne: false }, isDraft: { $ne: true } };
+    if (isAdmin && req.query.draft === 'true') {
+      filter = { isDraft: true };
+    }
 
     const products = await Product.find(filter)
       .populate('brand', 'name')
@@ -323,6 +326,10 @@ exports.updateProduct = async (req, res) => {
 
     // Tạo object chứa dữ liệu mới cơ bản
     let updateData = { name, price, description, stock, importPrice: Number(importPrice) || 0, brand, category, gender, arConfig: parsedArConfig };
+
+    if (req.body.isDraft !== undefined) {
+      updateData.isDraft = req.body.isDraft === 'true' || req.body.isDraft === true;
+    }
 
     if (isActive !== undefined) {
       updateData.isActive = isActive === 'true' || isActive === true;

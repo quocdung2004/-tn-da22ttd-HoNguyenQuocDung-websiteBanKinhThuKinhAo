@@ -9,7 +9,7 @@ export default function Home() {
   const navigate = useNavigate();
   const { socket } = useSocket();
   const { user } = useAuth();
-  
+
   // STATE LƯU DỮ LIỆU TỪ BACKEND
   const [products, setProducts] = useState([]);
   const [banners, setBanners] = useState([]);
@@ -20,6 +20,24 @@ export default function Home() {
 
   // STATE CHO THANH TÌM KIẾM
   const [searchQuery, setSearchQuery] = useState('');
+
+  // STATE CHO CAROUSEL SLIDER Ở CÁC MỤC SẢN PHẨM Trang chủ
+  const [promoStartIndex, setPromoStartIndex] = useState(0);
+  const [arStartIndex, setArStartIndex] = useState(0);
+  const [newStartIndex, setNewStartIndex] = useState(0);
+
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const itemsPerPage = useMemo(() => {
+    if (windowWidth >= 1024) return 4;
+    if (windowWidth >= 768) return 3;
+    return 2;
+  }, [windowWidth]);
 
   const fetchProducts = async () => {
     try {
@@ -181,6 +199,18 @@ export default function Home() {
       .slice(0, 8);
   }, [products]);
 
+  useEffect(() => {
+    setPromoStartIndex(prev => Math.min(prev, Math.max(0, promoProducts.length - itemsPerPage)));
+  }, [itemsPerPage, promoProducts.length]);
+
+  useEffect(() => {
+    setArStartIndex(prev => Math.min(prev, Math.max(0, arProducts.length - itemsPerPage)));
+  }, [itemsPerPage, arProducts.length]);
+
+  useEffect(() => {
+    setNewStartIndex(prev => Math.min(prev, Math.max(0, newProducts.length - itemsPerPage)));
+  }, [itemsPerPage, newProducts.length]);
+
   // P1: HÀM XỬ LÝ SEARCH SUBMIT ĐIỀU HƯỚNG THỰC TẾ
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -213,9 +243,6 @@ export default function Home() {
               />
               <div className="absolute inset-0 bg-gradient-to-r from-gray-950/75 via-gray-950/35 to-transparent" />
               <div className="absolute inset-y-0 left-0 flex flex-col justify-center px-6 sm:px-10 lg:px-14 max-w-2xl">
-                <p className="text-xs sm:text-sm font-black uppercase tracking-widest text-blue-200 mb-3">
-                  Banner
-                </p>
                 <h2 className="text-2xl sm:text-4xl lg:text-5xl font-black text-white leading-tight">
                   {activeBanner.title}
                 </h2>
@@ -274,28 +301,28 @@ export default function Home() {
         <div className="absolute bottom-[-10%] left-[-10%] w-[300px] h-[300px] rounded-full bg-indigo-50/50 blur-3xl -z-10"></div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24 flex flex-col md:flex-row items-center gap-12 z-10 relative">
-          
+
           {/* Cột trái: Chữ và Nút bấm */}
           <div className="md:w-1/2 flex flex-col items-center md:items-start text-center md:text-left">
             <div className="inline-flex items-center space-x-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-full mb-6 border border-blue-100">
               <Sparkles className="w-5 h-5 animate-pulse" />
               <span className="text-xs font-black tracking-widest uppercase">Công nghệ 3D AR 2026</span>
             </div>
-            
+
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold text-gray-900 tracking-tight leading-[1.1] mb-6">
               Tìm kiếm chiếc kính hoàn hảo <br className="hidden lg:block" />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">
                 ngay tại nhà của bạn
               </span>
             </h1>
-            
+
             <p className="text-lg text-gray-600 mb-10 max-w-lg leading-relaxed">
-              Trải nghiệm công nghệ thử kính 3D thực tế ảo (AR) độc quyền. 
+              Trải nghiệm công nghệ thử kính 3D thực tế ảo (AR) độc quyền.
               Mở camera, ướm thử hàng trăm mẫu kính và biết chính xác chiếc nào sinh ra là dành cho khuôn mặt bạn.
             </p>
-            
+
             <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-              <button 
+              <button
                 onClick={() => {
                   const el = document.getElementById('promo-section') || document.getElementById('ar-section') || document.getElementById('new-arrivals-section');
                   if (el) el.scrollIntoView({ behavior: 'smooth' });
@@ -304,8 +331,8 @@ export default function Home() {
               >
                 <View className="w-6 h-6" /> Thử kính ngay
               </button>
-              
-              <Link 
+
+              <Link
                 to="/my-prescription"
                 className="bg-white text-gray-900 border-2 border-gray-200 px-8 py-4 rounded-2xl font-bold text-lg hover:border-gray-900 transition flex items-center justify-center gap-2"
               >
@@ -317,9 +344,9 @@ export default function Home() {
           {/* Cột phải: Hình ảnh minh họa */}
           <div className="md:w-1/2 w-full flex justify-center relative">
             <div className="relative w-full max-w-md aspect-square bg-gradient-to-br from-blue-100 to-indigo-50 rounded-[3rem] p-8 flex items-center justify-center shadow-inner border border-white">
-              <img 
-                src="https://images.unsplash.com/photo-1591076482161-42ce6da69f67?q=80&w=800&auto=format&fit=crop" 
-                alt="Người mẫu đeo kính" 
+              <img
+                src="https://images.unsplash.com/photo-1591076482161-42ce6da69f67?q=80&w=800&auto=format&fit=crop"
+                alt="Người mẫu đeo kính"
                 className="w-full h-full object-cover rounded-[2rem] shadow-2xl transform rotate-3 hover:rotate-0 transition duration-500"
               />
               <div className="absolute -bottom-6 -left-6 bg-white p-4 rounded-2xl shadow-xl border border-gray-100 flex items-center gap-4 animate-bounce">
@@ -339,22 +366,22 @@ export default function Home() {
 
       {/* ================= 3. THANH TÌM KIẾM LỚN NẰM GIỮA TRANG ================= */}
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mt-12">
-        <form 
+        <form
           onSubmit={handleSearchSubmit}
           className="relative bg-white/90 backdrop-blur-md rounded-3xl shadow-xl border border-gray-100 p-2.5 flex items-center gap-2 group focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-all duration-300"
         >
           <div className="pl-4 text-gray-400 group-focus-within:text-blue-600 transition-colors">
             <Search className="w-6 h-6" />
           </div>
-          <input 
-            type="text" 
-            placeholder="Tìm kiếm sản phẩm hoặc thương hiệu kính mắt..." 
+          <input
+            type="text"
+            placeholder="Tìm kiếm sản phẩm hoặc thương hiệu kính mắt..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full py-4 px-2 outline-none bg-transparent text-gray-800 font-bold placeholder-gray-400 text-lg"
           />
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             className="bg-gray-900 hover:bg-blue-600 active:scale-95 text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 shadow-md shadow-gray-900/10 hover:shadow-blue-500/20"
           >
             Tìm kiếm
@@ -375,7 +402,7 @@ export default function Home() {
       ) : (
         /* LƯỚI KHÁM PHÁ SẢN PHẨM */
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-20 space-y-24">
-          
+
           {/* ================= 4. SECTION "ĐANG KHUYẾN MÃI" ================= */}
           {promoProducts.length > 0 && (
             <section id="promo-section" className="relative">
@@ -388,25 +415,52 @@ export default function Home() {
                   <h2 className="text-3xl font-black text-gray-900 tracking-tight">Đang Khuyến Mãi</h2>
                   <p className="text-sm text-gray-500 mt-1">Các mẫu kính mắt cao cấp đang được áp dụng mức giá ưu đãi nhất</p>
                 </div>
-                <button 
-                  onClick={() => navigate('/products?isSale=true')}
-                  className="group flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold transition-all text-sm bg-blue-50 hover:bg-blue-100/80 px-4 py-2 rounded-full"
-                >
-                  Xem tất cả <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </button>
+                <div className="flex items-center gap-3">
+                  {promoProducts.length > itemsPerPage && (
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setPromoStartIndex(prev => Math.max(0, prev - 1))}
+                        disabled={promoStartIndex === 0}
+                        className="p-2 rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPromoStartIndex(prev => Math.min(promoProducts.length - itemsPerPage, prev + 1))}
+                        disabled={promoStartIndex + itemsPerPage >= promoProducts.length}
+                        className="p-2 rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => navigate('/products?isSale=true')}
+                    className="group flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold transition-all text-sm bg-blue-50 hover:bg-blue-100/80 px-4 py-2 rounded-full"
+                  >
+                    Xem tất cả <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </button>
+                </div>
               </div>
 
-              {/* P1: TỐI ƯU RESPONSIVE MOBILE SỬ DỤNG GRID-COLS-2 */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
-                {promoProducts.map((product) => (
-                  <ProductCard 
-                    key={product._id} 
-                    product={product} 
-                    showWishlistActions={showWishlistActions} 
-                    wishlistIds={wishlistIds} 
-                    onWishlistToggle={handleWishlistToggle} 
-                  />
-                ))}
+              <div className="overflow-hidden -mx-3">
+                <div
+                  className="flex transition-transform duration-500 ease-in-out"
+                  style={{ transform: `translateX(-${promoStartIndex * (100 / itemsPerPage)}%)` }}
+                >
+                  {promoProducts.map((product) => (
+                    <div key={product._id} className="flex-shrink-0 w-1/2 md:w-1/3 lg:w-1/4 px-3">
+                      <ProductCard
+                        product={product}
+                        showWishlistActions={showWishlistActions}
+                        wishlistIds={wishlistIds}
+                        onWishlistToggle={handleWishlistToggle}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
           )}
@@ -423,25 +477,52 @@ export default function Home() {
                   <h2 className="text-3xl font-black text-gray-900 tracking-tight">Hỗ Trợ Thử Kính AR</h2>
                   <p className="text-sm text-gray-500 mt-1">Trải nghiệm đeo thử kính ảo trực quan bằng camera của bạn ngay tại chỗ</p>
                 </div>
-                <button 
-                  onClick={() => navigate('/products?isAR=true')}
-                  className="group flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold transition-all text-sm bg-blue-50 hover:bg-blue-100/80 px-4 py-2 rounded-full"
-                >
-                  Xem tất cả <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </button>
+                <div className="flex items-center gap-3">
+                  {arProducts.length > itemsPerPage && (
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setArStartIndex(prev => Math.max(0, prev - 1))}
+                        disabled={arStartIndex === 0}
+                        className="p-2 rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setArStartIndex(prev => Math.min(arProducts.length - itemsPerPage, prev + 1))}
+                        disabled={arStartIndex + itemsPerPage >= arProducts.length}
+                        className="p-2 rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => navigate('/products?isAR=true')}
+                    className="group flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold transition-all text-sm bg-blue-50 hover:bg-blue-100/80 px-4 py-2 rounded-full"
+                  >
+                    Xem tất cả <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </button>
+                </div>
               </div>
 
-              {/* P1: TỐI ƯU RESPONSIVE MOBILE SỬ DỤNG GRID-COLS-2 */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
-                {arProducts.map((product) => (
-                  <ProductCard 
-                    key={product._id} 
-                    product={product} 
-                    showWishlistActions={showWishlistActions} 
-                    wishlistIds={wishlistIds} 
-                    onWishlistToggle={handleWishlistToggle} 
-                  />
-                ))}
+              <div className="overflow-hidden -mx-3">
+                <div
+                  className="flex transition-transform duration-500 ease-in-out"
+                  style={{ transform: `translateX(-${arStartIndex * (100 / itemsPerPage)}%)` }}
+                >
+                  {arProducts.map((product) => (
+                    <div key={product._id} className="flex-shrink-0 w-1/2 md:w-1/3 lg:w-1/4 px-3">
+                      <ProductCard
+                        product={product}
+                        showWishlistActions={showWishlistActions}
+                        wishlistIds={wishlistIds}
+                        onWishlistToggle={handleWishlistToggle}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
           )}
@@ -458,32 +539,59 @@ export default function Home() {
                   <h2 className="text-3xl font-black text-gray-900 tracking-tight">Sản Phẩm Mới</h2>
                   <p className="text-sm text-gray-500 mt-1">Những mẫu kính mắt thời thượng vừa cập bến cửa hàng của chúng tôi</p>
                 </div>
-                <button 
-                  onClick={() => navigate('/products?sort=newest')}
-                  className="group flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold transition-all text-sm bg-blue-50 hover:bg-blue-100/80 px-4 py-2 rounded-full"
-                >
-                  Xem tất cả <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </button>
+                <div className="flex items-center gap-3">
+                  {newProducts.length > itemsPerPage && (
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setNewStartIndex(prev => Math.max(0, prev - 1))}
+                        disabled={newStartIndex === 0}
+                        className="p-2 rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewStartIndex(prev => Math.min(newProducts.length - itemsPerPage, prev + 1))}
+                        disabled={newStartIndex + itemsPerPage >= newProducts.length}
+                        className="p-2 rounded-full border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => navigate('/products?sort=newest')}
+                    className="group flex items-center gap-1 text-blue-600 hover:text-blue-800 font-bold transition-all text-sm bg-blue-50 hover:bg-blue-100/80 px-4 py-2 rounded-full"
+                  >
+                    Xem tất cả <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </button>
+                </div>
               </div>
 
-              {/* P1: TỐI ƯU RESPONSIVE MOBILE SỬ DỤNG GRID-COLS-2 */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
-                {newProducts.map((product) => (
-                  <ProductCard 
-                    key={product._id} 
-                    product={product} 
-                    showWishlistActions={showWishlistActions} 
-                    wishlistIds={wishlistIds} 
-                    onWishlistToggle={handleWishlistToggle} 
-                  />
-                ))}
+              <div className="overflow-hidden -mx-3">
+                <div
+                  className="flex transition-transform duration-500 ease-in-out"
+                  style={{ transform: `translateX(-${newStartIndex * (100 / itemsPerPage)}%)` }}
+                >
+                  {newProducts.map((product) => (
+                    <div key={product._id} className="flex-shrink-0 w-1/2 md:w-1/3 lg:w-1/4 px-3">
+                      <ProductCard
+                        product={product}
+                        showWishlistActions={showWishlistActions}
+                        wishlistIds={wishlistIds}
+                        onWishlistToggle={handleWishlistToggle}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
           )}
 
           {/* ================= 7. NÚT "XEM TẤT CẢ SẢN PHẨM" ================= */}
           <div className="flex justify-center pt-8">
-            <button 
+            <button
               onClick={() => navigate('/products')}
               className="inline-flex items-center gap-2 bg-gray-950 hover:bg-blue-600 active:scale-95 text-white px-10 py-5 rounded-3xl font-extrabold text-lg transition-all duration-300 shadow-xl shadow-gray-900/10 hover:shadow-blue-500/20"
             >

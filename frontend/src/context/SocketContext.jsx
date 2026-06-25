@@ -18,10 +18,8 @@ export const SocketProvider = ({ children }) => {
       return;
     }
 
-    // Nhắm mục tiêu máy chủ backend chạy trên cổng 3001
-    const socketUrl = window.location.hostname === 'localhost' 
-      ? 'http://localhost:3001' 
-      : window.location.origin;
+    // Nhắm mục tiêu máy chủ backend thông qua proxy của Vite (hoặc trực tiếp trong prod)
+    const socketUrl = window.location.origin;
 
     const newSocket = io(socketUrl, {
       auth: { token },

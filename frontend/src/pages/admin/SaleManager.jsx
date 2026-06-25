@@ -67,7 +67,12 @@ export default function SaleManager() {
 
   const fetchProducts = async () => {
     try {
-      const res = await fetch('/api/products?all=true');
+      const token = localStorage.getItem('glassesToken');
+      const res = await fetch('/api/products?all=true', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       const data = await res.json();
       if (data.success) setProducts(data.products);
     } catch (err) {
@@ -432,8 +437,10 @@ export default function SaleManager() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-black text-gray-700 uppercase tracking-wider mb-2">Mức Giảm *</label>
-                  <input required type="number" min="1" placeholder={formData.discountType === 'percent' ? 'VD: 15' : 'VD: 50000'} value={formData.discountValue} onChange={e => setFormData({...formData, discountValue: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none text-sm font-bold" />
+                  <label className="block text-xs font-black text-gray-700 uppercase tracking-wider mb-2">
+                    {formData.discountType === 'percent' ? 'Mức Giảm (%) *' : 'Giá sau khi giảm (đ) *'}
+                  </label>
+                  <input required type="number" min="1" placeholder={formData.discountType === 'percent' ? 'VD: 15' : 'VD: 500000'} value={formData.discountValue} onChange={e => setFormData({...formData, discountValue: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none text-sm font-bold" />
                 </div>
               </div>
 
@@ -462,7 +469,7 @@ export default function SaleManager() {
                   <label className="block text-xs font-black text-gray-700 uppercase tracking-wider mb-2">Giới hạn số lượng</label>
                   <select 
                     value={formData.usageLimitType} 
-                    onChange={e => setFormData({...formData, usageLimitType: e.target.value, usageLimit: e.target.value === 'unlimited' ? '' : formData.usageLimit})} 
+                    onChange={e => setFormData({...formData, usageLimitType: e.target.value})} 
                     className="w-full px-3 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none text-sm font-bold bg-white"
                   >
                     <option value="unlimited">Không giới hạn</option>
@@ -732,7 +739,7 @@ export default function SaleManager() {
                               )}
                             </div>
                             <span className="text-sm font-black text-red-500 bg-red-50 border border-red-100 rounded-lg px-2 py-0.5">
-                              {sale.discountType === 'percent' ? `Giảm ${sale.discountValue}%` : `Giảm -${sale.discountValue.toLocaleString('vi-VN')} đ`}
+                              {sale.discountType === 'percent' ? `Giảm ${sale.discountValue}%` : `Đồng giá ${sale.discountValue.toLocaleString('vi-VN')} đ`}
                             </span>
                           </div>
 

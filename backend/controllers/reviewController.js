@@ -3,6 +3,7 @@ const Product = require('../models/Product');
 const Order = require('../models/Order');
 const User = require('../models/User');
 const mongoose = require('mongoose');
+const { createNotificationAndEmit } = require('../utils/notificationHelper');
 
 // Helper to update product's averageRating and totalReviews dynamically
 const updateProductRating = async (productId) => {
@@ -206,5 +207,68 @@ exports.deleteReview = async (req, res) => {
   } catch (error) {
     console.error('Error deleting review:', error);
     return res.status(500).json({ success: false, message: 'Lỗi hệ thống khi xóa đánh giá.' });
+  }
+};
+
+// Reply to a review (Staff/Admin)
+exports.replyReview = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reply } = req.body;
+    const replierName = req.user.name || req.user.username || 'Quản trị viên';
+
+    if (reply === undefined) {
+      return res.status(400).json({ success: false, message: 'Thiếu trường reply!' });
+    }
+
+    const review = await Review.findById(id);
+    if (!review) {
+      return res.status(404).json({ success: false, message: 'Đánh giá không tồn tại.' });
+    }
+
+    // Nếu reply rỗng, coi như xóa phản hồi cũ
+    if (reply.trim() === '') {
+      review.reply = undefined;
+      review.replyBy = undefined;
+      review.replyAt = undefined;
+    } else {
+      review.reply = reply.trim();
+      review.replyBy = replierName;
+      review.replyAt = new Date();
+
+      // Gửi thông báo đến khách hàng
+      try {
+        const customer = await User.findOne({ username: review.username });
+        if (customer) {
+          const product = await Product.findById(review.productId);
+          const productName = product ? product.name : 'kính mắt';
+          
+          await createNotificationAndEmit({
+            userId: customer._id,
+            type: 'review',
+            title: 'Phản hồi đánh giá',
+            message: `Cửa hàng đã phản hồi nhận xét của bạn về sản phẩm "${productName}".`,
+            link: `/product/${review.productId}`,
+            metadata: {
+              reviewId: review._id.toString(),
+              productId: review.productId.toString()
+            }
+          });
+        }
+      } catch (notifErr) {
+        console.error('Lỗi khi gửi thông báo phản hồi đánh giá:', notifErr);
+      }
+    }
+    
+    await review.save();
+
+    return res.status(200).json({
+      success: true,
+      message: reply.trim() === '' ? 'Đã xóa phản hồi!' : 'Phản hồi đánh giá thành công!',
+      review
+    });
+  } catch (error) {
+    console.error('Error replying review:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi hệ thống khi phản hồi đánh giá.' });
   }
 };

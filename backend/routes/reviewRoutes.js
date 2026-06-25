@@ -18,4 +18,7 @@ router.get('/', verifyToken, verifyStaffOrAdmin, reviewController.getAllReviews)
 // Delete a review (Admin only)
 router.delete('/:id', verifyToken, verifyAdmin, reviewController.deleteReview);
 
+// Reply to a review (Staff/Admin)
+router.put('/:id/reply', verifyToken, verifyStaffOrAdmin, reviewController.replyReview);
+
 module.exports = router;

@@ -56,16 +56,86 @@ exports.createReceipt = async (req, res) => {
         return res.status(400).json({ success: false, message: `Đơn giá nhập hàng sỉ phải lớn hơn hoặc bằng 0!` });
       }
 
-      // Đảm bảo sản phẩm có thật trong DB
-      const product = await Product.findById(item.productId);
-      if (!product) {
-        return res.status(404).json({ success: false, message: `Không tìm thấy sản phẩm với ID ${item.productId}!` });
+      if (item.productId === 'new-product' || !item.productId) {
+        if (!item.newProductName || !item.newProductName.trim()) {
+          return res.status(400).json({ success: false, message: `Dòng sản phẩm mới thiếu tên kính!` });
+        }
+      } else {
+        // Đảm bảo sản phẩm có thật trong DB
+        const product = await Product.findById(item.productId);
+        if (!product) {
+          return res.status(404).json({ success: false, message: `Không tìm thấy sản phẩm với ID ${item.productId}!` });
+        }
       }
     }
+
+    const processReceiptItems = async (sessionOpts) => {
+      const processedItems = [];
+      for (const item of items) {
+        let finalProductId = item.productId;
+        let finalProduct;
+
+        if (item.productId === 'new-product' || !item.productId) {
+          // Tạo sản phẩm mới dưới dạng Nháp
+          const newProduct = new Product({
+            name: item.newProductName.trim(),
+            price: 0, // Giá bán lẻ mặc định ban đầu là 0
+            importPrice: Number(item.importPrice),
+            stock: Number(item.quantity),
+            isDraft: true,
+            isActive: false // Chưa cho phép hiển thị ra website
+          });
+          await newProduct.save(sessionOpts);
+          finalProductId = newProduct._id;
+          finalProduct = newProduct;
+        } else {
+          // Sản phẩm có sẵn: Tính giá bình quân gia quyền
+          const product = await Product.findById(item.productId);
+          const oldStock = Math.max(0, product.stock || 0);
+          const oldImportPrice = product.importPrice || 0;
+          const importQty = Number(item.quantity);
+          const importPrice = Number(item.importPrice);
+
+          const totalStock = oldStock + importQty;
+          let newWeightedImportPrice = importPrice;
+          if (totalStock > 0) {
+            newWeightedImportPrice = Math.round(((oldStock * oldImportPrice) + (importQty * importPrice)) / totalStock);
+          }
+
+          finalProduct = await Product.findByIdAndUpdate(
+            item.productId,
+            {
+              $inc: { stock: importQty },
+              $set: { importPrice: newWeightedImportPrice }
+            },
+            { new: true, ...sessionOpts }
+          );
+        }
+
+        processedItems.push({
+          productId: finalProductId,
+          quantity: Number(item.quantity),
+          importPrice: Number(item.importPrice)
+        });
+
+        // Realtime Stock và LowStock check
+        if (finalProduct) {
+          getIO().emit('product:stockUpdated', {
+            productId: finalProduct._id.toString(),
+            stock: finalProduct.stock,
+            reason: 'import'
+          });
+          await checkAndEmitLowStockNotification(finalProduct);
+        }
+      }
+      return processedItems;
+    };
 
     // 2. THỰC THI GHI NHẬN (TRANSACTION HOẶC ATOMIC BATCH)
     if (session) {
       session.startTransaction();
+
+      const processedItems = await processReceiptItems({ session });
 
       // Lưu phiếu nhập
       const newReceipt = new ImportReceipt({ 
@@ -73,65 +143,26 @@ exports.createReceipt = async (req, res) => {
         creator: creatorName, // Giữ tương thích ngược
         creatorId, 
         creatorName, 
-        items, 
+        items: processedItems, 
         note 
       });
       await newReceipt.save({ session });
-
-      // Cộng tồn kho và đổi giá sỉ hiện hành cho từng sản phẩm
-      for (const item of items) {
-        const updatedProduct = await Product.findByIdAndUpdate(
-          item.productId,
-          {
-            $inc: { stock: Number(item.quantity) },
-            $set: { importPrice: Number(item.importPrice) }
-          },
-          { session, new: true }
-        );
-
-        // ================= REALTIME STOCK INTEGRATION =================
-        getIO().emit('product:stockUpdated', {
-          productId: updatedProduct._id.toString(),
-          stock: updatedProduct.stock,
-          reason: 'import'
-        });
-        await checkAndEmitLowStockNotification(updatedProduct);
-        // ===============================================================
-      }
 
       await session.commitTransaction();
       session.endSession();
     } else {
       // Chế độ Standalone (Bảo đảm an toàn tuyệt đối nhờ bước Tiền Kiểm Tra 1 đã xác thực thành công)
+      const processedItems = await processReceiptItems({});
+
       const newReceipt = new ImportReceipt({ 
         receiptCode: generatedReceiptCode, 
         creator: creatorName, // Giữ tương thích ngược
         creatorId, 
         creatorName, 
-        items, 
+        items: processedItems, 
         note 
       });
       await newReceipt.save();
-
-      for (const item of items) {
-        const updatedProduct = await Product.findByIdAndUpdate(
-          item.productId,
-          {
-            $inc: { stock: Number(item.quantity) },
-            $set: { importPrice: Number(item.importPrice) }
-          },
-          { new: true }
-        );
-
-        // ================= REALTIME STOCK INTEGRATION =================
-        getIO().emit('product:stockUpdated', {
-          productId: updatedProduct._id.toString(),
-          stock: updatedProduct.stock,
-          reason: 'import'
-        });
-        await checkAndEmitLowStockNotification(updatedProduct);
-        // ===============================================================
-      }
     }
 
     res.status(201).json({ success: true, message: 'Tạo phiếu nhập kho và đồng bộ tồn kho thành công!' });

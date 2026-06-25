@@ -1,10 +1,21 @@
 import React from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
-import { ShoppingBag, LogOut, XOctagon, Wallet, MessageSquare, Star } from 'lucide-react';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { ShoppingBag, LogOut, XOctagon, Wallet, MessageSquare, Star, Home } from 'lucide-react';
 import NotificationBell from '../../components/NotificationBell';
+import { useAuth } from '../../context/AuthContext';
 
 export default function StaffLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+
+  const handleLogout = () => {
+    const confirmLogout = window.confirm("Bạn có chắc chắn muốn đăng xuất khỏi hệ thống không?");
+    if (confirmLogout) {
+      logout();
+      navigate('/');
+    }
+  };
 
   const menuItems = [
     { path: '/staff', icon: <ShoppingBag className="w-5 h-5" />, label: 'Quản lý Đơn hàng' },
@@ -41,10 +52,16 @@ export default function StaffLayout() {
           ))}
         </nav>
 
-        <div className="p-4 border-t border-gray-800">
+        <div className="p-4 border-t border-gray-800 space-y-2">
           <Link to="/" className="flex items-center gap-3 px-4 py-3 text-gray-400 hover:bg-gray-800 hover:text-white rounded-xl transition-all">
-            <LogOut className="w-5 h-5" /> Về trang Khách hàng
+            <Home className="w-5 h-5" /> Về trang Khách hàng
           </Link>
+          <button 
+            onClick={handleLogout} 
+            className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-500 hover:text-white rounded-xl transition-all text-left outline-none"
+          >
+            <LogOut className="w-5 h-5" /> Đăng xuất
+          </button>
         </div>
       </aside>
 

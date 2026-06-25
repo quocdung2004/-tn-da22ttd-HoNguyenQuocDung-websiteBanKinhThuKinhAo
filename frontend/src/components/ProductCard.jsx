@@ -19,7 +19,7 @@ export default function ProductCard({
   return (
     <div 
       onClick={handleCardClick}
-      className="group bg-white rounded-3xl p-5 shadow-sm hover:shadow-2xl hover:shadow-blue-900/10 transition-all duration-300 border border-gray-100 flex flex-col cursor-pointer relative"
+      className="group bg-white rounded-3xl p-5 shadow-sm hover:shadow-2xl hover:shadow-blue-900/10 transition-all duration-300 border border-gray-100 flex flex-col cursor-pointer relative h-full"
     >
       {showWishlistActions && (
         <button
@@ -70,7 +70,7 @@ export default function ProductCard({
           {/* Lấy tên Brand và Category từ dữ liệu populate */}
           {product.brand?.name || "Kính Mắt"} • {product.category?.name || "Thời Trang"}
         </p>
-        <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors">
+        <h3 className="text-lg font-bold text-gray-900 h-14 mb-2 line-clamp-2 leading-snug group-hover:text-blue-600 transition-colors">
           {product.name}
         </h3>
         

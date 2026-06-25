@@ -1,13 +1,16 @@
 const Banner = require('../models/Banner');
 
-const normalizeBannerPayload = (body) => {
+const normalizeBannerPayload = (body, file) => {
   const startDate = body.startDate ? new Date(body.startDate) : new Date();
   const endDate = body.endDate ? new Date(body.endDate) : null;
+
+  // Lấy URL ảnh từ file upload (Cloudinary) hoặc giữ nguyên link cũ gửi từ client
+  const imageUrl = file ? file.path : body.imageUrl?.trim();
 
   return {
     title: body.title?.trim(),
     subtitle: body.subtitle?.trim() || '',
-    imageUrl: body.imageUrl?.trim(),
+    imageUrl,
     targetUrl: body.targetUrl?.trim() || '/',
     sortOrder: Number(body.sortOrder || 0),
     isActive: body.isActive !== undefined ? Boolean(body.isActive) : true,
@@ -17,14 +20,14 @@ const normalizeBannerPayload = (body) => {
 };
 
 const validateBannerPayload = (payload) => {
-  if (!payload.title) return 'Vui long nhap tieu de banner.';
-  if (!payload.imageUrl) return 'Vui long nhap URL hinh anh banner.';
-  if (Number.isNaN(payload.startDate.getTime())) return 'Ngay bat dau khong hop le.';
-  if (payload.endDate && Number.isNaN(payload.endDate.getTime())) return 'Ngay ket thuc khong hop le.';
+  if (!payload.title) return 'Vui lòng nhập tiêu đề banner.';
+  if (!payload.imageUrl) return 'Vui lòng tải lên hình ảnh banner.';
+  if (Number.isNaN(payload.startDate.getTime())) return 'Ngày bắt đầu không hợp lệ.';
+  if (payload.endDate && Number.isNaN(payload.endDate.getTime())) return 'Ngày kết thúc không hợp lệ.';
   if (payload.endDate && payload.startDate > payload.endDate) {
-    return 'Ngay bat dau phai nho hon hoac bang ngay ket thuc.';
+    return 'Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc.';
   }
-  if (Number.isNaN(payload.sortOrder)) return 'Thu tu hien thi khong hop le.';
+  if (Number.isNaN(payload.sortOrder)) return 'Thứ tự hiển thị không hợp lệ.';
   return null;
 };
 
@@ -62,7 +65,7 @@ exports.getAdminBanners = async (req, res) => {
 
 exports.createBanner = async (req, res) => {
   try {
-    const payload = normalizeBannerPayload(req.body);
+    const payload = normalizeBannerPayload(req.body, req.file);
     const validationError = validateBannerPayload(payload);
     if (validationError) {
       return res.status(400).json({ success: false, message: validationError });
@@ -83,7 +86,7 @@ exports.createBanner = async (req, res) => {
 
 exports.updateBanner = async (req, res) => {
   try {
-    const payload = normalizeBannerPayload(req.body);
+    const payload = normalizeBannerPayload(req.body, req.file);
     const validationError = validateBannerPayload(payload);
     if (validationError) {
       return res.status(400).json({ success: false, message: validationError });

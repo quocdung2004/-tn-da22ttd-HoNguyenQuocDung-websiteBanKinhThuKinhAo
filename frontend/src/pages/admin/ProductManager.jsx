@@ -8,16 +8,18 @@ export default function ProductManager() {
   const [brands, setBrands] = useState([]);
   const [categories, setCategories] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [draftProducts, setDraftProducts] = useState([]);
+  const [selectedDraftId, setSelectedDraftId] = useState('');
   
   // STATE CỦA FORM
   const [formData, setFormData] = useState({ 
     name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true, gender: 'unisex',
     arConfig: {
-      splitSingleMeshByDepth: false,
+      splitSingleMeshByDepth: true,
       frontDepthStartRatio: 0.68,
       templeDepthEndRatio: 0.70,
       frontCenterKeepRatio: 0.23,
-      verticalOffsetRatio: 0,
+      verticalOffsetRatio: -0.08,
       scaleMultiplier: 1
     }
   });
@@ -29,6 +31,7 @@ export default function ProductManager() {
   
   const [editingId, setEditingId] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false); // State để ẩn/hiện Form Popup
+  const [showAdvancedAR, setShowAdvancedAR] = useState(false);
   
   const fileInputRef = useRef(null); 
   const arFileInputRef = useRef(null);
@@ -39,12 +42,15 @@ export default function ProductManager() {
   const fetchData = async () => {
     try {
       const token = localStorage.getItem('glassesToken');
-      const [prodRes, brandRes, catRes] = await Promise.all([
+      const [prodRes, brandRes, catRes, draftRes] = await Promise.all([
         fetch('/api/products?all=true', {
           headers: { Authorization: `Bearer ${token}` }
         }).then(res => res.json()), // Gọi all=true để Admin quản lý toàn bộ
         fetch('/api/brands').then(res => res.json()),
-        fetch('/api/categories').then(res => res.json())
+        fetch('/api/categories').then(res => res.json()),
+        fetch('/api/products?draft=true', {
+          headers: { Authorization: `Bearer ${token}` }
+        }).then(res => res.json())
       ]);
       
       console.log("Danh sách Nhãn hàng từ DB:", brandRes.brands);
@@ -53,6 +59,7 @@ export default function ProductManager() {
       if (prodRes.success) setProducts(prodRes.products);
       if (brandRes.success) setBrands(brandRes.brands);
       if (catRes.success) setCategories(catRes.categories);
+      if (draftRes.success) setDraftProducts(draftRes.products || []);
       
     } catch (error) {
       console.error('Lỗi tải dữ liệu:', error);
@@ -128,11 +135,11 @@ export default function ProductManager() {
       isActive: prod.isActive !== false, // nạp đúng trạng thái
       gender: prod.gender || 'unisex',
       arConfig: {
-        splitSingleMeshByDepth: prod.arConfig?.splitSingleMeshByDepth ?? false,
+        splitSingleMeshByDepth: prod.arConfig?.splitSingleMeshByDepth ?? true,
         frontDepthStartRatio: prod.arConfig?.frontDepthStartRatio ?? 0.68,
         templeDepthEndRatio: prod.arConfig?.templeDepthEndRatio ?? 0.70,
         frontCenterKeepRatio: prod.arConfig?.frontCenterKeepRatio ?? 0.23,
-        verticalOffsetRatio: prod.arConfig?.verticalOffsetRatio ?? 0,
+        verticalOffsetRatio: prod.arConfig?.verticalOffsetRatio ?? -0.08,
         scaleMultiplier: prod.arConfig?.scaleMultiplier ?? 1
       }
     });
@@ -146,15 +153,17 @@ export default function ProductManager() {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingId(null);
+    setSelectedDraftId('');
+    setShowAdvancedAR(false);
     // Reset form về trạng thái rỗng
     setFormData({ 
       name: '', price: '', description: '', stock: '', brand: '', category: '', isActive: true, gender: 'unisex',
       arConfig: {
-        splitSingleMeshByDepth: false,
+        splitSingleMeshByDepth: true,
         frontDepthStartRatio: 0.68,
         templeDepthEndRatio: 0.70,
         frontCenterKeepRatio: 0.23,
-        verticalOffsetRatio: 0,
+        verticalOffsetRatio: -0.08,
         scaleMultiplier: 1
       }
     });
@@ -221,6 +230,12 @@ export default function ProductManager() {
 		dataToSend.append('gender', formData.gender);
     dataToSend.append('arConfig', JSON.stringify(formData.arConfig));
     
+    // Nếu đây là sản phẩm nháp được hoàn thiện, tự động tắt trạng thái nháp
+    const isDraftBeingCompleted = draftProducts.some(d => d._id === editingId);
+    if (isDraftBeingCompleted) {
+      dataToSend.append('isDraft', 'false');
+    }
+
     // Gửi trạng thái isActive khi đang sửa sản phẩm
     if (editingId) {
       dataToSend.append('isActive', formData.isActive);
@@ -427,6 +442,60 @@ export default function ProductManager() {
               )}
 
               <form onSubmit={handleSubmit} className="space-y-6">
+                {!editingId && (
+                  <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-2xl mb-4">
+                    <label className="block text-xs font-black text-blue-700 uppercase tracking-widest mb-2">
+                      💡 Chọn từ kính nháp mới nhập kho
+                    </label>
+                    {draftProducts.length > 0 ? (
+                      <select
+                        value={selectedDraftId}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSelectedDraftId(val);
+                          if (val) {
+                            const selectedDraft = draftProducts.find(d => d._id === val);
+                            if (selectedDraft) {
+                              setFormData({
+                                name: selectedDraft.name || '',
+                                price: selectedDraft.price || '',
+                                description: selectedDraft.description || '',
+                                stock: selectedDraft.stock || 0,
+                                brand: selectedDraft.brand ? selectedDraft.brand._id : '',
+                                category: selectedDraft.category ? selectedDraft.category._id : '',
+                                isActive: true,
+                                gender: selectedDraft.gender || 'unisex',
+                                arConfig: {
+                                  splitSingleMeshByDepth: selectedDraft.arConfig?.splitSingleMeshByDepth ?? true,
+                                  frontDepthStartRatio: selectedDraft.arConfig?.frontDepthStartRatio ?? 0.68,
+                                  templeDepthEndRatio: selectedDraft.arConfig?.templeDepthEndRatio ?? 0.70,
+                                  frontCenterKeepRatio: selectedDraft.arConfig?.frontCenterKeepRatio ?? 0.23,
+                                  verticalOffsetRatio: selectedDraft.arConfig?.verticalOffsetRatio ?? -0.08,
+                                  scaleMultiplier: selectedDraft.arConfig?.scaleMultiplier ?? 1
+                                }
+                              });
+                              // Thiết lập editingId của form là ID của kính nháp này
+                              setEditingId(selectedDraft._id);
+                            }
+                          }
+                        }}
+                        className="w-full px-3 py-2 bg-white border border-blue-200 focus:border-blue-500 rounded-xl text-sm font-bold outline-none text-gray-800"
+                      >
+                        <option value="">-- Chọn sản phẩm nháp để hoàn thiện thông tin --</option>
+                        {draftProducts.map(d => (
+                          <option key={d._id} value={d._id}>
+                            {d.name} (Tồn kho: {d.stock} cái, Giá nhập sỉ: {d.importPrice?.toLocaleString('vi-VN')}đ)
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-xs text-blue-600 font-medium italic">
+                        Không có kính nháp nào chờ hoàn thiện (hãy tạo phiếu nhập kho với "Kính mới hoàn toàn" ở trang Nhập kho để sinh kính nháp).
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Tên Kính</label>
                   <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-600 outline-none" />
@@ -491,31 +560,17 @@ export default function ProductManager() {
 
                 {/* ⚙️ Cấu hình hình học AR (Dành cho file sinh từ AI) */}
                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-4">
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                    <span>⚙️</span> Cấu hình hình học AR (Dành cho file sinh từ AI)
-                  </h4>
-                  
-                  <div className="flex items-center gap-3">
-                    <input 
-                      type="checkbox" 
-                      id="splitSingleMeshByDepth"
-                      checked={formData.arConfig?.splitSingleMeshByDepth || false}
-                      onChange={e => setFormData({
-                        ...formData,
-                        arConfig: {
-                          ...formData.arConfig,
-                          splitSingleMeshByDepth: e.target.checked
-                        }
-                      })}
-                      className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500 border-gray-300"
-                    />
-                    <label htmlFor="splitSingleMeshByDepth" className="text-sm font-medium text-slate-700 select-none cursor-pointer">
-                      Kích hoạt chia nhỏ Mesh đơn lẻ theo độ sâu (splitSingleMeshByDepth)
-                    </label>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedAR(!showAdvancedAR)}
+                    className="flex items-center justify-between w-full text-sm font-black text-gray-700 uppercase tracking-wider mb-2 p-2 hover:bg-gray-100 rounded-lg transition-colors outline-none"
+                  >
+                    <span className="flex items-center gap-2">⚙️ Cấu hình hình học AR (Nâng cao)</span>
+                    <span>{showAdvancedAR ? '▲' : '▼'}</span>
+                  </button>
 
-                  {formData.arConfig?.splitSingleMeshByDepth && (
-                    <div className="grid grid-cols-3 gap-4 pt-2 animate-in fade-in duration-200">
+                  {showAdvancedAR && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-top-2 duration-300 mt-4">
                       <div>
                         <label className="block text-xs font-bold text-slate-600 mb-1">Mặt trước bắt đầu (frontDepthStartRatio)</label>
                         <input 
@@ -570,44 +625,41 @@ export default function ProductManager() {
                           className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-600"
                         />
                       </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1">Tỉ lệ kích thước (scaleMultiplier)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          min="0.1"
+                          value={formData.arConfig?.scaleMultiplier ?? 1}
+                          onChange={e => setFormData({
+                            ...formData,
+                            arConfig: {
+                              ...formData.arConfig,
+                              scaleMultiplier: parseFloat(e.target.value) || 1
+                            }
+                          })}
+                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 mb-1">Dịch chuyển dọc (verticalOffsetRatio)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          value={formData.arConfig?.verticalOffsetRatio ?? -0.08}
+                          onChange={e => setFormData({
+                            ...formData,
+                            arConfig: {
+                              ...formData.arConfig,
+                              verticalOffsetRatio: parseFloat(e.target.value) || 0
+                            }
+                          })}
+                          className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-600"
+                        />
+                      </div>
                     </div>
                   )}
-
-                  <div className="grid grid-cols-2 gap-4 pt-2">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">Dịch chuyển dọc (verticalOffsetRatio)</label>
-                      <input 
-                        type="number" 
-                        step="0.01"
-                        value={formData.arConfig?.verticalOffsetRatio ?? 0}
-                        onChange={e => setFormData({
-                          ...formData,
-                          arConfig: {
-                            ...formData.arConfig,
-                            verticalOffsetRatio: parseFloat(e.target.value) || 0
-                          }
-                        })}
-                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-600"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">Tỉ lệ kích thước (scaleMultiplier)</label>
-                      <input 
-                        type="number" 
-                        step="0.01"
-                        min="0.1"
-                        value={formData.arConfig?.scaleMultiplier ?? 1}
-                        onChange={e => setFormData({
-                          ...formData,
-                          arConfig: {
-                            ...formData.arConfig,
-                            scaleMultiplier: parseFloat(e.target.value) || 1
-                          }
-                        })}
-                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 outline-none focus:ring-2 focus:ring-blue-600"
-                      />
-                    </div>
-                  </div>
                 </div>
 
                 {/* VÙNG CHỌN FILE 3D (.GLB) */}

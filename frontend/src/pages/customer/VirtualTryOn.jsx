@@ -1045,7 +1045,7 @@ const splitTempleMeshIntoSegments = (mesh) => {
     .filter(Boolean);
 };
 
-const applyTempleDepthFit = (mesh, depthScale) => {
+const applyTempleDepthFit = (mesh, depthScale, pivotZ) => {
   if (!mesh?.geometry) return;
   if (!mesh.userData.originalTempleTransform) {
     mesh.geometry.computeBoundingBox();
@@ -1057,15 +1057,83 @@ const applyTempleDepthFit = (mesh, depthScale) => {
   }
 
   const original = mesh.userData.originalTempleTransform;
+
+  // 1. Áp dụng scale trên trục Z
   mesh.scale.set(
     original.scale.x,
     original.scale.y,
     original.scale.z * depthScale
   );
-  mesh.position.set(
+
+  // 2. Tính toán tịnh tiến trục Z bù trừ bằng pivotZ để giữ cố định bản lề
+  mesh.position.z = original.position.z + original.scale.z * pivotZ * (1 - depthScale);
+
+  // 3. Tính toán độ uốn cong trục X (flare) dựa trên index của phân đoạn
+  const segmentIndex = mesh.userData.templeSegmentIndex; // từ 0 đến 15
+  if (segmentIndex !== undefined && segmentIndex !== null) {
+    const partType = mesh.userData.partType || '';
+    const isLeft = partType.startsWith('LEFT_TEMPLE') || partType.includes('LEFT');
+    const isRight = partType.startsWith('RIGHT_TEMPLE') || partType.includes('RIGHT');
+
+    if (isLeft || isRight) {
+      // Chuẩn hóa chỉ số đoạn về khoảng [0, 1]
+      const t = segmentIndex / 15;
+
+      // Hàm parabol curveFactor = t^2. 
+      // Càng gần tai (t -> 1.0), lực bẻ vát ra ngoài càng mạnh
+      const curveFactor = t * t;
+
+      // Hằng số bẻ vát tối đa (maxFlare). Giá trị 0.022 (2.2cm) là tối ưu
+      const MAX_FLARE = 0.022;
+      const sideSign = isLeft ? -1 : 1; // Left vát sang âm X, Right vát sang dương X
+      const xOffset = sideSign * MAX_FLARE * curveFactor;
+
+      mesh.position.x = original.position.x + xOffset;
+    }
+  } else {
+    // Trả lại tọa độ X gốc nếu không có segment index
+    mesh.position.x = original.position.x;
+  }
+};
+
+const adjustTempleZDepth = (templeMesh, hingeWorldPos, earWorldPos, glassesWorldScale) => {
+  if (!templeMesh?.geometry || !hingeWorldPos || !earWorldPos) return;
+
+  if (!templeMesh.userData.originalTempleTransform) {
+    if (!templeMesh.geometry.boundingBox) {
+      templeMesh.geometry.computeBoundingBox();
+    }
+    const bbox = templeMesh.geometry.boundingBox;
+    templeMesh.userData.originalTempleTransform = {
+      position: templeMesh.position.clone(),
+      scale: templeMesh.scale.clone(),
+      localLength: Math.abs(bbox.max.z - bbox.min.z),
+      localFrontZ: bbox.max.z
+    };
+  }
+
+  const original = templeMesh.userData.originalTempleTransform;
+
+  // Chống lỗi chia cho 0 nếu tỷ lệ scale hoặc độ dài gốc bằng 0
+  if (glassesWorldScale <= 0 || original.localLength === 0) return;
+
+  const targetWorldLength = hingeWorldPos.distanceTo(earWorldPos);
+  let targetZScale = targetWorldLength / (original.localLength * glassesWorldScale);
+
+  const MIN_SCALE_Z = 0.85;
+  const MAX_SCALE_Z = 1.65;
+  targetZScale = Math.min(MAX_SCALE_Z, Math.max(MIN_SCALE_Z, targetZScale));
+
+  templeMesh.scale.set(
+    original.scale.x,
+    original.scale.y,
+    original.scale.z * targetZScale
+  );
+
+  templeMesh.position.set(
     original.position.x,
     original.position.y,
-    original.position.z + original.scale.z * original.frontZ * (1 - depthScale)
+    original.position.z + original.scale.z * original.localFrontZ * (1 - targetZScale)
   );
 };
 
@@ -1651,6 +1719,12 @@ const getFaceAttachedTempleVisibleT = ({
   const isYawMode = yawAbs > YAW_SIDE_THRESHOLD_DEG;
   const isNearSide = templeSideState?.nearTemplePart === basePart;
   const isFarSide = templeSideState?.farTemplePart === basePart;
+
+  // Nếu là càng kính phía gần camera khi đang xoay đầu, hiển thị full 100% không che/cắt
+  if (isNearSide && isYawMode) {
+    return 1.0;
+  }
+
   const fallbackT = getFaceAttachedTempleFallbackT(side, templeSideState, yawAbs, pitchAbs);
   const nearTargetT = isNearSide && isYawMode ? getNearSideTempleTargetT(yawAbs) : fallbackT;
   const polygon = side === 'LEFT' ? faceMaskModel?.leftPolygon : faceMaskModel?.rightPolygon;
@@ -3977,46 +4051,124 @@ export default function VirtualTryOn({
           }
         }
 
+        // =========================================================================
+        // KHỐI LỆNH 1: CẮT ĐUÔI GỌNG & TÍNH TOÁN SCALE ĐỘ SÂU ĐỘNG
+        // =========================================================================
+        let baseTempleLength = 0.001;
+        let leftPivotZ = null;
+        let rightPivotZ = null;
+
+        // Ý TƯỞNG CỦA BẠN: Chỉ giữ lại 75% gọng kính (Cắt bỏ 25% phần móc tai)
+        const TEMPLE_KEEP_RATIO = 0.6;
+        const maxSegmentIndex = Math.floor(15 * TEMPLE_KEEP_RATIO); // Cắt bỏ từ khúc số 12 trở đi
+
+        // Quét tìm thông số gốc từ các khúc kính ĐƯỢC GIỮ LẠI
         glassesModelRef.current.traverse((child) => {
           if (child.isMesh) {
-            if (child.userData.partType === 'LENS') {
-              applyArLensRenderState(child);
-              return;
+            const part = child.userData.partType || '';
+            const originalPart = child.userData.originalPartType || '';
+            const checkName = part + ' ' + originalPart;
+
+            const isLeft = checkName.includes('LEFT');
+            const isRight = checkName.includes('RIGHT');
+            const isTemple = isLeft || isRight || part === 'SEGMENTED_TEMPLE_SOURCE';
+
+            if (isTemple) {
+              // Bỏ qua các khúc đuôi bị cắt khi tính toán chiều dài gốc
+              const segIndex = child.userData.templeSegmentIndex;
+              if (segIndex !== undefined && segIndex > maxSegmentIndex) return;
+
+              if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+              const bbox = child.geometry.boundingBox;
+              if (bbox) {
+                const lengthZ = Math.abs(bbox.max.z - bbox.min.z);
+                if (lengthZ > baseTempleLength) baseTempleLength = lengthZ;
+
+                if (isLeft && (leftPivotZ === null || bbox.max.z > leftPivotZ)) leftPivotZ = bbox.max.z;
+                if (isRight && (rightPivotZ === null || bbox.max.z > rightPivotZ)) rightPivotZ = bbox.max.z;
+              }
+            }
+          }
+        });
+
+        if (leftPivotZ === null) leftPivotZ = 0;
+        if (rightPivotZ === null) rightPivotZ = 0;
+
+        const leftDist = leftHingeApprox.distanceTo(leftEstimatedEar);
+        const rightDist = rightHingeApprox.distanceTo(rightEstimatedEar);
+        const avgDist = (leftDist + rightDist) / 2;
+
+        // Tính toán độ Scale trục Z. 
+        // Lần này KHÔNG nhân thêm 1.35 chừa hao nữa, vì ta muốn đuôi kính dừng đúng vành tai.
+        const dynamicTempleDepthScale = clamp(
+          (avgDist / (baseTempleLength * s)) * 1.05, // Nhân 1.05 để gác lên tai một chút xíu
+          1.0,
+          3.5
+        );
+
+        // =========================================================================
+        // KHỐI LỆNH 2: RENDER, CẮT XÉN VÀ ÁP DỤNG BIẾN DẠNG LÊN MÔ HÌNH
+        // =========================================================================
+        glassesModelRef.current.traverse((child) => {
+          if (!child.isMesh) return;
+
+          if (child.userData.partType === 'LENS') {
+            applyArLensRenderState(child);
+            return;
+          }
+
+          const part = child.userData.partType || '';
+          const isLeft = part.includes('LEFT');
+          const isRight = part.includes('RIGHT');
+          const isTemple = isLeft || isRight || isTemplePart(part);
+
+          if (isTemple) {
+            // THỰC THI LỆNH CẮT: Tàng hình các khúc đuôi cong
+            const segIndex = child.userData.templeSegmentIndex;
+            if (segIndex !== undefined && segIndex > maxSegmentIndex) {
+              child.visible = false;
+              child.userData.skipProductionRender = true;
+              return; // Thoát ngay, không render đoạn móc tai này
             }
 
-            if (child.material) {
-              if (!child.userData.isMaterialCloned) {
-                if (Array.isArray(child.material)) {
-                  child.material = child.material.map(m => m.clone());
-                } else {
-                  child.material = child.material.clone();
-                }
-                child.userData.isMaterialCloned = true;
-              }
-              const materials = Array.isArray(child.material) ? child.material : [child.material];
-              materials.forEach((mat) => {
-                if (mat) {
-                  mat.transparent = false;
-                  mat.opacity = 1.0;
-                  mat.clippingPlanes = [];
-                }
-              });
-            }
+            const pivotZ = isLeft ? leftPivotZ : rightPivotZ;
+
+            // Kéo giãn và bẻ cong các khúc thẳng còn lại
+            applyTempleDepthFit(child, dynamicTempleDepthScale, pivotZ);
 
             if (showOccluderDebugRef.current || showTempleOccluderDebugRef.current) {
               child.visible = true;
             } else {
               const testMode = activeTestRef.current;
-              if (testMode === "A") {
-                child.visible = (child.name === 'Object_5');
-              } else if (testMode === "B") {
-                child.visible = (child.name === 'Object_7');
-              } else if (testMode === "C") {
-                child.visible = (child.name === 'Object_9');
-              } else {
-                child.visible = true;
-              }
+              if (testMode === "B") child.visible = (child.name === 'Object_7');
+              else child.visible = child.userData.glbDerivedTempleVisible !== false;
             }
+            return;
+          }
+
+          // ... (Giữ nguyên phần code xử lý FRONT_FRAME ở bên dưới của bạn)
+          if (child.material) {
+            if (!child.userData.isMaterialCloned) {
+              child.material = Array.isArray(child.material) ? child.material.map(m => m.clone()) : child.material.clone();
+              child.userData.isMaterialCloned = true;
+            }
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach((mat) => {
+              if (mat) {
+                mat.transparent = false;
+                mat.opacity = 1.0;
+                mat.clippingPlanes = [];
+              }
+            });
+          }
+
+          if (showOccluderDebugRef.current || showTempleOccluderDebugRef.current) {
+            child.visible = true;
+          } else {
+            const testMode = activeTestRef.current;
+            if (testMode === "A") child.visible = (child.name === 'Object_5');
+            else if (testMode === "C") child.visible = (child.name === 'Object_9');
+            else child.visible = true;
           }
         });
       } catch (e) {

@@ -12,7 +12,7 @@ export default function ImportManager() {
   const [currentUser, setCurrentUser] = useState(null);
   const [note, setNote] = useState('');
   const [importItems, setImportItems] = useState([
-    { productId: '', quantity: 1, importPrice: 0 }
+    { productId: '', quantity: 1, importPrice: 0, newProductName: '' }
   ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -27,7 +27,11 @@ export default function ImportManager() {
       const token = localStorage.getItem('glassesToken');
       
       // Lấy toàn bộ sản phẩm (kể cả ẩn để Admin nhập hàng)
-      const prodRes = await fetch('/api/products?all=true');
+      const prodRes = await fetch('/api/products?all=true', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       const prodData = await prodRes.json();
       if (prodData.success) {
         setProducts(prodData.products);
@@ -65,7 +69,7 @@ export default function ImportManager() {
 
   // 3. Quản lý các dòng sản phẩm trong form nhập hàng
   const handleAddItemRow = () => {
-    setImportItems([...importItems, { productId: '', quantity: 1, importPrice: 0 }]);
+    setImportItems([...importItems, { productId: '', quantity: 1, importPrice: 0, newProductName: '' }]);
   };
 
   const handleRemoveItemRow = (index) => {
@@ -78,15 +82,22 @@ export default function ImportManager() {
     const newItems = [...importItems];
     if (field === 'productId') {
       newItems[index].productId = value;
-      // Tự động lấy giá nhập sỉ hiện hành của sản phẩm để điền làm gợi ý ban đầu
-      const selectedProd = products.find(p => p._id === value);
-      if (selectedProd) {
-        newItems[index].importPrice = selectedProd.importPrice || 0;
+      if (value === 'new-product') {
+        newItems[index].importPrice = 0;
+        newItems[index].newProductName = '';
+      } else {
+        const selectedProd = products.find(p => p._id === value);
+        if (selectedProd) {
+          newItems[index].importPrice = selectedProd.importPrice || 0;
+        }
+        newItems[index].newProductName = '';
       }
     } else if (field === 'quantity') {
       newItems[index].quantity = Math.max(1, parseInt(value) || 1);
     } else if (field === 'importPrice') {
       newItems[index].importPrice = Math.max(0, parseFloat(value) || 0);
+    } else if (field === 'newProductName') {
+      newItems[index].newProductName = value;
     }
     setImportItems(newItems);
   };
@@ -100,6 +111,10 @@ export default function ImportManager() {
       const item = importItems[i];
       if (!item.productId) {
         alert(`Dòng thứ ${i + 1} chưa chọn sản phẩm cần nhập!`);
+        return;
+      }
+      if (item.productId === 'new-product' && (!item.newProductName || !item.newProductName.trim())) {
+        alert(`Dòng thứ ${i + 1}: Bạn đã chọn nhập kính mới hoàn toàn nhưng chưa điền tên kính!`);
         return;
       }
       if (item.quantity <= 0) {
@@ -133,7 +148,7 @@ export default function ImportManager() {
         
         // Reset form
         setNote('');
-        setImportItems([{ productId: '', quantity: 1, importPrice: 0 }]);
+        setImportItems([{ productId: '', quantity: 1, importPrice: 0, newProductName: '' }]);
 
         // Tải lại dữ liệu mới nhất
         fetchData();
@@ -261,21 +276,38 @@ export default function ImportManager() {
                         <div key={index} className="flex flex-col sm:flex-row gap-4 p-4 bg-gray-50 rounded-2xl items-end sm:items-center relative border border-transparent hover:border-gray-200 transition">
                           
                           {/* Chọn sản phẩm */}
-                          <div className="flex-1 w-full">
-                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Sản phẩm</label>
-                            <select
-                              required
-                              value={item.productId}
-                              onChange={(e) => handleItemChange(index, 'productId', e.target.value)}
-                              className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-xs font-bold outline-none text-gray-800"
-                            >
-                              <option value="">-- Chọn sản phẩm trong kho --</option>
-                              {products.map(p => (
-                                <option key={p._id} value={p._id}>
-                                  {p.name} {!p.isActive ? '(Đã ẩn ngoài shop)' : ''} (Hiện có: {p.stock})
-                                </option>
-                              ))}
-                            </select>
+                          <div className="flex-1 w-full space-y-2">
+                            <div>
+                              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1">Sản phẩm</label>
+                              <select
+                                required
+                                value={item.productId}
+                                onChange={(e) => handleItemChange(index, 'productId', e.target.value)}
+                                className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-xs font-bold outline-none text-gray-800"
+                              >
+                                <option value="">-- Chọn sản phẩm trong kho --</option>
+                                <option value="new-product" className="text-blue-600 font-bold">[+ Nhập kính mới hoàn toàn]</option>
+                                {products.map(p => (
+                                  <option key={p._id} value={p._id}>
+                                    {p.name} {!p.isActive ? '(Đã ẩn ngoài shop)' : ''} (Hiện có: {p.stock})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {item.productId === 'new-product' && (
+                              <div>
+                                <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block mb-1">Tên kính mới *</label>
+                                <input
+                                  type="text"
+                                  required
+                                  placeholder="Nhập tên kính mắt mới..."
+                                  value={item.newProductName || ''}
+                                  onChange={(e) => handleItemChange(index, 'newProductName', e.target.value)}
+                                  className="w-full px-3 py-2 bg-white border border-blue-200 focus:border-blue-500 rounded-xl text-xs font-medium outline-none text-gray-800"
+                                />
+                              </div>
+                            )}
                           </div>
 
                           {/* Số lượng */}

@@ -25,7 +25,7 @@ const restoreSaleQuotaForOrder = async (order) => {
   for (const item of order.items) {
     if (item.saleIdAtPurchase) {
       await Sale.findOneAndUpdate(
-        { _id: item.saleIdAtPurchase, usageLimitType: 'limited' },
+        { _id: item.saleIdAtPurchase },
         { $inc: { usedCount: -item.quantity } }
       );
     }
