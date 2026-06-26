@@ -18,8 +18,8 @@ export const SocketProvider = ({ children }) => {
       return;
     }
 
-    // Nhắm mục tiêu máy chủ backend thông qua proxy của Vite (hoặc trực tiếp trong prod)
-    const socketUrl = window.location.origin;
+    // Nhắm mục tiêu máy chủ backend trực tiếp thông qua biến môi trường hoặc proxy của Vite
+    const socketUrl = import.meta.env.VITE_BACKEND_URL || window.location.origin;
 
     const newSocket = io(socketUrl, {
       auth: { token },

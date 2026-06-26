@@ -123,8 +123,8 @@ app.post('/api/create-payment-link', async (req, res, next) => {
       orderCode: finalOrderCode,
       amount,
       description: `KinhMat ${finalOrderCode}`.substring(0, 25),
-      cancelUrl: 'http://localhost:5173/checkout',
-      returnUrl: 'http://localhost:5173/success',
+      cancelUrl: process.env.PAYOS_CANCEL_URL || 'http://localhost:5173/checkout',
+      returnUrl: process.env.PAYOS_RETURN_URL || 'http://localhost:5173/success',
     };
 
     const paymentLinkRes = await payos.paymentRequests.create(requestData);
