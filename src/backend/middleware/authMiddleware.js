@@ -72,3 +72,15 @@ exports.verifyStaffOrAdmin = (req, res, next) => {
     return res.status(403).json({ success: false, message: 'Từ chối truy cập. Bạn không có quyền hạn này!' });
   }
 };
+
+// Middleware xác thực quyền hạn Admin duy nhất để bảo mật dòng tiền đối soát
+exports.verifyAdminOnly = (req, res, next) => {
+  if (req.user && req.user.role === 1) {
+    next();
+  } else {
+    return res.status(403).json({ 
+      success: false, 
+      message: 'Bảo mật dòng tiền: Bạn không có quyền thực hiện hành động này. Chỉ Admin mới được phép duyệt giải ngân!' 
+    });
+  }
+};

@@ -56,6 +56,19 @@ const orderSchema = new mongoose.Schema({
     enum: ['none', 'pending', 'wallet_refunded', 'rejected'], 
     default: 'none' 
   },
+  
+  // --- THÔNG TIN VẬN CHUYỂN & DÒNG TIỀN ĐỐI SOÁT (SHIPPER & CASH RECONCILIATION) ---
+  shipperId: { type: String, default: null },
+  codStatus: { 
+    type: String, 
+    enum: ['no_cod', 'pending', 'pending_submission', 'pending_reconciliation', 'reconciled', 'pending_return', 'returned'], 
+    default: 'no_cod' 
+  },
+  returnPhysicalStatus: { 
+    type: String, 
+    enum: ['none', 'pending', 'returned'], 
+    default: 'none' 
+  },
   cancelReason: { type: String },
   cancelRequestedAt: { type: Date },
   cancelRejectReason: { type: String },

@@ -43,6 +43,9 @@ import ChatManagement from './pages/staff/ChatManagement';
 // Import Pages (Review Manager)
 import ReviewManager from './pages/admin/ReviewManager';
 
+// Import Pages (Shipper & Shipper Management)
+import ShipperDashboard from './pages/shipper/ShipperDashboard';
+import ShipperManagement from './pages/admin/ShipperManagement';
 
 import { SocketProvider } from './context/SocketContext';
 
@@ -129,6 +132,7 @@ export default function App() {
               <Route path="banners" element={<BannerManager />} />
               <Route path="cancel-requests" element={<CancelRequests />} />
               <Route path="withdraw-requests" element={<WithdrawRequests />} />
+              <Route path="shippers" element={<ShipperManagement />} />
             </Route>
 
             {/* ================= KHU VỰC 3: STAFF (Giới hạn quyền - role 1 & 2) ================= */}
@@ -143,7 +147,15 @@ export default function App() {
               <Route path="cancel-requests" element={<CancelRequests />} />
               <Route path="withdraw-requests" element={<WithdrawRequests />} />
               <Route path="chat" element={<ChatManagement />} />
+              <Route path="shippers" element={<ShipperManagement />} />
             </Route>
+
+            {/* ================= KHU VỰC 4: SHIPPER (Quyền hạn Shipper - role 3) ================= */}
+            <Route path="/shipper" element={
+              <ProtectedRoute allowedRoles={[3]}>
+                <ShipperDashboard />
+              </ProtectedRoute>
+            } />
 
           </Routes>
         </BrowserRouter>

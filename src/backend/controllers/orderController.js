@@ -982,3 +982,211 @@ exports.receiveOrder = async (req, res) => {
     res.status(500).json({ success: false, message: 'Lỗi máy chủ khi nhận xử lý đơn!' });
   }
 };
+
+// ==================== HỆ THỐNG GIAO HÀNG & ĐỐI SOÁT CHO SHIPPER (MERN STACK) ====================
+
+// [GET] Lấy danh sách đơn hàng được phân phối cho shipper hiện tại
+exports.getShipperAssignedOrders = async (req, res) => {
+  try {
+    const shipperId = req.user.id;
+
+    // Tìm các đơn hàng:
+    // 1. Đơn đang đi giao: status: 'shipping'
+    // 2. Đơn đối soát: status: 'shipped' + codStatus: 'pending_submission' HOẶC status: 'cancelled' + codStatus: 'pending_return'
+    // 3. Đơn thu hồi: returnPhysicalStatus: 'pending'
+    const orders = await Order.find({
+      shipperId,
+      $or: [
+        { status: 'shipping' },
+        { status: 'shipped', codStatus: 'pending_submission' },
+        { status: 'cancelled', codStatus: 'pending_return' },
+        { returnPhysicalStatus: 'pending' }
+      ]
+    }).populate({
+      path: 'items.productId',
+      select: 'name code price images' // select fields cần thiết
+    });
+
+    // Bảo mật nghiêm ngặt: Tab 3 (Thu hồi đổi trả) ẩn hoàn toàn giá trị sản phẩm
+    const sanitizedOrders = orders.map(order => {
+      const orderObj = order.toObject();
+      
+      // Nếu đơn hàng đang ở trạng thái chờ thu hồi hàng vật lý
+      if (orderObj.returnPhysicalStatus === 'pending') {
+        // Xóa hoàn toàn các trường giá trị để bảo mật hàng hóa, tránh rủi ro
+        delete orderObj.total;
+        if (orderObj.items) {
+          orderObj.items = orderObj.items.map(item => {
+            delete item.priceAtPurchase;
+            delete item.importPriceAtPurchase;
+            delete item.originalPriceAtPurchase;
+            delete item.discountAtPurchase;
+            if (item.productId) {
+              delete item.productId.price;
+            }
+            return item;
+          });
+        }
+      }
+      return orderObj;
+    });
+
+    res.json({ success: true, orders: sanitizedOrders });
+  } catch (error) {
+    console.error('Lỗi lấy đơn hàng của shipper:', error);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi lấy danh sách đơn giao!' });
+  }
+};
+
+// [PUT] Cập nhật kết quả giao hàng của Shipper (Thành công / Thất bại)
+exports.updateShipperDeliveryStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { deliveryStatus } = req.body; // 'success' hoặc 'failed'
+    const shipperId = req.user.id;
+
+    const order = await Order.findOne({ _id: id, shipperId });
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng hoặc đơn hàng không được phân công cho bạn!' });
+    }
+
+    if (order.status !== 'shipping') {
+      return res.status(400).json({ success: false, message: 'Đơn hàng không ở trạng thái đang đi giao!' });
+    }
+
+    if (deliveryStatus === 'success') {
+      order.status = 'shipped';
+      // Nếu COD thì chuyển trạng thái dòng tiền sang 'pending_submission' (Shipper đang cầm tiền mặt)
+      // Nếu Online banking/PayOS thì 'no_cod' (Không cần thu tiền mặt)
+      order.codStatus = order.paymentMethod === 'cod' ? 'pending_submission' : 'no_cod';
+    } else if (deliveryStatus === 'failed') {
+      order.status = 'cancelled';
+      // Đơn COD giao thất bại thì codStatus chuyển sang 'pending_return' (Cần trả lại hàng vật lý về kho)
+      order.codStatus = order.paymentMethod === 'cod' ? 'pending_return' : 'no_cod';
+      
+      // Hoàn trả tồn kho tự động nếu đơn bị hủy
+      if (!order.stockRestored) {
+        for (const item of order.items) {
+          const product = await Product.findById(item.productId);
+          if (product) {
+            product.stock = (product.stock || 0) + item.quantity;
+            product.soldQuantity = Math.max(0, (product.soldQuantity || 0) - item.quantity);
+            await product.save();
+            
+            getIO().emit('product:stockUpdated', {
+              productId: product._id.toString(),
+              stock: product.stock,
+              reason: 'delivery_failed_cancelled'
+            });
+          }
+        }
+        order.stockRestored = true;
+      }
+      await restoreSaleQuotaForOrder(order);
+    } else {
+      return res.status(400).json({ success: false, message: 'Kết quả giao hàng không hợp lệ!' });
+    }
+
+    await order.save();
+
+    // Đồng bộ realtime danh sách đơn hàng cho Staff và Admin
+    emitToStaff('order:statusChanged', { id: order._id, orderCode: order.orderCode, status: order.status });
+    emitToAdmin('order:statusChanged', { id: order._id, orderCode: order.orderCode, status: order.status });
+
+    res.json({ success: true, message: 'Cập nhật trạng thái giao hàng thành công!', order });
+  } catch (error) {
+    console.error('Lỗi cập nhật giao hàng của shipper:', error);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi cập nhật giao hàng!' });
+  }
+};
+
+// [POST] Shipper gửi yêu cầu đối soát nộp tiền COD về công ty
+exports.requestReconciliation = async (req, res) => {
+  try {
+    const shipperId = req.user.id;
+
+    // Tìm các đơn hàng COD của shipper này đã giao thành công nhưng chưa nộp tiền mặt
+    const pendingOrders = await Order.find({
+      shipperId,
+      status: 'shipped',
+      paymentMethod: 'cod',
+      codStatus: 'pending_submission'
+    });
+
+    if (pendingOrders.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Không tìm thấy tiền mặt COD nào đang giữ cần nộp đối soát!'
+      });
+    }
+
+    // Tính tổng tiền mặt thu hộ đang giữ
+    const totalAmount = pendingOrders.reduce((sum, order) => sum + order.total, 0);
+
+    // Chuyển toàn bộ sang trạng thái PENDING_RECONCILIATION (Chờ Admin duyệt nộp tiền)
+    const orderIds = pendingOrders.map(o => o._id);
+    await Order.updateMany(
+      { _id: { $in: orderIds } },
+      { $set: { codStatus: 'pending_reconciliation' } }
+    );
+
+    // Tạo thông báo cho hệ thống quản trị
+    await createNotificationAndEmit({
+      roleTarget: 'admin',
+      type: 'reconciliation',
+      title: 'Yêu cầu nộp tiền đối soát mới',
+      message: `Shipper ${req.user.name || req.user.username} đã gửi yêu cầu đối soát số tiền ${totalAmount.toLocaleString('vi-VN')}đ cho ${pendingOrders.length} đơn hàng.`,
+      link: '/admin/reconciliation'
+    });
+
+    emitToAdmin('reconciliation:requested', { shipperId, totalAmount, count: pendingOrders.length });
+
+    res.json({
+      success: true,
+      message: 'Gửi yêu cầu đối soát tiền mặt thành công! Số dư hiện tại trên màn hình shipper đã được reset về 0.',
+      reconciledCount: pendingOrders.length,
+      totalAmount
+    });
+  } catch (error) {
+    console.error('Lỗi gửi yêu cầu đối soát:', error);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi gửi yêu cầu đối soát tiền!' });
+  }
+};
+
+// [PUT] Shipper xác nhận đã thu hồi hàng vật lý đổi trả từ khách hàng (Tab 3)
+exports.confirmPhysicalReturn = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const shipperId = req.user.id;
+
+    const order = await Order.findOne({ _id: id, shipperId });
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng đổi trả được phân công!' });
+    }
+
+    if (order.returnPhysicalStatus !== 'pending') {
+      return res.status(400).json({ success: false, message: 'Đơn hàng không ở trạng thái chờ thu hồi hàng vật lý!' });
+    }
+
+    // Cập nhật trạng thái thu hồi hàng vật lý thành công
+    order.returnPhysicalStatus = 'returned';
+    await order.save();
+
+    // Gửi thông báo cho Nhân viên (Staff) để xử lý hoàn tiền ví hoặc đổi sản phẩm mới
+    await createNotificationAndEmit({
+      roleTarget: 'staff',
+      type: 'return',
+      title: 'Đã thu hồi hàng vật lý đổi trả',
+      message: `Shipper đã xác nhận thu hồi đủ hàng vật lý của đơn hàng ${order.orderCode}. Vui lòng làm thủ tục tiếp theo.`,
+      link: '/staff/orders'
+    });
+
+    emitToStaff('return:physicalReturned', { id: order._id, orderCode: order.orderCode });
+
+    res.json({ success: true, message: 'Xác nhận đã thu hồi hàng vật lý thành công! Đã gửi thông báo cho Staff xử lý ví tiền.' });
+  } catch (error) {
+    console.error('Lỗi xác nhận thu hồi hàng vật lý:', error);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi xác nhận thu hồi hàng!' });
+  }
+};
+

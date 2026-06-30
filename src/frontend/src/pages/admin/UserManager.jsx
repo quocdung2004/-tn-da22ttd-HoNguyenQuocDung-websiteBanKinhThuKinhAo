@@ -18,7 +18,8 @@ export default function UserManager() {
     password: '',
     name: '',
     phone: '',
-    email: ''
+    email: '',
+    role: 2 // Mặc định là Nhân viên (role 2)
   });
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -64,10 +65,10 @@ export default function UserManager() {
   };
 
   // 1. Lọc danh sách theo tab hoạt động
-  // role === 2 là Staff, role === 0 là Customer. Riêng role === 1 là Admin cũng hiển thị ở Staff để đầy đủ quản trị.
+  // role === 2 là Staff, role === 3 là Shipper, role === 0 là Customer. Riêng role === 1 là Admin cũng hiển thị ở Staff để đầy đủ quản trị.
   const filteredUsers = users.filter(u => {
     if (activeTab === 'staff') {
-      return u.role === 1 || u.role === 2;
+      return u.role === 1 || u.role === 2 || u.role === 3;
     } else {
       return u.role === 0;
     }
@@ -95,7 +96,8 @@ export default function UserManager() {
       password: '',
       name: '',
       phone: '',
-      email: ''
+      email: '',
+      role: 2 // Mặc định Staff
     });
     setFormError('');
     setIsStaffModalOpen(true);
@@ -109,7 +111,8 @@ export default function UserManager() {
       password: '', // Chừa trống để Admin tùy chọn reset mật khẩu
       name: staff.name || '',
       phone: staff.phone || '',
-      email: staff.email || ''
+      email: staff.email || '',
+      role: staff.role !== undefined ? staff.role : 2
     });
     setFormError('');
     setIsStaffModalOpen(true);
@@ -227,7 +230,7 @@ export default function UserManager() {
               : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
           }`}
         >
-          <UserCheck className="w-4 h-4" /> Nhân Viên ({users.filter(u => u.role === 1 || u.role === 2).length})
+          <UserCheck className="w-4 h-4" /> Nhân Viên ({users.filter(u => u.role === 1 || u.role === 2 || u.role === 3).length})
         </button>
         <button
           onClick={() => handleTabChange('customer')}
@@ -340,6 +343,8 @@ export default function UserManager() {
                                 ? 'bg-amber-100 text-amber-700' 
                                 : user.role === 2 
                                 ? 'bg-blue-100 text-blue-700' 
+                                : user.role === 3
+                                ? 'bg-purple-100 text-purple-700'
                                 : 'bg-gray-100 text-gray-700'
                             }`}>
                               {user.name ? user.name.substring(0, 2).toUpperCase() : 'US'}
@@ -385,9 +390,11 @@ export default function UserManager() {
                               ? 'bg-amber-100 text-amber-800'
                               : user.role === 2
                               ? 'bg-blue-100 text-blue-800'
+                              : user.role === 3
+                              ? 'bg-purple-100 text-purple-800'
                               : 'bg-gray-100 text-gray-800'
                           }`}>
-                            {user.role === 1 ? 'Admin' : user.role === 2 ? 'Staff' : 'Khách'}
+                            {user.role === 1 ? 'Admin' : user.role === 2 ? 'Staff' : user.role === 3 ? 'Shipper' : 'Khách'}
                           </span>
                         </td>
                         
@@ -408,8 +415,8 @@ export default function UserManager() {
                         {/* Thao tác */}
                         <td className="p-4 sm:p-5 pr-6 sm:pr-8 text-right">
                           <div className="flex items-center justify-end gap-2">
-                            {/* Chỉ cho sửa thông tin nếu là Staff (role 2) */}
-                            {user.role === 2 && (
+                             {/* Chỉ cho sửa thông tin nếu là Staff (role 2) hoặc Shipper (role 3) */}
+                             {(user.role === 2 || user.role === 3) && (
                               <button
                                 onClick={() => handleOpenEditStaff(user)}
                                 className="p-2 bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-900 rounded-xl transition"
@@ -553,6 +560,23 @@ export default function UserManager() {
                     className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-2xl font-bold text-gray-900 focus:outline-none focus:border-blue-500 focus:bg-white transition"
                     placeholder="VD: staff@dungglasses.com"
                   />
+                </div>
+              </div>
+
+              {/* Vai trò */}
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5 pl-1">Vai trò / Quyền hạn</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">⚓</span>
+                  <select
+                    value={staffForm.role}
+                    onChange={(e) => setStaffForm({ ...staffForm, role: Number(e.target.value) })}
+                    className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-2xl font-bold text-gray-900 focus:outline-none focus:border-blue-500 focus:bg-white transition cursor-pointer"
+                  >
+                    <option value={2}>Nhân viên (Staff)</option>
+                    <option value={3}>Nhân viên giao hàng (Shipper)</option>
+                    <option value={1}>Quản trị viên (Admin)</option>
+                  </select>
                 </div>
               </div>
 

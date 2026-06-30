@@ -61,10 +61,10 @@ exports.getAllUsers = async (req, res) => {
   }
 };
 
-// [POST] Admin tạo tài khoản Nhân viên (Staff) mới
+// [POST] Admin tạo tài khoản Nhân viên (Staff) hoặc Shipper mới
 exports.createStaff = async (req, res) => {
   try {
-    const { username, password, name, phone, email } = req.body;
+    const { username, password, name, phone, email, role } = req.body;
 
     if (!username || !password) {
       return res.status(400).json({ success: false, message: 'Tên đăng nhập và mật khẩu là bắt buộc!' });
@@ -88,14 +88,14 @@ exports.createStaff = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // 4. Tạo tài khoản Staff (role 2)
+    // 4. Tạo tài khoản với vai trò tùy chọn (mặc định là Staff - role 2)
     const newStaff = new User({
       username,
       password: hashedPassword,
       name,
       phone,
       email,
-      role: 2 // Gán cứng vai trò Staff
+      role: role !== undefined ? Number(role) : 2
     });
 
     await newStaff.save();
@@ -104,23 +104,23 @@ exports.createStaff = async (req, res) => {
     const staffObject = newStaff.toObject();
     delete staffObject.password;
 
-    res.status(201).json({ success: true, message: 'Tạo tài khoản Nhân viên thành công!', user: staffObject });
+    res.status(201).json({ success: true, message: 'Tạo tài khoản nhân sự thành công!', user: staffObject });
   } catch (error) {
-    console.error('Lỗi tạo tài khoản Staff:', error);
-    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi tạo tài khoản nhân viên!' });
+    console.error('Lỗi tạo tài khoản nhân sự:', error);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi tạo tài khoản nhân sự!' });
   }
 };
 
-// [PUT] Admin chỉnh sửa thông tin Nhân viên (Staff)
+// [PUT] Admin chỉnh sửa thông tin Nhân viên (Staff/Shipper)
 exports.updateStaff = async (req, res) => {
   try {
-    const { name, phone, email, password } = req.body;
+    const { name, phone, email, password, role } = req.body;
     const staffId = req.params.id;
 
     // 1. Tìm tài khoản
     const staff = await User.findById(staffId);
     if (!staff) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản nhân viên!' });
+      return res.status(404).json({ success: false, message: 'Không tìm thấy tài khoản nhân sự!' });
     }
 
     // Chặn thay đổi quyền nếu sửa chính mình
@@ -136,10 +136,11 @@ exports.updateStaff = async (req, res) => {
       }
     }
 
-    // 3. Cập nhật thông tin cơ bản
+    // 3. Cập nhật thông tin cơ bản và vai trò
     if (name !== undefined) staff.name = name;
     if (phone !== undefined) staff.phone = phone;
     if (email !== undefined) staff.email = email;
+    if (role !== undefined) staff.role = Number(role);
 
     // 4. Reset mật khẩu mới (Bắt buộc phải hash trước khi lưu)
     if (password && password.trim() !== '') {
