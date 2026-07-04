@@ -84,3 +84,12 @@ exports.verifyAdminOnly = (req, res, next) => {
     });
   }
 };
+
+// Middleware xác thực quyền hạn Shipper duy nhất (role === 3)
+exports.verifyShipperOnly = (req, res, next) => {
+  if (req.user && req.user.role === 3) {
+    next();
+  } else {
+    return res.status(403).json({ success: false, message: 'Quyền truy cập bị từ chối. Chỉ dành cho Shipper!' });
+  }
+};

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { ShoppingBag, LogOut, XOctagon, Wallet, MessageSquare, Star, Home } from 'lucide-react';
+import { ShoppingBag, LogOut, XOctagon, Wallet, MessageSquare, Star, Home, Truck } from 'lucide-react';
 import NotificationBell from '../../components/NotificationBell';
 import { useAuth } from '../../context/AuthContext';
 import Footer from '../../components/Footer';
@@ -20,9 +20,9 @@ export default function StaffLayout() {
 
   const menuItems = [
     { path: '/staff', icon: <ShoppingBag className="w-5 h-5" />, label: 'Quản lý Đơn hàng' },
+    { path: '/staff/shippers', icon: <Truck className="w-5 h-5" />, label: 'Phân công Giao nhận' },
     { path: '/staff/reviews', icon: <Star className="w-5 h-5" />, label: 'Quản lý Đánh giá' },
     { path: '/staff/cancel-requests', icon: <XOctagon className="w-5 h-5" />, label: 'Yêu cầu hủy đơn' },
-    { path: '/staff/withdraw-requests', icon: <Wallet className="w-5 h-5" />, label: 'Yêu cầu rút tiền' },
     { path: '/staff/chat', icon: <MessageSquare className="w-5 h-5" />, label: 'Quản lý Chat' },
   ];
 

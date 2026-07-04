@@ -15,19 +15,29 @@ import {
   RefreshCw,
   Clock,
   ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  Camera
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import Footer from '../../components/Footer';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 export default function ShipperDashboard() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('pending'); // 'pending' | 'reconciliation' | 'returns'
+  const [activeTab, setActiveTab] = useState('pending'); // 'pending' | 'reconciliation' | 'returns' | 'scan'
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [processingId, setProcessingId] = useState(null);
   const [reconciling, setReconciling] = useState(false);
+
+  // States cho quét mã QR
+  const [scanResult, setScanResult] = useState('');
+  const [qrOrderDetail, setQrOrderDetail] = useState(null);
+  const [qrError, setQrError] = useState('');
+  const [qrMessage, setQrMessage] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
+  const [scanning, setScanning] = useState(true);
 
   // Lấy token từ localStorage
   const token = localStorage.getItem('glassesToken');
@@ -118,6 +128,135 @@ export default function ShipperDashboard() {
   useEffect(() => {
     fetchShipperOrders();
   }, []);
+
+  // 1.5. Khởi tạo Scanner cho Tab Quét QR
+  useEffect(() => {
+    let scanner = null;
+    if (activeTab === 'scan' && scanning && !scanResult) {
+      const timer = setTimeout(() => {
+        const element = document.getElementById('shipper-reader');
+        if (element) {
+          scanner = new Html5QrcodeScanner('shipper-reader', {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+          }, false);
+
+          scanner.render(
+            async (decodedText) => {
+              setScanResult(decodedText);
+              setScanning(false);
+              if (scanner) {
+                scanner.clear().catch(err => console.error('Error clearing scanner:', err));
+              }
+              await handleFetchQrOrder(decodedText);
+            },
+            (error) => {
+              // Bỏ qua lỗi quét
+            }
+          );
+        }
+      }, 300);
+
+      return () => {
+        clearTimeout(timer);
+        if (scanner) {
+          scanner.clear().catch(err => console.error('Error clearing scanner in cleanup:', err));
+        }
+      };
+    }
+  }, [activeTab, scanning, scanResult]);
+
+  // Các hàm API phục vụ quét QR
+  const handleFetchQrOrder = async (qrToken) => {
+    setActionLoading(true);
+    setQrError('');
+    setQrMessage('');
+    try {
+      const res = await fetch(`/api/orders/shipper/scan-order/${encodeURIComponent(qrToken)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setQrOrderDetail(data.order);
+      } else {
+        setQrError(data.message || 'Mã QR không hợp lệ hoặc bạn không có quyền!');
+      }
+    } catch (err) {
+      setQrError('Lỗi kết nối máy chủ khi lấy thông tin đơn.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAcceptQrOrder = async () => {
+    setActionLoading(true);
+    setQrError('');
+    setQrMessage('');
+    try {
+      const res = await fetch('/api/orders/shipper/accept-order', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ orderId: qrOrderDetail._id })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setQrMessage('Nhận nhiệm vụ giao hàng thành công!');
+        setQrOrderDetail(data.order);
+        fetchShipperOrders();
+      } else {
+        setQrError(data.message || 'Không thể nhận đơn hàng.');
+      }
+    } catch (err) {
+      setQrError('Lỗi kết nối khi nhận nhiệm vụ.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdateQrOrderStatus = async (statusType) => {
+    if (!window.confirm(`Xác nhận chốt đơn giao: ${statusType === 'success' ? 'Thành công' : 'Thất bại'}?`)) return;
+
+    setActionLoading(true);
+    setQrError('');
+    setQrMessage('');
+    try {
+      const res = await fetch('/api/orders/shipper/update-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          orderId: qrOrderDetail._id,
+          deliveryStatus: statusType
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setQrMessage(statusType === 'success' ? 'Giao hàng thành công! Đã ghi nhận dòng tiền.' : 'Đã chốt giao thất bại. Chờ hoàn kho.');
+        setQrOrderDetail(data.order);
+        fetchShipperOrders();
+      } else {
+        setQrError(data.message || 'Cập nhật giao hàng thất bại.');
+      }
+    } catch (err) {
+      setQrError('Lỗi kết nối khi cập nhật.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const resetQrScanner = () => {
+    setScanResult('');
+    setQrOrderDetail(null);
+    setQrError('');
+    setQrMessage('');
+    setScanning(true);
+  };
 
   // 2. Thao tác giao hàng (Thành công / Thất bại)
   const handleDeliveryStatus = async (orderId, isSuccess) => {
@@ -253,8 +392,8 @@ export default function ShipperDashboard() {
 
   // --- TÍNH TOÁN DỮ LIỆU HIỂN THỊ ---
 
-  // Lọc đơn đi giao (Tab 1) -> Trạng thái: 'shipping'
-  const pendingDeliveries = orders.filter(o => o.status === 'shipping');
+  // Lọc đơn đi giao (Tab 1) -> Trạng thái: 'shipping' hoặc 'processing'
+  const pendingDeliveries = orders.filter(o => o.status === 'shipping' || o.status === 'processing');
 
   // Lọc đơn đối soát (Tab 2) -> Giao thành công (chưa nộp COD) hoặc Giao thất bại (cần trả kho)
   const reconciliationDeliveries = orders.filter(
@@ -266,9 +405,9 @@ export default function ShipperDashboard() {
   const returnDeliveries = orders.filter(o => o.returnPhysicalStatus === 'pending');
 
   // Tính thống kê:
-  // 1. Tổng tiền mặt COD cần thu (Đơn đi giao và phương thức COD)
+  // 1. Tổng tiền mặt COD cần thu (Đơn đang đi giao và phương thức COD)
   const totalCodToCollect = pendingDeliveries
-    .filter(o => o.paymentMethod === 'cod')
+    .filter(o => o.status === 'shipping' && o.paymentMethod === 'cod')
     .reduce((sum, o) => sum + (o.total || 0), 0);
 
   // 2. Tổng tiền mặt đang giữ (Đã giao thành công nhưng chưa nộp tiền)
@@ -308,37 +447,55 @@ export default function ShipperDashboard() {
       <div className="max-w-md mx-auto px-4 mt-6">
 
         {/* TABS SELECTOR (Mobile-Optimized) */}
-        <div className="bg-[#1e293b] p-1.5 rounded-2xl border border-slate-800/80 flex justify-between gap-1 shadow-inner mb-6">
+        <div className="bg-[#1e293b] p-1.5 rounded-2xl border border-slate-800/80 flex flex-wrap justify-between gap-1 shadow-inner mb-6">
           <button
             onClick={() => setActiveTab('pending')}
-            className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all duration-200 flex flex-col items-center gap-1 ${activeTab === 'pending'
+            className={`flex-1 min-w-[70px] py-2 text-[10px] font-bold rounded-xl transition-all duration-200 flex flex-col items-center gap-1 ${activeTab === 'pending'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
                 : 'text-slate-400 hover:text-slate-200'
               }`}
           >
-            <Truck className="w-4 h-4" />
-            <span>Đơn Đi Giao ({pendingDeliveries.length})</span>
+            <Truck className="w-3.5 h-3.5" />
+            <span>Đi Giao ({pendingDeliveries.length})</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('scan');
+              setScanning(true);
+              setScanResult('');
+              setQrOrderDetail(null);
+              setQrError('');
+              setQrMessage('');
+            }}
+            className={`flex-1 min-w-[70px] py-2 text-[10px] font-bold rounded-xl transition-all duration-200 flex flex-col items-center gap-1 ${activeTab === 'scan'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                : 'text-slate-400 hover:text-slate-200'
+              }`}
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>Quét QR</span>
           </button>
 
           <button
             onClick={() => setActiveTab('reconciliation')}
-            className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all duration-200 flex flex-col items-center gap-1 ${activeTab === 'reconciliation'
+            className={`flex-1 min-w-[70px] py-2 text-[10px] font-bold rounded-xl transition-all duration-200 flex flex-col items-center gap-1 ${activeTab === 'reconciliation'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
                 : 'text-slate-400 hover:text-slate-200'
               }`}
           >
-            <DollarSign className="w-4 h-4" />
+            <DollarSign className="w-3.5 h-3.5" />
             <span>Đối Soát ({reconciliationDeliveries.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('returns')}
-            className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all duration-200 flex flex-col items-center gap-1 ${activeTab === 'returns'
+            className={`flex-1 min-w-[70px] py-2 text-[10px] font-bold rounded-xl transition-all duration-200 flex flex-col items-center gap-1 ${activeTab === 'returns'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
                 : 'text-slate-400 hover:text-slate-200'
               }`}
           >
-            <RotateCcw className="w-4 h-4" />
+            <RotateCcw className="w-3.5 h-3.5" />
             <span>Thu Hồi ({returnDeliveries.length})</span>
           </button>
         </div>
@@ -402,6 +559,11 @@ export default function ShipperDashboard() {
                       <div>
                         <span className="text-[10px] text-slate-400 block font-bold">MÃ ĐƠN HÀNG</span>
                         <span className="text-sm font-black text-indigo-400">{order.orderCode}</span>
+                        {order.status === 'processing' && (
+                          <span className="text-[9px] bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded font-black uppercase tracking-wider block mt-1 w-fit">
+                            Chờ Quét Nhận Đơn
+                          </span>
+                        )}
                       </div>
 
                       {isOnlinePay ? (
@@ -453,26 +615,180 @@ export default function ShipperDashboard() {
                     </div>
 
                     {/* Nút thao tác dưới Card */}
-                    <div className="p-3 bg-slate-800/20 border-t border-slate-800/80 grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => handleDeliveryStatus(order._id, false)}
-                        disabled={processingId === order._id}
-                        className="py-2.5 bg-red-650 hover:bg-red-600 active:scale-98 transition text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 border border-red-700/30 disabled:opacity-50"
-                      >
-                        <XCircle className="w-3.5 h-3.5" /> Giao thất bại
-                      </button>
+                    {order.status === 'processing' ? (
+                      <div className="p-3 bg-slate-800/20 border-t border-slate-800/80">
+                        <button
+                          onClick={() => {
+                            setActiveTab('scan');
+                            setScanning(true);
+                            setScanResult('');
+                            setQrOrderDetail(null);
+                            setQrError('');
+                            setQrMessage('');
+                          }}
+                          className="w-full py-2.5 bg-yellow-600 hover:bg-yellow-500 active:scale-98 transition text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-yellow-500/10"
+                        >
+                          <Camera className="w-3.5 h-3.5" /> Quét QR nhận đơn giao
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-slate-800/20 border-t border-slate-800/80 grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => handleDeliveryStatus(order._id, false)}
+                          disabled={processingId === order._id}
+                          className="py-2.5 bg-red-650 hover:bg-red-600 active:scale-98 transition text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 border border-red-700/30 disabled:opacity-50"
+                        >
+                          <XCircle className="w-3.5 h-3.5" /> Giao thất bại
+                        </button>
 
-                      <button
-                        onClick={() => handleDeliveryStatus(order._id, true)}
-                        disabled={processingId === order._id}
-                        className="py-2.5 bg-emerald-600 hover:bg-emerald-505 active:scale-98 transition text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/10 disabled:opacity-50"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Giao thành công
-                      </button>
-                    </div>
+                        <button
+                          onClick={() => handleDeliveryStatus(order._id, true)}
+                          disabled={processingId === order._id}
+                          className="py-2.5 bg-emerald-600 hover:bg-emerald-505 active:scale-98 transition text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/10 disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Giao thành công
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })
+            )}
+          </div>
+        )}
+
+        {/* TAB QUÉT QR */}
+        {!loading && activeTab === 'scan' && (
+          <div className="space-y-6">
+            {/* Khung quét QR */}
+            {scanning && (
+              <div className="bg-[#1e293b] p-6 rounded-3xl border border-slate-800 shadow-lg flex flex-col items-center">
+                <h2 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2">
+                  <Camera className="w-4 h-4 text-indigo-400 animate-pulse" /> Đưa camera vào mã QR đơn hàng
+                </h2>
+                <div id="shipper-reader" className="w-full overflow-hidden rounded-2xl border-2 border-dashed border-slate-700 bg-slate-900/50"></div>
+              </div>
+            )}
+
+            {/* Trạng thái xử lý */}
+            {actionLoading && (
+              <div className="bg-[#1e293b] p-12 rounded-3xl border border-slate-800 shadow-lg flex flex-col items-center justify-center">
+                <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+                <p className="text-sm font-bold text-slate-400">Đang xử lý đơn hàng...</p>
+              </div>
+            )}
+
+            {qrError && (
+              <div className="bg-red-950/30 border border-red-900/50 text-red-200 p-5 rounded-3xl flex flex-col items-center text-center">
+                <p className="font-bold mb-3">{qrError}</p>
+                <button onClick={resetQrScanner} className="px-5 py-2.5 bg-red-650 hover:bg-red-600 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4" /> Quét lại đơn khác
+                </button>
+              </div>
+            )}
+
+            {qrMessage && (
+              <div className="bg-emerald-950/30 border border-emerald-900/50 text-emerald-300 p-5 rounded-3xl text-center font-bold text-sm">
+                <p className="mb-3">{qrMessage}</p>
+                <button onClick={resetQrScanner} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-505 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-2 mx-auto">
+                  Quét tiếp đơn khác
+                </button>
+              </div>
+            )}
+
+            {/* Thông tin chi tiết đơn hàng quét được */}
+            {qrOrderDetail && !actionLoading && (
+              <div className="bg-[#1e293b] p-6 rounded-3xl border border-slate-800 shadow-lg space-y-6">
+                <div className="flex justify-between items-start border-b border-slate-800 pb-4">
+                  <div>
+                    <p className="text-[10px] text-slate-400 font-bold">MÃ VẬN ĐƠN</p>
+                    <p className="text-base font-black text-indigo-400">{qrOrderDetail.orderCode}</p>
+                  </div>
+                  <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                    qrOrderDetail.status === 'processing' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' :
+                    qrOrderDetail.status === 'shipping' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                    qrOrderDetail.status === 'shipped' || qrOrderDetail.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                    'bg-red-500/10 text-red-400 border border-red-500/20'
+                  }`}>
+                    {qrOrderDetail.status === 'processing' ? 'Chờ shipper nhận' :
+                     qrOrderDetail.status === 'shipping' ? 'Đang giao hàng' :
+                     qrOrderDetail.status === 'shipped' ? 'Giao thành công (Chờ nộp COD)' :
+                     qrOrderDetail.status === 'completed' ? 'Hoàn tất đơn' : 'Đã hủy'}
+                  </span>
+                </div>
+
+                {/* Khách hàng */}
+                <div className="space-y-2.5 text-xs text-slate-300">
+                  <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Giao nhận</h3>
+                  <div className="flex items-start gap-2.5">
+                    <User className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-slate-200">{qrOrderDetail.customerInfo.name}</p>
+                      <p className="text-slate-400">{qrOrderDetail.customerInfo.phone}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                    <p className="text-slate-300 font-medium">{qrOrderDetail.customerInfo.address}</p>
+                  </div>
+                </div>
+
+                {/* Thanh toán */}
+                <div className="border-t border-slate-800 pt-4 space-y-2.5 text-xs text-slate-300">
+                  <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Thanh toán</h3>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-medium">Hình thức:</span>
+                    <span className="font-bold uppercase text-slate-200">{qrOrderDetail.paymentMethod}</span>
+                  </div>
+                  <div className="flex items-end justify-between border-b border-slate-800 pb-3">
+                    <span className="text-slate-400 font-bold">Số tiền cần thu hộ:</span>
+                    <span className="text-lg font-black text-emerald-400">
+                      {qrOrderDetail.paymentMethod === 'cod' 
+                        ? `${qrOrderDetail.total.toLocaleString('vi-VN')} đ` 
+                        : 'Đã thanh toán Online (0đ)'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Hành động cập nhật trạng thái */}
+                <div className="pt-2 space-y-3">
+                  {qrOrderDetail.status === 'processing' && (
+                    <button
+                      onClick={handleAcceptQrOrder}
+                      disabled={actionLoading}
+                      className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 text-white rounded-2xl font-black text-xs tracking-wider shadow-lg flex items-center justify-center gap-2 active:scale-95 transition"
+                    >
+                      <Package className="w-4 h-4" /> NHẬN NHIỆM VỤ GIAO
+                    </button>
+                  )}
+
+                  {qrOrderDetail.status === 'shipping' && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => handleUpdateQrOrderStatus('success')}
+                        disabled={actionLoading}
+                        className="py-3.5 bg-emerald-650 hover:bg-emerald-600 disabled:bg-slate-700 text-white rounded-2xl font-black text-xs tracking-wider shadow-lg flex items-center justify-center gap-1.5 active:scale-95 transition"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Giao thành công
+                      </button>
+                      <button
+                        onClick={() => handleUpdateQrOrderStatus('failed')}
+                        disabled={actionLoading}
+                        className="py-3.5 bg-red-650 hover:bg-red-600 disabled:bg-slate-700 text-white rounded-2xl font-black text-xs tracking-wider shadow-lg flex items-center justify-center gap-1.5 active:scale-95 transition"
+                      >
+                        <XCircle className="w-4 h-4" /> Giao thất bại
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={resetQrScanner}
+                    className="w-full py-3 bg-slate-800 hover:bg-slate-750 text-slate-300 rounded-2xl font-bold text-xs tracking-wider flex items-center justify-center gap-2 transition"
+                  >
+                    QUÉT ĐƠN HÀNG KHÁC
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         )}

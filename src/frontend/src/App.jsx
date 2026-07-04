@@ -130,14 +130,13 @@ export default function App() {
               <Route path="users" element={<UserManager />} />
               <Route path="reviews" element={<ReviewManager />} />
               <Route path="banners" element={<BannerManager />} />
-              <Route path="cancel-requests" element={<CancelRequests />} />
               <Route path="withdraw-requests" element={<WithdrawRequests />} />
               <Route path="shippers" element={<ShipperManagement />} />
             </Route>
 
-            {/* ================= KHU VỰC 3: STAFF (Giới hạn quyền - role 1 & 2) ================= */}
+            {/* ================= KHU VỰC 3: STAFF (Giới hạn quyền - role 2) ================= */}
             <Route path="/staff" element={
-              <ProtectedRoute allowedRoles={[1, 2]}>
+              <ProtectedRoute allowedRoles={[2]}>
                 <StaffLayout />
               </ProtectedRoute>
             }>
@@ -145,7 +144,6 @@ export default function App() {
               <Route path="orders" element={<OrderManagement />} />
               <Route path="reviews" element={<ReviewManager />} />
               <Route path="cancel-requests" element={<CancelRequests />} />
-              <Route path="withdraw-requests" element={<WithdrawRequests />} />
               <Route path="chat" element={<ChatManagement />} />
               <Route path="shippers" element={<ShipperManagement />} />
             </Route>

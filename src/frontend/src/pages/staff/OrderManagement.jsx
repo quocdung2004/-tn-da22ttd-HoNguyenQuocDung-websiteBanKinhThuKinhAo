@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Package, Clock, CheckCircle, Truck, XCircle, Search, Eye, Filter, Loader2, AlertCircle, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
+import OrderInvoiceQR from './OrderInvoiceQR';
 
 export default function OrderManagement() {
   const { user } = useAuth();
@@ -20,6 +21,15 @@ export default function OrderManagement() {
   const [cancellingOrderId, setCancellingOrderId] = useState(null);
   const [adminCancelReason, setAdminCancelReason] = useState('');
 
+  // Log thông tin User & Quyền hạn
+  useEffect(() => {
+    console.log('👤 [AuthContext] Current User info:', { 
+      username: user?.username, 
+      role: user?.role, 
+      isStaff: isStaff 
+    });
+  }, [user, isStaff]);
+
   // 1. Tải danh sách đơn hàng thực tế từ MongoDB qua API
   const fetchOrders = async () => {
     setLoading(true);
@@ -34,39 +44,48 @@ export default function OrderManagement() {
       const data = await res.json();
       if (data.success) {
         // Ánh xạ cấu trúc dữ liệu trả về từ MongoDB
-        const mappedOrders = data.orders.map(order => ({
-          _id: order._id,
-          id: order.orderCode,
-          customer: {
-            name: order.customerInfo?.name || 'Khách vãng lai',
-            phone: order.customerInfo?.phone || 'Không có',
-            address: order.customerInfo?.address || 'Không có'
-          },
-          items: order.items.map(item => ({
-            productId: item.productId?._id || '',
-            name: item.productId?.name || 'Sản phẩm đã xóa',
-            image: item.productId?.images?.[0] || '',
-            quantity: item.quantity,
-            price: item.priceAtPurchase,
-            od: item.od || '',
-            os: item.os || '',
-            hasPrescription: item.hasPrescription || false,
-            od_sph: item.od_sph,
-            od_cyl: item.od_cyl,
-            od_axis: item.od_axis,
-            os_sph: item.os_sph,
-            os_cyl: item.os_cyl,
-            os_axis: item.os_axis,
-            pd: item.pd,
-            rxDate: item.rxDate,
-            rxNote: item.rxNote,
-            prescriptionMode: item.prescriptionMode || 'none'
-          })),
-          total: order.total,
-          paymentMethod: order.paymentMethod,
-          status: order.status,
-          date: order.createdAt
-        }));
+        const mappedOrders = data.orders.map(order => {
+          // Log kiểm tra shipperId thô từ backend
+          if (order.shipperId) {
+            console.log(`📦 [API Order] Mã đơn: ${order.orderCode} - shipperId thô từ DB:`, order.shipperId);
+          }
+          return {
+            _id: order._id,
+            id: order.orderCode,
+            customer: {
+              name: order.customerInfo?.name || 'Khách vãng lai',
+              phone: order.customerInfo?.phone || 'Không có',
+              address: order.customerInfo?.address || 'Không có'
+            },
+            items: order.items.map(item => ({
+              productId: item.productId?._id || '',
+              name: item.productId?.name || 'Sản phẩm đã xóa',
+              image: item.productId?.images?.[0] || '',
+              quantity: item.quantity,
+              price: item.priceAtPurchase,
+              od: item.od || '',
+              os: item.os || '',
+              hasPrescription: item.hasPrescription || false,
+              od_sph: item.od_sph,
+              od_cyl: item.od_cyl,
+              od_axis: item.od_axis,
+              os_sph: item.os_sph,
+              os_cyl: item.os_cyl,
+              os_axis: item.os_axis,
+              pd: item.pd,
+              rxDate: item.rxDate,
+              rxNote: item.rxNote,
+              prescriptionMode: item.prescriptionMode || 'none'
+            })),
+            total: order.total,
+            paymentMethod: order.paymentMethod,
+            status: (order.status || '').trim(), // FIX BUG SHIPPED
+            date: order.createdAt,
+            shipperId: order.shipperId || null
+          };
+        });
+        
+        console.log('📋 [fetchOrders] Tổng số đơn hàng nạp được:', mappedOrders.length);
         setOrders(mappedOrders);
       } else {
         throw new Error(data.message || 'Không thể lấy dữ liệu đơn hàng');
@@ -141,37 +160,37 @@ export default function OrderManagement() {
   };
 
   // 3. Hàm tính toán luồng chuyển đổi trạng thái hợp lệ trên Frontend (Staff vs Admin)
-  const getValidTransitions = (currentStatus) => {
+  const getAvailableStatuses = (currentStatus, shipperId) => {
+    console.log('🔍 [getAvailableStatuses] Check input:', { currentStatus, shipperId, isStaff });
+
     if (!isStaff) {
-      // Admin có toàn quyền điều hành tự do để sửa sai sót
-      return ['pending', 'paid', 'processing', 'shipping', 'completed', 'cancelled'];
+      // Admin có toàn quyền điều hành tự do để sửa sai sót (thêm 'shipped' để quản lý)
+      return ['pending', 'paid', 'processing', 'shipping', 'shipped', 'completed', 'cancelled', 'cancel_requested']; // FIX BUG SHIPPED
     }
 
-    // Nhân viên (Staff) bắt buộc phải tuân theo luồng kinh doanh nghiêm ngặt:
-    switch (currentStatus) {
-      case 'pending':
-        return ['pending', 'processing', 'cancelled'];
-      case 'paid':
-        return ['paid', 'processing', 'cancelled'];
-      case 'processing':
-        return ['processing', 'shipping', 'cancelled'];
-      case 'shipping':
-        return ['shipping', 'completed'];
-      case 'completed':
-        return ['completed']; // Hoàn tất thì dừng
-      case 'cancelled':
-        return ['cancelled']; // Đã hủy thì dừng
-      default:
-        return [currentStatus];
+    if (shipperId !== null && shipperId !== undefined) {
+      console.log(`🔒 [getAvailableStatuses] Khóa dropdown vì đơn hàng đã giao cho Shipper (ID: ${shipperId})`);
+      return [currentStatus];
     }
+
+    if (currentStatus === 'pending' || currentStatus === 'paid') {
+      return [currentStatus, 'processing', 'cancelled'];
+    }
+
+    if (currentStatus === 'processing') {
+      return [currentStatus, 'shipping'];
+    }
+
+    return [currentStatus];
   };
 
   const getStatusLabel = (status) => {
     switch (status) {
       case 'pending': return 'Chờ xác nhận';
       case 'paid': return 'Đã thanh toán';
-      case 'processing': return 'Đang xử lý';
       case 'shipping': return 'Đang giao hàng';
+      case 'shipped': return 'Đã giao (Chờ thu tiền)'; // FIX BUG SHIPPED
+      case 'cancel_requested': return 'Yêu cầu hủy đơn'; // FIX BUG SHIPPED
       case 'completed': return 'Hoàn tất';
       case 'cancelled': return 'Đã hủy';
       default: return status;
@@ -189,6 +208,10 @@ export default function OrderManagement() {
         return <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Clock className="w-3 h-3"/> Đang xử lý</span>;
       case 'shipping':
         return <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Truck className="w-3 h-3"/> Đang giao hàng</span>;
+      case 'shipped': // FIX BUG SHIPPED
+        return <span className="bg-teal-100 text-teal-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><CheckCircle className="w-3 h-3"/> Đã giao (Chờ thu tiền)</span>;
+      case 'cancel_requested': // FIX BUG SHIPPED
+        return <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><AlertCircle className="w-3 h-3"/> Yêu cầu hủy đơn</span>;
       case 'completed':
         return <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><CheckCircle className="w-3 h-3"/> Hoàn tất</span>;
       case 'cancelled':
@@ -284,13 +307,15 @@ export default function OrderManagement() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="flex items-center gap-2 px-4 py-3 bg-gray-50 text-gray-700 font-bold rounded-2xl outline-none border-none cursor-pointer w-full md:w-auto text-sm"
+              className="flex items-center gap-2 px-4 py-3 bg-gray-55 text-gray-700 font-bold rounded-2xl outline-none border-none cursor-pointer w-full md:w-auto text-sm"
             >
               <option value="all">Tất cả trạng thái</option>
               <option value="pending">Chờ xác nhận</option>
               <option value="paid">Đã thanh toán</option>
               <option value="processing">Đang xử lý</option>
               <option value="shipping">Đang giao hàng</option>
+              <option value="shipped">Đã giao (Chờ thu tiền)</option> {/* FIX BUG SHIPPED */}
+              <option value="cancel_requested">Yêu cầu hủy đơn</option> {/* FIX BUG SHIPPED */}
               <option value="completed">Hoàn tất</option>
               <option value="cancelled">Đã hủy</option>
             </select>
@@ -378,11 +403,11 @@ export default function OrderManagement() {
                       <td className="p-4 text-center max-w-[180px]">
                         <select 
                           value={order.status}
-                          disabled={isUpdating}
+                          disabled={isUpdating || (isStaff && (order.shipperId !== null || order.status === 'completed' || order.status === 'cancelled'))}
                           onChange={(e) => updateOrderStatus(order._id, e.target.value)}
-                          className="bg-gray-50 border border-gray-200 text-gray-700 text-xs rounded-xl focus:ring-blue-500 focus:border-blue-500 w-full p-2.5 outline-none cursor-pointer font-bold disabled:opacity-50"
+                          className="bg-gray-55 border border-gray-200 text-gray-700 text-xs rounded-xl focus:ring-blue-500 focus:border-blue-500 w-full p-2.5 outline-none cursor-pointer font-bold disabled:opacity-50"
                         >
-                          {getValidTransitions(order.status).map(st => (
+                          {getAvailableStatuses(order.status, order.shipperId).map(st => (
                             <option key={st} value={st}>
                               {getStatusLabel(st)}
                             </option>
@@ -422,12 +447,22 @@ export default function OrderManagement() {
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Chi tiết đơn hàng thực tế</span>
                 <h2 className="text-xl font-black text-gray-900 mt-0.5">Mã đơn: <span className="text-blue-600">{selectedOrder.id}</span></h2>
               </div>
-              <button 
-                onClick={() => setSelectedOrder(null)}
-                className="p-2 bg-white text-gray-400 hover:text-gray-900 rounded-full border shadow-sm hover:shadow-md transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              
+              <div className="flex items-center gap-4">
+                <div className="flex flex-col items-center">
+                  <OrderInvoiceQR orderId={selectedOrder._id} orderCode={selectedOrder.id} />
+                  <span className="text-[9px] text-gray-400 font-bold mt-1 max-w-[120px] text-center leading-tight">
+                    Shipper quét mã này để nhận nhiệm vụ
+                  </span>
+                </div>
+                
+                <button 
+                  onClick={() => setSelectedOrder(null)}
+                  className="p-2 bg-white text-gray-400 hover:text-gray-900 rounded-full border shadow-sm hover:shadow-md transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Content (Có scroll) */}
@@ -470,7 +505,7 @@ export default function OrderManagement() {
                     <span className="text-gray-400 text-xs block mb-1">Đổi trạng thái nhanh:</span>
                     <select
                       value={selectedOrder.status}
-                      disabled={isUpdating}
+                      disabled={isUpdating || (isStaff && (selectedOrder.shipperId !== null || selectedOrder.status === 'completed' || selectedOrder.status === 'cancelled'))}
                       onChange={(e) => {
                         const newStatus = e.target.value;
                         if (newStatus === 'cancelled') {
@@ -482,7 +517,7 @@ export default function OrderManagement() {
                       }}
                       className="bg-white border border-gray-200 text-gray-800 text-xs rounded-xl p-2 font-bold outline-none cursor-pointer w-full"
                     >
-                      {getValidTransitions(selectedOrder.status).map(st => (
+                      {getAvailableStatuses(selectedOrder.status, selectedOrder.shipperId).map(st => (
                         <option key={st} value={st}>
                           {getStatusLabel(st)}
                         </option>
@@ -501,7 +536,7 @@ export default function OrderManagement() {
                       {item.image ? (
                         <img src={item.image} className="w-16 h-16 object-cover rounded-xl border p-1 flex-shrink-0" alt={item.name} />
                       ) : (
-                        <div className="w-16 h-16 bg-gray-50 rounded-xl border flex items-center justify-center text-gray-300 flex-shrink-0"><Package className="w-8 h-8" /></div>
+                        <div className="w-16 h-16 bg-gray-55 rounded-xl border flex items-center justify-center text-gray-300 flex-shrink-0"><Package className="w-8 h-8" /></div>
                       )}
                       
                       <div className="flex-1 min-w-0">

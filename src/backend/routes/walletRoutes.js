@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const walletController = require('../controllers/walletController');
-const { verifyToken, verifyStaffOrAdmin } = require('../middleware/authMiddleware');
+const { verifyToken, verifyStaffOrAdmin, verifyAdminOnly } = require('../middleware/authMiddleware');
 
 // ================= PHÂN HỆ KHÁCH HÀNG (CUSTOMER - Yêu cầu đăng nhập) =================
 
@@ -24,10 +24,10 @@ router.post('/withdraw/:id/dispute', verifyToken, walletController.disputeWithdr
 router.get('/admin/withdrawals', verifyToken, verifyStaffOrAdmin, walletController.getAdminWithdrawals);
 
 // Phê duyệt yêu cầu rút tiền (Nhập mã đối soát ngân hàng)
-router.post('/admin/withdrawals/:id/approve', verifyToken, verifyStaffOrAdmin, walletController.approveWithdrawal);
+router.post('/admin/withdrawals/:id/approve', verifyToken, verifyAdminOnly, walletController.approveWithdrawal);
 
 // Từ chối yêu cầu rút tiền (Bắt buộc cung cấp lý do từ chối)
-router.post('/admin/withdrawals/:id/reject', verifyToken, verifyStaffOrAdmin, walletController.rejectWithdrawal);
+router.post('/admin/withdrawals/:id/reject', verifyToken, verifyAdminOnly, walletController.rejectWithdrawal);
 
 // Staff/Admin xử lý và giải quyết khiếu nại giải ngân
 router.post('/admin/withdrawals/:id/resolve', verifyToken, verifyStaffOrAdmin, walletController.resolveWithdrawDispute);

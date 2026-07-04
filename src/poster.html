@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Poster Khóa Luận Tốt Nghiệp - Website Bán Kính Mắt Tích Hợp Chức Năng Thử Kính Ảo</title>
+
+  <!-- Import Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Montserrat:wght@700;800;900&display=swap"
+    rel="stylesheet">
+
+  <style>
+    /* Reset & CSS Variables */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg-dark: #070a13;
+      --bg-card: rgba(15, 23, 42, 0.65);
+      --card-border: rgba(6, 182, 212, 0.2);
+      --primary-cyan: #06b6d4;
+      --secondary-pink: #ec4899;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --glow-cyan: 0 0 20px rgba(6, 182, 212, 0.45);
+      --glow-pink: 0 0 20px rgba(236, 72, 153, 0.4);
+    }
+
+    body {
+      background-color: #03050a;
+      color: var(--text-main);
+      font-family: 'Inter', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    /* Fixed Aspect Ratio Container (1200px x 1600px) */
+    .poster {
+      width: 1200px;
+      height: 1600px;
+      background: radial-gradient(circle at 50% 0%, #111a2e 0%, var(--bg-dark) 70%);
+      border: 8px solid #0f172a;
+      border-radius: 24px;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+    }
+
+    /* Background futuristic grid overlay */
+    .poster::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(6, 182, 212, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(6, 182, 212, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* Top glowing header decorative bar */
+    .poster::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 10%;
+      width: 80%;
+      height: 4px;
+      background: linear-gradient(90deg, transparent, var(--primary-cyan), var(--secondary-pink), transparent);
+      box-shadow: 0 0 15px var(--primary-cyan);
+      z-index: 2;
+    }
+
+    /* Header Styling */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 25px;
+      z-index: 10;
+    }
+
+    .school-info {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      width: 28%;
+    }
+
+    .school-logo-img {
+      width: 60px;
+      height: 60px;
+      object-fit: contain;
+      filter: drop-shadow(0 0 8px rgba(6, 182, 212, 0.5));
+    }
+
+    .school-text h3 {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--primary-cyan);
+      text-transform: uppercase;
+    }
+
+    .school-text p {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+
+    .title-area {
+      width: 44%;
+      text-align: center;
+    }
+
+    .title-area h1 {
+      font-family: 'Montserrat', sans-serif;
+      font-size: 21px;
+      font-weight: 900;
+      line-height: 1.3;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: linear-gradient(135deg, #ffffff 40%, var(--primary-cyan) 75%, var(--secondary-pink) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.5));
+    }
+
+    .title-area .badge {
+      display: inline-block;
+      margin-bottom: 10px;
+      padding: 4px 16px;
+      background: rgba(6, 182, 212, 0.12);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--primary-cyan);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .authors-info {
+      width: 28%;
+      text-align: right;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .authors-info p {
+      color: var(--text-muted);
+    }
+
+    .authors-info strong {
+      color: var(--text-main);
+      font-weight: 600;
+    }
+
+    /* Main Content Layout Grid */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 4.8fr 7.2fr;
+      gap: 20px;
+      margin-top: 20px;
+      margin-bottom: 15px;
+      z-index: 10;
+    }
+
+    .col-left,
+    .col-right {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    /* Section Cards (Glassmorphism) */
+    .card {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 20px;
+      position: relative;
+      transition: all 0.3s ease;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 20px;
+      right: 20px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+    }
+
+    .card-title {
+      font-family: 'Montserrat', sans-serif;
+      font-size: 17px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--primary-cyan);
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
+    }
+
+    .card-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(6, 182, 212, 0.3), transparent);
+    }
+
+    .card-title-icon {
+      color: var(--secondary-pink);
+    }
+
+    /* Subcard lists & text */
+    p.description {
+      font-size: 13.5px;
+      line-height: 1.6;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .bullet-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .bullet-list li {
+      position: relative;
+      padding-left: 20px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #e2e8f0;
+    }
+
+    .bullet-list li::before {
+      content: "✦";
+      position: absolute;
+      left: 0;
+      color: var(--secondary-pink);
+      font-size: 11px;
+    }
+
+    /* Pipeline Step Diagram styling */
+    .pipeline {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      margin-top: 10px;
+    }
+
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+      padding: 10px 15px;
+      position: relative;
+    }
+
+    .step-num {
+      width: 26px;
+      height: 26px;
+      background: var(--primary-cyan);
+      color: var(--bg-dark);
+      font-weight: 800;
+      font-size: 12px;
+      border-radius: 50px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      box-shadow: var(--glow-cyan);
+    }
+
+    .step-info {
+      flex: 1;
+    }
+
+    .step-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .step-desc {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .step-arrow-down {
+      text-align: center;
+      color: var(--primary-cyan);
+      font-size: 12px;
+      margin: -8px 0;
+      opacity: 0.6;
+    }
+
+    /* Tech Stack Badges Grid */
+    .tech-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .tech-badge {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 8px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: #cbd5e1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .tech-badge span.tech-cat {
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--primary-cyan);
+    }
+
+    /* Mockups & UI Layouts */
+    .mockup-container {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      margin-top: 10px;
+    }
+
+    /* Phone Mockup */
+    .phone-mockup {
+      width: 250px;
+      height: 480px;
+      background: #090d16;
+      border: 6px solid #1e293b;
+      border-radius: 36px;
+      position: relative;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), var(--glow-cyan);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Notch */
+    .phone-mockup::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100px;
+      height: 18px;
+      background: #1e293b;
+      border-bottom-left-radius: 12px;
+      border-bottom-right-radius: 12px;
+      z-index: 100;
+    }
+
+    .phone-screen {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      background: #020617;
+    }
+
+    /* Camera Feed Area in VTO */
+    .vto-camera-feed {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      background: #090f1d;
+    }
+
+    .vto-camera-feed img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.85;
+    }
+
+    /* Glow face mesh lines over the image */
+    .face-mesh-overlay {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle, transparent 40%, rgba(6, 182, 212, 0.15) 80%);
+      pointer-events: none;
+    }
+
+    /* UI elements inside the VTO mockup */
+    .phone-overlay-controls {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(to top, rgba(15, 23, 42, 0.95) 70%, transparent);
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 10;
+    }
+
+    .phone-vto-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .fps-counter {
+      color: var(--primary-cyan);
+      background: rgba(6, 182, 212, 0.15);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 9px;
+    }
+
+    .glasses-selectors {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .glass-thumb {
+      width: 48px;
+      height: 36px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .glass-thumb.active {
+      border-color: var(--primary-cyan);
+      background: rgba(6, 182, 212, 0.15);
+      box-shadow: 0 0 8px rgba(6, 182, 212, 0.3);
+    }
+
+    .glass-thumb svg {
+      width: 32px;
+      height: 18px;
+      fill: #fff;
+    }
+
+    .phone-vto-btn {
+      background: linear-gradient(90deg, var(--primary-cyan), #0891b2);
+      color: #020617;
+      border: none;
+      border-radius: 8px;
+      padding: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      text-align: center;
+    }
+
+    /* Product card showcase */
+    .showcase-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .product-show-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 15px;
+    }
+
+    .product-header-tag {
+      font-size: 10px;
+      color: var(--secondary-pink);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 5px;
+    }
+
+    .product-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .product-specs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .product-spec-item strong {
+      color: #e2e8f0;
+    }
+
+    .product-try-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+      background: rgba(236, 72, 153, 0.1);
+      border: 1px solid rgba(236, 72, 153, 0.2);
+      color: var(--secondary-pink);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    /* Laptop Dashboard Mockup */
+    .laptop-mockup {
+      width: 100%;
+      background: #090d16;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .laptop-header {
+      background: #1e293b;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .dot-red {
+      background: #ef4444;
+    }
+
+    .dot-yellow {
+      background: #f59e0b;
+    }
+
+    .dot-green {
+      background: #10b981;
+    }
+
+    .laptop-address {
+      background: #0f172a;
+      flex: 1;
+      margin-left: 15px;
+      border-radius: 4px;
+      font-size: 9px;
+      color: var(--text-muted);
+      padding: 3px 10px;
+      letter-spacing: 0.5px;
+    }
+
+    .laptop-body {
+      padding: 15px;
+      background: #020617;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .dash-widgets {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+
+    .widget {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 6px;
+      padding: 8px;
+    }
+
+    .widget-title {
+      font-size: 8px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .widget-val {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      margin-top: 2px;
+    }
+
+    .prescription-box {
+      border: 1px dashed rgba(6, 182, 212, 0.4);
+      background: rgba(6, 182, 212, 0.02);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .prescription-badge {
+      background: var(--primary-cyan);
+      color: #020617;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 9px;
+      text-transform: uppercase;
+    }
+
+    /* KPI Highlights dashboard */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 15px;
+    }
+
+    .kpi-card {
+      background: rgba(6, 182, 212, 0.04);
+      border: 1px solid rgba(6, 182, 212, 0.15);
+      border-radius: 12px;
+      padding: 15px;
+      text-align: center;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .kpi-card.special {
+      background: rgba(236, 72, 153, 0.04);
+      border-color: rgba(236, 72, 153, 0.15);
+    }
+
+    .kpi-num {
+      font-family: 'Montserrat', sans-serif;
+      font-size: 28px;
+      font-weight: 900;
+      color: var(--primary-cyan);
+      text-shadow: 0 0 10px rgba(6, 182, 212, 0.3);
+    }
+
+    .kpi-card.special .kpi-num {
+      color: var(--secondary-pink);
+      text-shadow: 0 0 10px rgba(236, 72, 153, 0.3);
+    }
+
+    .kpi-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-top: 5px;
+    }
+
+    .kpi-desc {
+      font-size: 9px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Bottom footer area */
+    footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 2px solid rgba(255, 255, 255, 0.08);
+      padding-top: 20px;
+      z-index: 10;
+    }
+
+    .footer-left {
+      width: 40%;
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .footer-left strong {
+      color: var(--text-main);
+    }
+
+    .footer-center {
+      width: 20%;
+      text-align: center;
+    }
+
+    .demo-badges {
+      display: flex;
+      gap: 20px;
+      width: 40%;
+      justify-content: flex-end;
+    }
+
+    .qr-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      padding: 8px 12px;
+    }
+
+    .qr-placeholder {
+      width: 60px;
+      height: 60px;
+      background: #fff;
+      border-radius: 6px;
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* SVG QR Code Simulation */
+    .qr-svg {
+      width: 100%;
+      height: 100%;
+      fill: #000;
+    }
+
+    .qr-text {
+      text-align: left;
+    }
+
+    .qr-title {
+      font-size: 10px;
+      font-weight: 700;
+      color: #fff;
+      text-transform: uppercase;
+    }
+
+    .qr-desc {
+      font-size: 8px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* SVG icons helper */
+    .svg-icon {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+      display: inline-block;
+      vertical-align: middle;
+    }
+
+    /* Print settings for exporting to PDF */
+    @media print {
+      body {
+        background: none;
+        padding: 0;
+      }
+
+      .poster {
+        border: none;
+        box-shadow: none;
+        width: 100%;
+        height: 100%;
+        border-radius: 0;
+        padding: 40px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="poster">
+
+    <!-- HEADER -->
+    <header>
+      <div class="school-info">
+        <img class="school-logo-img" src="./images.png" alt="TVU Logo">
+        <div class="school-text">
+          <h3>Đại học Trà Vinh</h3>
+          <p>Trường Kỹ thuật và Công nghệ</p>
+          <p style="font-size: 9px; font-weight: 600; opacity: 0.85; margin-top: 2px;">Khoa Công nghệ Thông tin</p>
+        </div>
+      </div>
+
+      <div class="title-area">
+        <div class="badge">Khóa Luận Tốt Nghiệp</div>
+        <h1>Website Bán kính<br>Tích hợp chức năng Thử kính ảo</h1>
+      </div>
+
+      <div class="authors-info">
+        <p>Sinh viên: <strong>Hồ Nguyễn Quốc Dũng</strong></p>
+        <p>Giảng viên hướng dẫn: <strong>TS. Đoàn Phước Miền</strong></p>
+      </div>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <main>
+
+      <!-- LEFT COLUMN -->
+      <div class="col-left">
+
+        <!-- CARD 1: Đặt Vấn Đề & Mục Tiêu -->
+        <div class="card">
+          <div class="card-title">
+            <svg class="svg-icon card-title-icon" viewBox="0 0 24 24">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"
+                fill="currentColor" />
+            </svg>
+            Đặt vấn đề & Giải pháp
+          </div>
+          <p class="description">
+            Mua kính trực tuyến đem lại sự tiện lợi vượt trội, nhưng cản trở lớn nhất của người tiêu dùng là không biết
+            gọng kính có thực sự phù hợp với đặc điểm khuôn mặt của mình hay không.
+          </p>
+          <ul class="bullet-list">
+            <li><strong>Thử kính ảo:</strong> Cho phép khách hàng đeo thử kính 3D ảo thời gian thực trực
+              tiếp trên trình duyệt bằng camera điện thoại/máy tính mà không cần cài đặt thêm phần mềm.</li>
+            <li><strong>Nhận diện AI khuôn mặt:</strong> Sử dụng trí tuệ nhân tạo để phát hiện và theo dõi tọa độ khuôn
+              mặt, giúp kính bám sát chuyển động đầu.</li>
+            <li><strong>Quản lý kính thuốc:</strong> Tích hợp luồng cấu hình tròng kính theo đơn y tế,
+              đáp ứng nhu cầu cắt kính cận/viễn trực tuyến.</li>
+          </ul>
+        </div>
+
+        <!-- CARD 2: VTO Pipeline & Logic -->
+        <div class="card">
+          <div class="card-title">
+            <svg class="svg-icon card-title-icon" viewBox="0 0 24 24">
+              <path
+                d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"
+                fill="currentColor" />
+            </svg>
+            Luồng xử lý thử kính ảo
+          </div>
+          <p class="description">
+            Ứng dụng kiến trúc đường ống (Pipeline) tối ưu kết hợp giữa AI theo dõi cử động khuôn mặt và Engine đồ họa
+            WebGL 3D để hiển thị mượt mà.
+          </p>
+
+          <div class="pipeline">
+            <div class="step">
+              <div class="step-num">1</div>
+              <div class="step-info">
+                <div class="step-title">Video Input & Camera Stream</div>
+                <div class="step-desc">Đọc luồng hình ảnh từ Webcam người dùng thông qua API WebRTC Navigator.</div>
+              </div>
+            </div>
+
+            <div class="step-arrow-down">▼</div>
+
+            <div class="step">
+              <div class="step-num">2</div>
+              <div class="step-info">
+                <div class="step-title">AI FaceMesh (Google MediaPipe)</div>
+                <div class="step-desc">Phát hiện khuôn mặt và định vị 478 điểm mốc (landmarks) mật độ cao với tần suất
+                  60 lần/giây.</div>
+              </div>
+            </div>
+
+            <div class="step-arrow-down">▼</div>
+
+            <div class="step">
+              <div class="step-num">3</div>
+              <div class="step-info">
+                <div class="step-title">Tính toán Ma trận Tọa độ 3D</div>
+                <div class="step-desc">Tính toán Vector vị trí sống mũi, mắt và tai để lấy khoảng cách, góc xoay (Yaw,
+                  Pitch, Roll).</div>
+              </div>
+            </div>
+
+            <div class="step-arrow-down">▼</div>
+
+            <div class="step">
+              <div class="step-num">4</div>
+              <div class="step-info">
+                <div class="step-title">Rendering & Occlusion (Three.js)</div>
+                <div class="step-desc">Chiếu gọng kính 3D lên mặt, tạo bóng đổ giả lập và che khuất phần gọng tai phía
+                  sau đầu.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 3: Công Nghệ Sử Dụng -->
+        <div class="card">
+          <div class="card-title">
+            <svg class="svg-icon card-title-icon" viewBox="0 0 24 24">
+              <path
+                d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.3C.5 6.7.9 9.8 2.9 11.8c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.6z"
+                fill="currentColor" />
+            </svg>
+            Công nghệ cốt lõi
+          </div>
+
+          <div class="tech-grid">
+            <div class="tech-badge">
+              <svg class="svg-icon" style="color:#00d8ff" viewBox="-11.5 -10.23 23 20.46">
+                <circle r="2.05" fill="#00d8ff" />
+                <g stroke="#00d8ff" stroke-width="1.1" fill="none">
+                  <ellipse rx="11" ry="4.2" />
+                  <ellipse rx="11" ry="4.2" transform="rotate(60)" />
+                  <ellipse rx="11" ry="4.2" transform="rotate(120)" />
+                </g>
+              </svg>
+              <span>ReactJS</span>
+              <span class="tech-cat">Frontend</span>
+            </div>
+
+            <div class="tech-badge">
+              <svg class="svg-icon" style="color:#ffffff" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2L2 7v10l10 5 10-5V7L12 2z" />
+                <path d="M12 22V12" />
+                <path d="M12 12L22 7" />
+                <path d="M12 12L2 7" />
+              </svg>
+              <span>Three.js</span>
+              <span class="tech-cat">WebGL 3D</span>
+            </div>
+
+            <div class="tech-badge">
+              <svg class="svg-icon" style="color:#10b981" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.5">
+                <circle cx="12" cy="4" r="2.5" fill="currentColor" />
+                <circle cx="6" cy="11" r="2" fill="currentColor" />
+                <circle cx="18" cy="11" r="2" fill="currentColor" />
+                <circle cx="12" cy="13" r="2" fill="currentColor" />
+                <circle cx="9" cy="20" r="2" fill="currentColor" />
+                <circle cx="15" cy="20" r="2" fill="currentColor" />
+                <line x1="12" y1="4" x2="6" y2="11" />
+                <line x1="12" y1="4" x2="18" y2="11" />
+                <line x1="12" y1="4" x2="12" y2="13" />
+                <line x1="6" y1="11" x2="12" y2="13" />
+                <line x1="18" y1="11" x2="12" y2="13" />
+                <line x1="12" y1="13" x2="9" y2="20" />
+                <line x1="12" y1="13" x2="15" y2="20" />
+              </svg>
+              <span>MediaPipe</span>
+              <span class="tech-cat">Face Mesh</span>
+            </div>
+
+            <div class="tech-badge">
+              <svg class="svg-icon" style="color:#ffc517" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.5">
+                <path d="M3 4.5L12 21L21 4.5" stroke="#646cff" stroke-width="2" stroke-linejoin="round" />
+                <path d="M12.5 3L7 12H12L11.5 21L17.5 10H12.5Z" fill="#ffc517" stroke="#ffc517" stroke-width="1" />
+              </svg>
+              <span>Vite</span>
+              <span class="tech-cat">Compiler</span>
+            </div>
+
+            <div class="tech-badge">
+              <svg class="svg-icon" style="color:#38bdf8" viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12.013 4.987C9.37 4.987 7.747 6.307 7.147 8.947c.9-1.2 1.95-1.65 3.15-1.35c.685.17 1.174.667 1.716 1.228C12.895 9.73 14.12 11.013 16.963 11.013c2.64 0 4.263-1.32 4.863-3.96c-.9 1.2-1.95 1.65-3.15 1.35c-.685-.17-1.174-.667-1.716-1.228c-.882-.905-2.107-2.188-4.947-2.188zm-4.866 6.026C4.507 11.013 2.883 12.333 2.283 14.973c.9-1.2 1.95-1.65 3.15-1.35c.685.17 1.174.667 1.716 1.228c.882.905 2.107 2.188 4.95 2.188c2.64 0 4.263-1.32 4.86-3.96c-.9 1.2-1.95 1.65-3.15 1.35c-.684-.17-1.173-.667-1.715-1.228c-.883-.905-2.11-2.188-4.95-2.188z" />
+              </svg>
+              <span>Tailwind</span>
+              <span class="tech-cat">CSS Frame</span>
+            </div>
+
+            <div class="tech-badge">
+              <svg class="svg-icon" style="color:#4ade80" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.8" stroke-linejoin="round">
+                <path d="M12 2L2.5 7.5v9L12 22l9.5-5.5v-9L12 2z" />
+                <path d="M12 22V12" />
+                <path d="M12 12l9.5-5.5" />
+                <path d="M12 12L2.5 6.5" />
+              </svg>
+              <span>Node / Mongo</span>
+              <span class="tech-cat">Database API</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 6: KPIs & Thực Nghiệm -->
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="kpi-num">60 FPS</div>
+            <div class="kpi-label">Tần suất xử lý</div>
+            <div class="kpi-desc">Thời gian thực mượt mà</div>
+          </div>
+
+          <div class="kpi-card special">
+            <div class="kpi-num">478 Pts</div>
+            <div class="kpi-label">Điểm mốc khuôn mặt</div>
+            <div class="kpi-desc">Nhận diện chi tiết mắt, tai</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT COLUMN -->
+      <div class="col-right">
+
+        <!-- CARD 4: Trải Nghiệm Thử Kính Ảo (VTO Showcase) -->
+        <div class="card">
+          <div class="card-title">
+            <svg class="svg-icon card-title-icon" viewBox="0 0 24 24">
+              <path
+                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.25z"
+                fill="currentColor" />
+            </svg>
+            Phân hệ Khách hàng: Giao diện Thử kính ảo thời gian thực
+          </div>
+
+          <div class="mockup-container">
+            <!-- Left: Phone Simulator -->
+            <div class="phone-mockup">
+              <div class="phone-screen">
+                <div class="vto-camera-feed">
+                  <!-- The generated futuristic image -->
+                  <img src="./ar_face_mesh.png" alt="AR Face Mesh Try On">
+                  <!-- Floating AR mesh overlay effects -->
+                  <div class="face-mesh-overlay"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Feature explanation text -->
+            <div class="showcase-info">
+              <div class="product-show-card">
+                <div class="product-header-tag">Chi tiết sản phẩm</div>
+                <div class="product-title">Kính Aviator Titanium Classic</div>
+
+                <!-- Mô tả kính (Chuẩn bị thêm vào) -->
+                <p class="product-description-text"
+                  style="font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.45;">
+                  Gọng kim loại phi công cổ điển, thiết kế thanh lịch ôm sát khuôn mặt tạo cảm giác thoải mái khi sử
+                  dụng.
+                </p>
+
+                <!-- Giá bán & Đánh giá -->
+                <div class="product-specs"
+                  style="margin-top: 10px; display: grid; grid-template-columns: 1.1fr 1.2fr; gap: 8px;">
+                  <div class="product-spec-item">Giá bán: <strong style="color: var(--secondary-pink);">790.000
+                      đ</strong></div>
+                  <div class="product-spec-item">Đánh giá: <strong style="color: #f59e0b;">4.8 ★ (120 đánh
+                      giá)</strong></div>
+                </div>
+
+                <!-- Mua hàng (chuẩn bị thêm vào) & Thêm vào giỏ hàng -->
+                <div class="product-actions-show" style="margin-top: 14px; display: flex; gap: 8px;">
+                  <span class="action-badge-demo"
+                    style="flex: 1; text-align: center; font-size: 10px; font-weight: 700; padding: 6px; background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.2); border-radius: 6px; color: var(--text-muted);">
+                    Mua ngay
+                  </span>
+                  <span class="action-badge-demo"
+                    style="flex: 1.2; text-align: center; font-size: 10px; font-weight: 700; padding: 6px; background: rgba(6, 182, 212, 0.15); border: 1px solid var(--primary-cyan); border-radius: 6px; color: var(--primary-cyan);">
+                    Thêm vào giỏ hàng
+                  </span>
+                </div>
+              </div>
+
+              <ul class="bullet-list" style="margin-top: 10px;">
+                <li><strong>Căn chỉnh chính xác:</strong> Hệ thống tự động phát hiện khoảng cách hai mắt (IPD) và khoảng
+                  cách hai tai để phóng to/thu nhỏ kính 3D tương đương tỉ lệ khuôn mặt thật.</li>
+                <li><strong>Tự động che khuất (Occlusion):</strong> Sử dụng hình học 3D che khuất trong Three.js để ẩn
+                  đi phần càng kính nằm phía sau vành tai người dùng, mang lại góc nhìn 3D góc nghiêng tự nhiên nhất.
+                </li>
+                <li><strong>Bộ lọc đa dạng:</strong> Khách hàng nhanh chóng lựa chọn màu gọng kính, loại tròng (tròng
+                  đổi màu, tròng kính chống ánh sáng xanh) và thấy kết quả phản chiếu đổi màu trực quan trên màn hình.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 5: Phân Hệ Quản Lý (Admin Dashboard & Prescription) -->
+        <div class="card">
+          <div class="card-title">
+            <svg class="svg-icon card-title-icon" viewBox="0 0 24 24">
+              <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"
+                fill="currentColor" />
+            </svg>
+            Quản trị viên & Chăm sóc khách hàng
+          </div>
+
+          <p class="description" style="margin-bottom: 15px;">
+            Hệ thống dashboard quản trị chuyên sâu hỗ trợ thống kê kinh doanh, quản lý kho kính 3D, tiếp nhận và kiểm
+            duyệt đơn kính thuốc từ khách hàng gửi lên.
+          </p>
+
+          <div class="laptop-mockup">
+            <div class="laptop-header">
+              <span class="dot dot-red"></span>
+              <span class="dot dot-yellow"></span>
+              <span class="dot dot-green"></span>
+              <div class="laptop-address">https://glassesvitualtryon.netlify.app/</div>
+            </div>
+
+            <div class="laptop-body">
+              <div class="dash-widgets">
+                <div class="widget">
+                  <div class="widget-title">Doanh số tuần</div>
+                  <div class="widget-val">42.500.000 đ</div>
+                </div>
+                <div class="widget">
+                  <div class="widget-title">Đơn hàng mới</div>
+                  <div class="widget-val">34 đơn</div>
+                </div>
+              </div>
+
+              <div class="prescription-box">
+                <div>
+                  <strong style="color: #fff;">ĐƠN HÀNG MỚI NHẬN:</strong>
+                  <span style="color: var(--text-muted); margin-left: 8px;">
+                    Mã: <strong>#DH1024</strong> | Khách: <strong>Nguyễn Văn A</strong> | Tổng:
+                    <strong>790.000đ</strong>
+                  </span>
+                </div>
+                <span class="prescription-badge">Đang xử lý</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 5.5: Phân hệ Thương mại & Tính năng Mở rộng -->
+        <div class="card">
+          <div class="card-title">
+            <svg class="svg-icon card-title-icon" viewBox="0 0 24 24">
+              <path
+                d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H4v-4h11v4zm0-5H4V9h11v4zm5 5h-4V9h4v9z"
+                fill="currentColor" />
+            </svg>
+            Phân hệ Thương mại &amp; Tính năng Mở rộng
+          </div>
+          <p class="description" style="margin-bottom: 8px;">
+            Tích hợp các tính năng thương mại chuyên biệt và mở rộng luồng nghiệp vụ vận hành thực tế.
+          </p>
+
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <!-- Core Group -->
+            <div>
+              <div
+                style="font-size: 9px; font-weight: 700; color: var(--primary-cyan); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px;">
+                ● Chức năng cốt lõi có sẵn
+              </div>
+              <div class="ecom-features-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div class="ecom-feature-item"
+                  style="background: rgba(255,255,255,0.01); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; padding: 6px 8px;">
+                  <strong style="color: #fff; font-size: 10px; display: block; margin-bottom: 2px;">🛒 Đơn Kính
+                    Thuốc</strong>
+                  <span style="font-size: 9px; color: var(--text-muted); line-height: 1.4;">Lưu vết thông số đo mắt
+                    cận/viễn/loạn (Sphere, Cylinder, Axis, PD) chi tiết vào từng đơn hàng.</span>
+                </div>
+                <div class="ecom-feature-item"
+                  style="background: rgba(255,255,255,0.01); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; padding: 6px 8px;">
+                  <strong style="color: #fff; font-size: 10px; display: block; margin-bottom: 2px;">💳 Ví Số &amp; Hoàn
+                    Tiền</strong>
+                  <span style="font-size: 9px; color: var(--text-muted); line-height: 1.4;">Thanh toán số dư nội bộ và
+                    tự động hoàn lại tiền vào ví khi đơn hàng được duyệt hủy.</span>
+                </div>
+                <div class="ecom-feature-item"
+                  style="background: rgba(255,255,255,0.01); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; padding: 6px 8px;">
+                  <strong style="color: #fff; font-size: 10px; display: block; margin-bottom: 2px;">📈 Nhập Kho &amp;
+                    Lợi Nhuận</strong>
+                  <span style="font-size: 9px; color: var(--text-muted); line-height: 1.4;">Theo dõi tồn kho thực tế,
+                    lưu giá vốn lúc mua để tính toán chính xác biên lợi nhuận ròng.</span>
+                </div>
+                <div class="ecom-feature-item"
+                  style="background: rgba(255,255,255,0.01); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; padding: 6px 8px;">
+                  <strong style="color: #fff; font-size: 10px; display: block; margin-bottom: 2px;">🎟️ Chiến Dịch
+                    Khuyến Mãi</strong>
+                  <span style="font-size: 9px; color: var(--text-muted); line-height: 1.4;">Cấu hình giảm giá theo
+                    %/tiền mặt, giới hạn lượt dùng và tự động khôi phục quota khi hủy đơn.</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Extended Group -->
+            <div style="margin-top: 2px;">
+              <div
+                style="font-size: 9px; font-weight: 700; color: var(--secondary-pink); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px;">
+                ● Chức năng mở rộng thực nghiệm
+              </div>
+              <div class="ecom-feature-item"
+                style="background: rgba(236,72,153,0.02); border: 1px dashed rgba(236,72,153,0.2); border-radius: 6px; padding: 6px 10px;">
+                <strong
+                  style="color: #fff; font-size: 10px; display: flex; align-items: center; gap: 4px; margin-bottom: 2px;">
+                  🚚 Phân hệ Shipper &amp; Đối soát COD chuyên biệt
+                </strong>
+                <span style="font-size: 9px; color: var(--text-muted); line-height: 1.4; display: block;">
+                  Cung cấp ứng dụng riêng cho Shipper giao nhận đơn, cập nhật hành trình thời gian thực, quản lý và đối
+                  soát dòng tiền thu hộ COD chặt chẽ.
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+
+    <!-- FOOTER -->
+    <!-- FOOTER MỚI -->
+    <footer
+      style="display: flex; justify-content: space-between; align-items: flex-end; border-top: 2px solid rgba(255, 255, 255, 0.08); padding-top: 24px; z-index: 10;">
+
+      <!-- Cột Trái: Thông tin -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div
+          style="font-size: 13px; font-weight: 800; color: var(--text-main); text-transform: uppercase; letter-spacing: 0.5px;">
+          Khóa luận tốt nghiệp ngành <span style="color: var(--primary-cyan);">Công nghệ thông tin</span>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); line-height: 1.6;">
+          Bản quyền thuộc về <strong>Đại học Trà Vinh</strong> &amp; Tác giả đề tài.<br>
+          Nghiêm cấm sao chép dưới mọi hình thức.
+        </div>
+        <div
+          style="font-size: 11px; color: var(--secondary-pink); font-weight: 700; margin-top: 4px; letter-spacing: 1px;">
+          TRÀ VINH, 2026
+        </div>
+      </div>
+
+      <!-- Cột Phải: QR Code -->
+      <div style="flex-shrink: 0;">
+        <div class="qr-container" style="background: rgba(6, 182, 212, 0.05); border-color: rgba(6, 182, 212, 0.2);">
+          <div class="qr-placeholder">
+            <img src="./qr.png" alt="Website Test QR" style="width: 100%; height: 100%; object-fit: contain;">
+          </div>
+          <div class="qr-text">
+            <div class="qr-title"
+              style="font-size: 11px; font-weight: 800; color: var(--primary-cyan); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px;">
+              Trải Nghiệm Website</div>
+            <div class="qr-desc" style="font-size: 9.5px; color: var(--text-muted); line-height: 1.4;">Quét mã QR bằng
+              điện thoại<br>Thử kính ảo AR ngay tức thì!</div>
+          </div>
+        </div>
+      </div>
+
+    </footer>
+
+  </div>
+
+</body>
+
+</html>

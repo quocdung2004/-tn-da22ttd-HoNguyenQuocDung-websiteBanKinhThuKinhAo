@@ -67,7 +67,7 @@ exports.assignShipper = async (req, res) => {
 
     // Cập nhật thông tin phân công
     order.shipperId = shipperUsername;
-    order.status = 'shipping'; // Đổi trạng thái sang đang đi giao
+    // Trạng thái status vẫn giữ nguyên 'processing' (chỉ đổi sang 'shipping' sau khi shipper quét QR xác nhận nhận hàng)
     order.codStatus = order.paymentMethod === 'cod' ? 'pending' : 'no_cod';
 
     await order.save();
@@ -83,8 +83,8 @@ exports.assignShipper = async (req, res) => {
 
     // Phát socket tín hiệu realtime cho Shipper, Staff và Admin
     emitToUser(shipper._id.toString(), 'order:assigned', { id: order._id, orderCode: order.orderCode });
-    emitToStaff('order:statusChanged', { id: order._id, orderCode: order.orderCode, status: 'shipping' });
-    emitToAdmin('order:statusChanged', { id: order._id, orderCode: order.orderCode, status: 'shipping' });
+    emitToStaff('order:statusChanged', { id: order._id, orderCode: order.orderCode, status: order.status });
+    emitToAdmin('order:statusChanged', { id: order._id, orderCode: order.orderCode, status: order.status });
 
     res.json({
       success: true,
@@ -221,5 +221,69 @@ exports.approveReconciliation = async (req, res) => {
   } catch (error) {
     console.error('Lỗi duyệt đối soát shipper:', error);
     res.status(500).json({ success: false, message: 'Lỗi máy chủ khi duyệt đối soát!' });
+  }
+};
+
+// 6. API rejectReconciliation: Từ chối đối soát dòng tiền của Shipper này (hoàn lại trạng thái pending_submission)
+exports.rejectReconciliation = async (req, res) => {
+  try {
+    const { shipperUsername } = req.body;
+
+    if (!shipperUsername) {
+      return res.status(400).json({ success: false, message: 'Vui lòng cung cấp tài khoản Shipper để từ chối đối soát!' });
+    }
+
+    // Tìm các đơn hàng pending_reconciliation của shipper này
+    const pendingOrders = await Order.find({
+      shipperId: shipperUsername,
+      codStatus: 'pending_reconciliation'
+    });
+
+    if (pendingOrders.length === 0) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng chờ đối soát nào của shipper này!' });
+    }
+
+    const totalRejectedAmount = pendingOrders.reduce((sum, order) => sum + order.total, 0);
+
+    // Hoàn lại trạng thái dòng tiền sang 'pending_submission' và giữ status đơn hàng là 'shipped'
+    const orderIds = pendingOrders.map(o => o._id);
+    await Order.updateMany(
+      { _id: { $in: orderIds } },
+      { 
+        $set: { 
+          codStatus: 'pending_submission',
+          status: 'shipped'
+        } 
+      }
+    );
+
+    // Tìm thông tin shipper để gửi thông báo
+    const shipper = await User.findOne({ username: shipperUsername });
+    if (shipper) {
+      await createNotificationAndEmit({
+        userId: shipper._id,
+        type: 'reconciliation',
+        title: 'Bị từ chối đối soát tiền mặt',
+        message: `Admin đã từ chối đối soát số tiền ${totalRejectedAmount.toLocaleString('vi-VN')}đ của bạn. Vui lòng kiểm tra lại tiền mặt bàn giao.`,
+        link: '/shipper/dashboard'
+      });
+      
+      // Phát socket báo shipper cập nhật lại màn hình
+      emitToUser(shipper._id.toString(), 'reconciliation:rejected', { totalRejectedAmount });
+    }
+
+    // Báo Staff & Admin cập nhật realtime
+    emitToStaff('order:statusChanged', { message: `Từ chối đối soát cho shipper ${shipperUsername}` });
+    emitToAdmin('order:statusChanged', { message: `Từ chối đối soát cho shipper ${shipperUsername}` });
+
+    res.json({
+      success: true,
+      message: `Đã từ chối nộp tiền đối soát số tiền ${totalRejectedAmount.toLocaleString('vi-VN')}đ của shipper ${shipperUsername}! Trạng thái đơn đã hoàn về Đã giao (Chờ nộp tiền).`,
+      rejectedCount: pendingOrders.length,
+      totalRejectedAmount
+    });
+  } catch (error) {
+    console.error('Lỗi từ chối đối soát shipper:', error);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi từ chối đối soát!' });
   }
 };

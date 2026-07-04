@@ -14,11 +14,17 @@ import {
   ShieldCheck,
   ChevronRight,
   Package,
-  Check
+  Check,
+  X
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export default function ShipperManagement() {
-  const [activeTab, setActiveTab] = useState('assignment'); // 'assignment' | 'reconciliation'
+  const { user } = useAuth();
+  const isStaff = user?.role === 2;
+  
+  // Staff mặc định ở assignment, Admin mặc định ở reconciliation
+  const [activeTab, setActiveTab] = useState(isStaff ? 'assignment' : 'reconciliation');
   
   // States cho Tab 1: Phân công
   const [pendingOrders, setPendingOrders] = useState([]);
@@ -39,95 +45,103 @@ export default function ShipperManagement() {
     setLoading(true);
     setError(null);
     try {
-      // 1. Lấy danh sách đơn hàng chờ phân công
-      const ordersRes = await fetch('/api/orders/admin/shipper-pending', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const ordersData = await ordersRes.json();
+      if (isStaff) {
+        // 1. Lấy danh sách đơn hàng chờ phân công
+        const ordersRes = await fetch('/api/orders/admin/shipper-pending', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const ordersData = await ordersRes.json();
 
-      // 2. Lấy danh sách Shippers
-      const shippersRes = await fetch('/api/orders/admin/shippers-list', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const shippersData = await shippersRes.json();
+        // 2. Lấy danh sách Shippers
+        const shippersRes = await fetch('/api/orders/admin/shippers-list', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const shippersData = await shippersRes.json();
 
-      // 3. Lấy danh sách yêu cầu đối soát
-      const reconRes = await fetch('/api/orders/admin/reconciliation-requests', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const reconData = await reconRes.json();
-
-      if (ordersData.success && shippersData.success && reconData.success) {
-        setPendingOrders(ordersData.orders || []);
-        setShippers(shippersData.shippers || []);
-        setReconciliations(reconData.requests || []);
+        if (ordersData.success && shippersData.success) {
+          setPendingOrders(ordersData.orders || []);
+          setShippers(shippersData.shippers || []);
+        } else {
+          throw new Error('API trả về kết quả không thành công.');
+        }
       } else {
-        throw new Error('API trả về kết quả không thành công.');
+        // 3. Lấy danh sách yêu cầu đối soát (Chỉ lấy nếu không phải Staff)
+        const reconRes = await fetch('/api/orders/admin/reconciliation-requests', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const reconData = await reconRes.json();
+
+        if (reconData.success) {
+          setReconciliations(reconData.requests || []);
+        } else {
+          throw new Error('API trả về kết quả không thành công.');
+        }
       }
     } catch (err) {
       console.error('Lỗi API quản trị shipper:', err);
       setError('Đang sử dụng dữ liệu mô phỏng do lỗi kết nối API.');
       
-      // MOCK DATA để Admin test trực tiếp giao diện
-      const mockShippers = [
-        { username: 'shipper_nam', name: 'Nguyễn Hoài Nam', phone: '0981112223' },
-        { username: 'shipper_dung', name: 'Trần Quốc Dũng', phone: '0982223334' },
-        { username: 'shipper_minh', name: 'Phạm Bình Minh', phone: '0983334445' }
-      ];
-      setShippers(mockShippers);
+      if (isStaff) {
+        const mockShippers = [
+          { username: 'shipper_nam', name: 'Nguyễn Hoài Nam', phone: '0981112223' },
+          { username: 'shipper_dung', name: 'Trần Quốc Dũng', phone: '0982223334' },
+          { username: 'shipper_minh', name: 'Phạm Bình Minh', phone: '0983334445' }
+        ];
+        setShippers(mockShippers);
 
-      const mockPendingOrders = [
-        {
-          _id: 'ord1',
-          orderCode: 'ORD-2026A1',
-          customerInfo: { name: 'Lê Thúy Hạnh', phone: '0912121212', address: '12 Đường Đồng Khởi, Quận 1, TP. HCM' },
-          paymentMethod: 'cod',
-          total: 680000,
-          createdAt: '2026-06-30T10:15:00.000Z'
-        },
-        {
-          _id: 'ord2',
-          orderCode: 'ORD-2026A2',
-          customerInfo: { name: 'Trịnh Thế Mỹ', phone: '0934343434', address: '345 Hùng Vương, Quận 5, TP. HCM' },
-          paymentMethod: 'banking',
-          total: 1350000,
-          createdAt: '2026-06-30T11:30:00.000Z'
-        },
-        {
-          _id: 'ord3',
-          orderCode: 'ORD-2026A3',
-          customerInfo: { name: 'Vũ Quốc Bảo', phone: '0978787878', address: '67 Nguyễn Bỉnh Khiêm, Bình Thạnh, TP. HCM' },
-          paymentMethod: 'cod',
-          total: 420000,
-          createdAt: '2026-06-30T12:00:00.000Z'
-        }
-      ];
-      setPendingOrders(mockPendingOrders);
-
-      const mockReconciliationRequests = [
-        {
-          _id: 'shipper_nam',
-          shipperName: 'Nguyễn Hoài Nam',
-          shipperPhone: '0981112223',
-          orderCount: 2,
-          totalCod: 1100000,
-          orders: [
-            { orderCode: 'ORD-2026A01', total: 600000, customerName: 'Hoàng Lâm', createdAt: '2026-06-30T01:00:00.000Z' },
-            { orderCode: 'ORD-2026A02', total: 500000, customerName: 'Mai Phương', createdAt: '2026-06-30T02:00:00.000Z' }
-          ]
-        },
-        {
-          _id: 'shipper_dung',
-          shipperName: 'Trần Quốc Dũng',
-          shipperPhone: '0982223334',
-          orderCount: 1,
-          totalCod: 450000,
-          orders: [
-            { orderCode: 'ORD-2026A05', total: 450000, customerName: 'Minh Tuấn', createdAt: '2026-06-30T04:00:00.000Z' }
-          ]
-        }
-      ];
-      setReconciliations(mockReconciliationRequests);
+        const mockPendingOrders = [
+          {
+            _id: 'ord1',
+            orderCode: 'ORD-2026A1',
+            customerInfo: { name: 'Lê Thúy Hạnh', phone: '0912121212', address: '12 Đường Đồng Khởi, Quận 1, TP. HCM' },
+            paymentMethod: 'cod',
+            total: 680000,
+            createdAt: '2026-06-30T10:15:00.000Z'
+          },
+          {
+            _id: 'ord2',
+            orderCode: 'ORD-2026A2',
+            customerInfo: { name: 'Trịnh Thế Mỹ', phone: '0934343434', address: '345 Hùng Vương, Quận 5, TP. HCM' },
+            paymentMethod: 'banking',
+            total: 1350000,
+            createdAt: '2026-06-30T11:30:00.000Z'
+          },
+          {
+            _id: 'ord3',
+            orderCode: 'ORD-2026A3',
+            customerInfo: { name: 'Vũ Quốc Bảo', phone: '0978787878', address: '67 Nguyễn Bỉnh Khiêm, Bình Thạnh, TP. HCM' },
+            paymentMethod: 'cod',
+            total: 420000,
+            createdAt: '2026-06-30T12:00:00.000Z'
+          }
+        ];
+        setPendingOrders(mockPendingOrders);
+      } else {
+        const mockReconciliationRequests = [
+          {
+            _id: 'shipper_nam',
+            shipperName: 'Nguyễn Hoài Nam',
+            shipperPhone: '0981112223',
+            orderCount: 2,
+            totalCod: 1100000,
+            orders: [
+              { orderCode: 'ORD-2026A01', total: 600000, customerName: 'Hoàng Lâm', createdAt: '2026-06-30T01:00:00.000Z' },
+              { orderCode: 'ORD-2026A02', total: 500000, customerName: 'Mai Phương', createdAt: '2026-06-30T02:00:00.000Z' }
+            ]
+          },
+          {
+            _id: 'shipper_dung',
+            shipperName: 'Trần Quốc Dũng',
+            shipperPhone: '0982223334',
+            orderCount: 1,
+            totalCod: 450000,
+            orders: [
+              { orderCode: 'ORD-2026A05', total: 450000, customerName: 'Minh Tuấn', createdAt: '2026-06-30T04:00:00.000Z' }
+            ]
+          }
+        ];
+        setReconciliations(mockReconciliationRequests);
+      }
     } finally {
       setLoading(false);
     }
@@ -207,6 +221,40 @@ export default function ShipperManagement() {
     }
   };
 
+  // Xử lý từ chối đối soát dòng tiền (Hoàn tiền/hoàn đơn về cho shipper cầm)
+  const handleRejectReconciliation = async (shipperUsername, shipperName, totalCod) => {
+    const confirmReject = window.confirm(
+      `Xác nhận Admin CHƯA NHẬN số tiền ${totalCod.toLocaleString('vi-VN')}đ của Shipper: ${shipperName}? \nHệ thống sẽ hoàn lại số tiền/đơn này về danh sách tự giữ của Shipper.`
+    );
+    if (!confirmReject) return;
+
+    setSubmittingId(shipperUsername);
+    try {
+      const res = await fetch('/api/orders/admin/reject-reconciliation', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ shipperUsername })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`Đã từ chối đối soát thành công dòng tiền cho shipper ${shipperName}!`);
+        fetchData();
+      } else {
+        alert(data.message || 'Từ chối đối soát thất bại.');
+      }
+    } catch (err) {
+      console.error('Lỗi từ chối đối soát:', err);
+      // Fallback offline demo
+      setReconciliations(prev => prev.filter(r => r._id !== shipperUsername));
+      alert(`Đã từ chối đối soát thành công cho shipper ${shipperName} (Chế độ mô phỏng).`);
+    } finally {
+      setSubmittingId(null);
+    }
+  };
+
   // Xử lý cập nhật Dropdown
   const handleDropdownChange = (orderId, val) => {
     setSelectedShipper(prev => ({
@@ -229,45 +277,49 @@ export default function ShipperManagement() {
           </div>
           <button 
             onClick={fetchData}
-            className="flex items-center gap-2 px-5 py-3 bg-white hover:bg-gray-50 text-slate-700 font-bold rounded-2xl border border-gray-200 shadow-sm active:scale-98 transition text-sm"
+            className="flex items-center gap-2 px-5 py-3 bg-white hover:bg-gray-55 text-slate-700 font-bold rounded-2xl border border-gray-200 shadow-sm active:scale-98 transition text-sm"
           >
             <RefreshCw className="w-4 h-4" /> Làm mới trang
           </button>
         </div>
 
         {/* THỐNG KÊ NHANH (CARDS) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-sm flex items-center gap-4 hover:shadow-md transition">
-            <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
-              <Package className="w-7 h-7" />
+        <div className={`grid grid-cols-1 ${isStaff ? 'md:grid-cols-1' : 'md:grid-cols-2'} gap-6 mb-8`}>
+          {isStaff ? (
+            <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-sm flex items-center gap-4 hover:shadow-md transition">
+              <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
+                <Package className="w-7 h-7" />
+              </div>
+              <div>
+                <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Đơn hàng cần giao</p>
+                <p className="text-3xl font-black text-slate-800">{pendingOrders.length}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Đơn hàng cần giao</p>
-              <p className="text-3xl font-black text-slate-800">{pendingOrders.length}</p>
-            </div>
-          </div>
+          ) : (
+            <>
+              <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-sm flex items-center gap-4 hover:shadow-md transition">
+                <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center">
+                  <Clock className="w-7 h-7 animate-pulse" />
+                </div>
+                <div>
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Shipper đang giữ tiền</p>
+                  <p className="text-3xl font-black text-amber-600">{reconciliations.length}</p>
+                </div>
+              </div>
 
-          <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-sm flex items-center gap-4 hover:shadow-md transition">
-            <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center">
-              <Clock className="w-7 h-7 animate-pulse" />
-            </div>
-            <div>
-              <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Shipper đang giữ tiền</p>
-              <p className="text-3xl font-black text-amber-600">{reconciliations.length}</p>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-sm flex items-center gap-4 hover:shadow-md transition">
-            <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
-              <DollarSign className="w-7 h-7" />
-            </div>
-            <div>
-              <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Tổng tiền đối soát chờ thu</p>
-              <p className="text-3xl font-black text-emerald-600">
-                {reconciliations.reduce((sum, r) => sum + r.totalCod, 0).toLocaleString('vi-VN')}đ
-              </p>
-            </div>
-          </div>
+              <div className="bg-white p-6 rounded-3xl border border-gray-150 shadow-sm flex items-center gap-4 hover:shadow-md transition">
+                <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
+                  <DollarSign className="w-7 h-7" />
+                </div>
+                <div>
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Tổng tiền đối soát chờ thu</p>
+                  <p className="text-3xl font-black text-emerald-600">
+                    {reconciliations.reduce((sum, r) => sum + r.totalCod, 0).toLocaleString('vi-VN')}đ
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* WARNING CẢNH BÁO MOCK DATA NẾU CÓ */}
@@ -280,33 +332,6 @@ export default function ShipperManagement() {
             </div>
           </div>
         )}
-
-        {/* TAB SELECTOR */}
-        <div className="bg-white p-1 rounded-2xl border border-gray-200 flex mb-8 w-fit shadow-sm">
-          <button
-            onClick={() => setActiveTab('assignment')}
-            className={`px-6 py-3 text-sm font-bold rounded-xl transition duration-150 flex items-center gap-2 ${
-              activeTab === 'assignment'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-gray-500 hover:text-gray-900'
-            }`}
-          >
-            <UserCheck className="w-4 h-4" />
-            <span>Phân công vận chuyển ({pendingOrders.length})</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('reconciliation')}
-            className={`px-6 py-3 text-sm font-bold rounded-xl transition duration-150 flex items-center gap-2 ${
-              activeTab === 'reconciliation'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-gray-500 hover:text-gray-900'
-            }`}
-          >
-            <DollarSign className="w-4 h-4" />
-            <span>Duyệt đối soát dòng tiền ({reconciliations.length})</span>
-          </button>
-        </div>
 
         {/* LOADING ANIMAITON */}
         {loading && (
@@ -430,20 +455,30 @@ export default function ShipperManagement() {
 
                       {/* Tiền mặt thu hộ & Nút Duyệt */}
                       <div className="flex items-center gap-5 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-gray-150">
-                        <div className="text-left sm:text-right">
+                        <div className="text-left sm:text-right mr-2">
                           <span className="text-[10px] text-slate-400 font-extrabold uppercase block tracking-wider">Số đơn: {recon.orderCount} đơn</span>
                           <span className="text-xl font-black text-emerald-600">
                             {recon.totalCod.toLocaleString('vi-VN')}đ
                           </span>
                         </div>
 
-                        <button
-                          onClick={() => handleApproveReconciliation(recon._id, recon.shipperName, recon.totalCod)}
-                          disabled={submittingId === recon._id}
-                          className="px-5 py-3 bg-emerald-600 hover:bg-emerald-705 active:scale-98 disabled:opacity-50 transition text-white font-bold text-xs rounded-2xl flex items-center gap-1.5 shadow-md shadow-emerald-600/10"
-                        >
-                          <Check className="w-4 h-4" /> Đã nhận tiền - Duyệt giải ngân
-                        </button>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            onClick={() => handleRejectReconciliation(recon._id, recon.shipperName, recon.totalCod)}
+                            disabled={submittingId === recon._id}
+                            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-98 disabled:opacity-50 transition text-white font-bold text-xs rounded-2xl flex items-center gap-1.5 shadow-md shadow-rose-600/10"
+                          >
+                            <X className="w-3.5 h-3.5" /> Chưa nhận tiền
+                          </button>
+
+                          <button
+                            onClick={() => handleApproveReconciliation(recon._id, recon.shipperName, recon.totalCod)}
+                            disabled={submittingId === recon._id}
+                            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-705 active:scale-98 disabled:opacity-50 transition text-white font-bold text-xs rounded-2xl flex items-center gap-1.5 shadow-md shadow-emerald-600/10"
+                          >
+                            <Check className="w-3.5 h-3.5" /> Đã nhận tiền - Duyệt giải ngân
+                          </button>
+                        </div>
                       </div>
                     </div>
 

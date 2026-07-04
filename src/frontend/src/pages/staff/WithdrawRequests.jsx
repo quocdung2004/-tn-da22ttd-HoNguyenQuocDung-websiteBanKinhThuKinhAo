@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Filter, RefreshCw, CheckCircle, XCircle, Clock, FileText, AlertCircle, QrCode } from 'lucide-react';
 import { useSocket } from '../../context/SocketContext';
+import { useAuth } from '../../context/AuthContext';
 
 export default function WithdrawRequests() {
+  const { user } = useAuth();
   const { socket } = useSocket();
   const [withdrawals, setWithdrawals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -399,7 +401,9 @@ export default function WithdrawRequests() {
                     </button>
                     <button
                       onClick={() => openModal(item, 'reject')}
-                      className="w-full bg-red-50 hover:bg-red-100 text-red-600 font-bold py-2.5 px-4 rounded-xl text-xs transition border border-red-200"
+                      disabled={user?.role === 2}
+                      className="w-full bg-red-50 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-50 text-red-600 font-bold py-2.5 px-4 rounded-xl text-xs transition border border-red-200"
+                      title={user?.role === 2 ? "Nhân viên không có quyền từ chối giải ngân" : ""}
                     >
                       Từ chối giải ngân
                     </button>
@@ -525,7 +529,9 @@ export default function WithdrawRequests() {
               <button
                 type="button"
                 onClick={() => openModal(qrModalRequest, 'approve')}
-                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-5 rounded-xl text-xs transition shadow-md shadow-green-100"
+                disabled={user?.role === 2}
+                className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600 text-white font-bold py-2.5 px-5 rounded-xl text-xs transition shadow-md shadow-green-100"
+                title={user?.role === 2 ? "Nhân viên không có quyền phê duyệt giải ngân" : ""}
               >
                 Xác nhận đã chuyển khoản
               </button>

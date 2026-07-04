@@ -4,8 +4,10 @@ import {
   CreditCard, Calendar, FileText, ArrowRight, Loader2 
 } from 'lucide-react';
 import { useSocket } from '../../context/SocketContext';
+import { useAuth } from '../../context/AuthContext';
 
 export default function CancelRequests() {
+  const { user } = useAuth();
   const { socket } = useSocket();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -270,13 +272,17 @@ export default function CancelRequests() {
                         <div className="flex justify-center items-center gap-2">
                           <button
                             onClick={() => handleApprove(order._id, order.orderCode)}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-md shadow-emerald-100 flex items-center gap-1"
+                            disabled={user?.role === 2 && !['pending', 'paid'].includes(order.previousStatusBeforeCancelRequest)}
+                            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-md shadow-emerald-100 flex items-center gap-1"
+                            title={user?.role === 2 && !['pending', 'paid'].includes(order.previousStatusBeforeCancelRequest) ? "Nhân viên không có quyền duyệt hủy đơn đã xuất kho" : ""}
                           >
                             Đồng ý
                           </button>
                           <button
                             onClick={() => setRejectingId(order._id)}
-                            className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white font-bold text-xs px-3.5 py-2 rounded-xl transition border border-red-200"
+                            disabled={user?.role === 2 && !['pending', 'paid'].includes(order.previousStatusBeforeCancelRequest)}
+                            className="bg-red-50 text-red-600 hover:bg-red-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-50 disabled:hover:text-red-600 font-bold text-xs px-3.5 py-2 rounded-xl transition border border-red-200"
+                            title={user?.role === 2 && !['pending', 'paid'].includes(order.previousStatusBeforeCancelRequest) ? "Nhân viên không có quyền từ chối hủy đơn đã xuất kho" : ""}
                           >
                             Từ chối
                           </button>

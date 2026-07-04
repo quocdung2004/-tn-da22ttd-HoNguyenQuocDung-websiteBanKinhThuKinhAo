@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import VirtualTryOn from './VirtualTryOn';
 import { useAuth } from '../../context/AuthContext';
+import ProductCard from '../../components/ProductCard';
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -17,6 +18,7 @@ export default function ProductDetail() {
   // ==========================================
   const [product, setProduct] = useState(null);
   const [allArProducts, setAllArProducts] = useState([]);
+  const [relatedProducts, setRelatedProducts] = useState([]);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
 
   const [prescriptionOption, setPrescriptionOption] = useState('none'); // 'none' | 'saved' | 'custom'
@@ -35,6 +37,7 @@ export default function ProductDetail() {
   const [showPrescriptionSheet, setShowPrescriptionSheet] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [isWishlisted, setIsWishlisted] = useState(false);
+  const [wishlistIds, setWishlistIds] = useState(new Set());
   const [wishlistUpdating, setWishlistUpdating] = useState(false);
 
   // Reviews System states
@@ -59,6 +62,15 @@ export default function ProductDetail() {
 
         const arAvailable = data.products.filter(p => p.arUrl && p.arUrl.trim() !== '');
         setAllArProducts(arAvailable);
+
+        if (currentProd) {
+          const related = data.products.filter(p => 
+            p._id !== currentProd._id && 
+            ((p.category && p.category._id === currentProd.category?._id) || 
+             (p.brand && p.brand._id === currentProd.brand?._id))
+          ).slice(0, 4);
+          setRelatedProducts(related);
+        }
       }
     } catch (error) {
       console.error("❌ Lỗi tải dữ liệu sản phẩm:", error);
@@ -139,23 +151,26 @@ export default function ProductDetail() {
     }
   };
 
-  const checkWishlistStatus = async () => {
+  const fetchWishlist = async () => {
     const token = localStorage.getItem('glassesToken');
     if (!token || !user || user.role !== 0) {
+      setWishlistIds(new Set());
       setIsWishlisted(false);
       return;
     }
 
     try {
-      const res = await fetch(`/api/wishlist/check/${id}`, {
+      const res = await fetch('/api/wishlist', {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
       if (data.success) {
-        setIsWishlisted(Boolean(data.isWishlisted));
+        const nextIds = new Set((data.items || []).map((item) => item.product?._id).filter(Boolean));
+        setWishlistIds(nextIds);
+        setIsWishlisted(nextIds.has(id));
       }
-    } catch (err) {
-      console.error('Loi kiem tra wishlist:', err);
+    } catch (error) {
+      console.error('Lỗi tải danh sách yêu thích:', error);
     }
   };
 
@@ -206,7 +221,7 @@ export default function ProductDetail() {
   }, [id]);
 
   useEffect(() => {
-    checkWishlistStatus();
+    fetchWishlist();
   }, [id, user]);
 
   const showToast = (message, type = 'success') => {
@@ -246,41 +261,66 @@ export default function ProductDetail() {
   // ==========================================
   // 3. THÊM VÀO GIỎ HÀNG
   // ==========================================
-  const handleWishlistToggle = async () => {
+  const handleWishlistToggle = async (event, targetId) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
     if (!user) {
-      showToast('Vui long dang nhap de su dung danh sach yeu thich!', 'error');
+      showToast('Vui lòng đăng nhập để sử dụng danh sách yêu thích!', 'error');
       navigate('/login');
       return;
     }
 
     if (user.role !== 0) return;
 
+    const productId = targetId || id;
     const token = localStorage.getItem('glassesToken');
+    const isTargetWishlisted = wishlistIds.has(productId);
     setWishlistUpdating(true);
 
     try {
-      const res = await fetch(`/api/wishlist/${id}`, {
-        method: isWishlisted ? 'DELETE' : 'POST',
+      const res = await fetch(`/api/wishlist/${productId}`, {
+        method: isTargetWishlisted ? 'DELETE' : 'POST',
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
 
       if (!data.success) {
-        showToast(data.message || 'Khong the cap nhat danh sach yeu thich!', 'error');
+        showToast(data.message || 'Không thể cập nhật danh sách yêu thích!', 'error');
         return;
       }
 
-      setIsWishlisted(!isWishlisted);
-      showToast(isWishlisted ? 'Da bo khoi danh sach yeu thich' : 'Da them vao danh sach yeu thich', 'success');
+      setWishlistIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        if (isTargetWishlisted) {
+          nextIds.delete(productId);
+          if (productId === id) setIsWishlisted(false);
+        } else {
+          nextIds.add(productId);
+          if (productId === id) setIsWishlisted(true);
+        }
+        return nextIds;
+      });
+      showToast(isTargetWishlisted ? 'Đã bỏ khỏi danh sách yêu thích' : 'Đã thêm vào danh sách yêu thích', 'success');
     } catch (err) {
-      console.error('Loi cap nhat wishlist:', err);
-      showToast('Loi ket noi may chu khi cap nhat yeu thich!', 'error');
+      console.error('Lỗi cập nhật wishlist:', err);
+      showToast('Lỗi kết nối máy chủ khi cập nhật yêu thích!', 'error');
     } finally {
       setWishlistUpdating(false);
     }
   };
 
   const handleAddToCart = () => {
+    if (!user) {
+      showToast('Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng!', 'error');
+      setTimeout(() => {
+        navigate('/login');
+      }, 1500);
+      return;
+    }
+
     const rx = getActivePrescription();
     if (prescriptionOption === 'custom') {
       if (rx.rightEye.sphere === '' && rx.leftEye.sphere === '') {
@@ -333,6 +373,71 @@ export default function ProductDetail() {
 
     setIsAdded(true);
     showToast('Đã thêm vào giỏ hàng', 'success');
+  };
+
+  const handleBuyNow = () => {
+    if (!user) {
+      showToast('Vui lòng đăng nhập để thực hiện mua ngay!', 'error');
+      setTimeout(() => {
+        navigate('/login');
+      }, 1500);
+      return;
+    }
+
+    const rx = getActivePrescription();
+    if (prescriptionOption === 'custom') {
+      if (rx.rightEye.sphere === '' && rx.leftEye.sphere === '') {
+        showToast('Vui lòng nhập thông số độ cận (SPH)!', 'error');
+        return;
+      }
+    } else if (prescriptionOption === 'saved' && !savedPrescription) {
+      showToast('Bạn chưa lưu hồ sơ độ cận. Vui lòng chọn Nhập mới hoặc Không cần độ cận!', 'error');
+      return;
+    }
+
+    const isRx = prescriptionOption !== 'none';
+    const cartItemId = isRx 
+      ? `${product._id}_rx_${rx.rightEye.sphere || 0}_${rx.leftEye.sphere || 0}_${rx.rightEye.cylinder || 0}_${rx.leftEye.cylinder || 0}`
+      : `${product._id}_std`;
+
+    const newItem = {
+      cartId: cartItemId,
+      productId: product._id,
+      name: product.name,
+      price: product.discountPercent > 0 ? product.salePrice : product.price,
+      originalPrice: product.discountPercent > 0 ? product.originalPrice : product.price,
+      discountPercent: product.discountPercent || 0,
+      salePrice: product.discountPercent > 0 ? product.salePrice : product.price,
+      image: product.images[0],
+      hasPrescription: isRx,
+      od: isRx ? `SPH: ${rx.rightEye.sphere || '0.00'} | CYL: ${rx.rightEye.cylinder || '0.00'} | AXIS: ${rx.rightEye.axis || '0'}` : '',
+      os: isRx ? `SPH: ${rx.leftEye.sphere || '0.00'} | CYL: ${rx.leftEye.cylinder || '0.00'} | AXIS: ${rx.leftEye.axis || '0'}` : '',
+      od_sph: isRx && rx.rightEye.sphere !== '' ? Number(rx.rightEye.sphere) : null,
+      od_cyl: isRx && rx.rightEye.cylinder !== '' ? Number(rx.rightEye.cylinder) : null,
+      od_axis: isRx && rx.rightEye.axis !== '' ? Number(rx.rightEye.axis) : null,
+      os_sph: isRx && rx.leftEye.sphere !== '' ? Number(rx.leftEye.sphere) : null,
+      os_cyl: isRx && rx.leftEye.cylinder !== '' ? Number(rx.leftEye.cylinder) : null,
+      os_axis: isRx && rx.leftEye.axis !== '' ? Number(rx.leftEye.axis) : null,
+      pd: isRx && rx.pd !== '' ? Number(rx.pd) : null,
+      rxDate: isRx && rx.issuedDate ? rx.issuedDate : null,
+      rxNote: isRx ? rx.note || '' : '',
+      prescriptionMode: prescriptionOption,
+      quantity: 1
+    };
+
+    const cartKey = getCartKey();
+    const cart = JSON.parse(localStorage.getItem(cartKey)) || [];
+    const existIdx = cart.findIndex(item => item.cartId === newItem.cartId);
+    if (existIdx !== -1) {
+      // Keep or increment
+    } else {
+      cart.push(newItem);
+    }
+
+    localStorage.setItem(cartKey, JSON.stringify(cart));
+    window.dispatchEvent(new Event('cartUpdated'));
+
+    navigate('/checkout', { state: { selectedItems: [newItem.cartId] } });
   };
 
   if (!product) {
@@ -498,11 +603,35 @@ export default function ProductDetail() {
               </button>
             )}
 
-            <button onClick={handleAddToCart} disabled={isAdded} className={`w-full py-6 rounded-3xl font-black text-xl flex items-center justify-center gap-3 shadow-2xl transition-all active:scale-95 ${isAdded ? 'bg-green-500 text-white shadow-green-200' : 'bg-blue-600 text-white shadow-blue-200 hover:bg-blue-700'}`}>
-              {isAdded ? <><ShieldCheck className="w-7 h-7 animate-bounce" /> ĐÃ THÊM VÀO GIỎ!</> : <><ShoppingCart className="w-7 h-7" /> THÊM VÀO GIỎ HÀNG</>}
-            </button>
+            <div className="flex gap-4">
+              <button onClick={handleAddToCart} disabled={isAdded} className={`flex-1 py-6 rounded-3xl font-black text-lg flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 ${isAdded ? 'bg-green-500 text-white shadow-green-200' : 'bg-blue-600 text-white shadow-blue-200 hover:bg-blue-700'}`}>
+                {isAdded ? <><ShieldCheck className="w-6 h-6 animate-bounce" /> ĐÃ THÊM!</> : <><ShoppingCart className="w-6 h-6" /> THÊM VÀO GIỎ</>}
+              </button>
+              <button onClick={handleBuyNow} className="flex-1 py-6 rounded-3xl font-black text-lg flex items-center justify-center gap-2 shadow-2xl bg-gray-900 text-white hover:bg-indigo-600 transition-all active:scale-95 shadow-gray-900/10">
+                MUA NGAY
+              </button>
+            </div>
           </div>
         </div>
+
+        {/* ===================== SẢN PHẨM LIÊN QUAN ===================== */}
+        {relatedProducts.length > 0 && (
+          <div className="mt-16 border-t border-gray-100 pt-16">
+            <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tight mb-2">Sản phẩm liên quan</h3>
+            <p className="text-gray-500 text-sm mb-8">Có thể bạn cũng sẽ thích những mẫu kính mắt này</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              {relatedProducts.map((prod) => (
+                <ProductCard
+                  key={prod._id}
+                  product={prod}
+                  showWishlistActions={!user || user.role === 0}
+                  wishlistIds={wishlistIds}
+                  onWishlistToggle={handleWishlistToggle}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ===================== HỆ THỐNG ĐÁNH GIÁ & NHẬN XÉT ===================== */}
         <div className="mt-16 border-t border-gray-100 pt-16">
