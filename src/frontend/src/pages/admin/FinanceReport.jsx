@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import { Card, Title, Subtitle, Badge, Text } from '@tremor/react';
-import { Calendar, Download, Wallet, Package, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Card, Title, Subtitle, Badge, Text, DateRangePicker } from '@tremor/react';
+import { Download, Wallet, Package, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 
 const formatCurrency = (value) => (
   new Intl.NumberFormat('vi-VN', {
@@ -18,12 +18,35 @@ export default function FinanceReport() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Khởi tạo khoảng ngày mặc định: 30 ngày gần nhất
+  const [dateRange, setDateRange] = useState({
+    from: (() => {
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      return d;
+    })(),
+    to: new Date()
+  });
+
   const fetchFinanceReport = async () => {
     try {
       setIsLoading(true);
       setError(null);
       const token = localStorage.getItem('glassesToken');
-      const response = await axios.get('/api/reports/finance-details', {
+
+      let url = '/api/reports/finance-details';
+      const params = [];
+      if (dateRange?.from) {
+        params.push(`startDate=${dateRange.from.toISOString()}`);
+      }
+      if (dateRange?.to) {
+        params.push(`endDate=${dateRange.to.toISOString()}`);
+      }
+      if (params.length > 0) {
+        url += `?${params.join('&')}`;
+      }
+
+      const response = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (response.data && response.data.success) {
@@ -39,9 +62,10 @@ export default function FinanceReport() {
     }
   };
 
+  // Tự động tải lại báo cáo mỗi khi dateRange thay đổi
   useEffect(() => {
     fetchFinanceReport();
-  }, []);
+  }, [dateRange]);
 
   const calculatedData = useMemo(() => {
     return data.map(p => {
@@ -70,6 +94,60 @@ export default function FinanceReport() {
     );
   }, [calculatedData]);
 
+  // Chức năng xuất Excel sử dụng CSV thuần tương thích Unicode
+  const handleExportExcel = () => {
+    if (calculatedData.length === 0) return;
+
+    // 1. Tiêu đề các cột
+    const headers = [
+      'Tên Sản Phẩm',
+      'Số Lượng Bán',
+      'Giá Nhập (Ước tính)',
+      'Giá Bán',
+      'Doanh Thu',
+      'Lợi Nhuận'
+    ];
+
+    // 2. Map dữ liệu thành từng dòng của CSV
+    const csvRows = calculatedData.map(item => {
+      // Bao quanh chuỗi bằng dấu ngoặc kép và chuyển đổi dấu ngoặc kép kép để tránh lỗi vỡ cột
+      const nameEscaped = `"${(item.name || '').toString().replace(/"/g, '""')}"`;
+      const value = item.value || 0;
+      const importPrice = item.importPrice || 0;
+      const salePrice = item.salePrice || 0;
+      const totalSale = item.totalSale || 0;
+      const profit = item.profit || 0;
+
+      return [
+        nameEscaped,
+        value,
+        importPrice,
+        salePrice,
+        totalSale,
+        profit
+      ].join(',');
+    });
+
+    // 3. Ghép Header và dữ liệu, thêm ký tự BOM (\uFEFF) để Excel hiển thị tiếng Việt UTF-8
+    const csvContent = '\uFEFF' + headers.join(',') + '\n' + csvRows.join('\n');
+
+    // 4. Tạo Blob và trigger tải file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const timestamp = new Date().getTime();
+    const fileName = `Bao_cao_tai_chinh_${timestamp}.csv`;
+
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+
+    // Giải phóng bộ nhớ
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="p-4 sm:p-8 bg-slate-50/50 min-h-screen pb-24">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -87,11 +165,17 @@ export default function FinanceReport() {
 
           {/* Action Toolbar */}
           <div className="flex flex-wrap items-center gap-3">
-            <button className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold transition shadow-sm outline-none">
-              <Calendar className="w-4 h-4 text-slate-500" />
-              <span>Chọn ngày tháng</span>
-            </button>
-            <button className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold transition shadow-sm outline-none">
+            <DateRangePicker
+              value={dateRange}
+              onValueChange={setDateRange}
+              placeholder="Chọn ngày tháng"
+              className="w-full sm:w-auto"
+            />
+            <button
+              onClick={handleExportExcel}
+              disabled={isLoading || calculatedData.length === 0}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-slate-900 text-white text-sm font-semibold transition shadow-sm outline-none"
+            >
               <Download className="w-4 h-4" />
               <span>Xuất Excel</span>
             </button>

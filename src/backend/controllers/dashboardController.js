@@ -836,12 +836,30 @@ exports.getInventoryDetailReport = async (req, res) => {
  */
 exports.getFinanceReportDetails = async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
+
+    const matchStage = {
+      status: { $in: ['completed', 'shipped', 'shipping'] }
+    };
+
+    if (startDate || endDate) {
+      matchStage.createdAt = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        matchStage.createdAt.$gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        matchStage.createdAt.$lte = end;
+      }
+    }
+
     const reportData = await Order.aggregate([
-      // $match: Chỉ thống kê các đơn hàng tạo ra dòng tiền thực tế
+      // $match: Chỉ thống kê các đơn hàng tạo ra dòng tiền thực tế và nằm trong khoảng ngày
       {
-        $match: {
-          status: { $in: ['completed', 'shipped', 'shipping'] }
-        }
+        $match: matchStage
       },
       // $unwind: Tách các mảng items trong mỗi đơn hàng
       {
