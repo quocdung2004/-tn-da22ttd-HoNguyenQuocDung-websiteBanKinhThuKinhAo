@@ -22,9 +22,10 @@ const { login } = useAuth();
       if (data.success) {
         alert(`Đăng nhập thành công! Chào mừng ${data.user.name || data.user.username}.`);
         login(data.user, data.token);
-        // Điều hướng dựa vào Role (0: Khách, 1: Admin, 2: Staff)
+        // Điều hướng dựa vào Role (0: Khách, 1: Admin, 2: Staff, 3: Shipper)
         if (data.user.role === 1) navigate('/admin');
         else if (data.user.role === 2) navigate('/staff');
+        else if (data.user.role === 3) navigate('/shipper');
         else navigate('/');
       } else {
         setError(data.message);

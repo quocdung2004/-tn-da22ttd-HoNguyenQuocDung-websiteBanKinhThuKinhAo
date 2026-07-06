@@ -3,7 +3,6 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Package, Tag, LogOut, LayoutDashboard, ListTree, PlusCircle, Users, XOctagon, Wallet, Percent, MessageSquare, Images, Home, Truck } from 'lucide-react';
 import NotificationBell from '../../components/NotificationBell';
 import { useAuth } from '../../context/AuthContext';
-import Footer from '../../components/Footer';
 
 export default function AdminLayout() {
   const location = useLocation();
@@ -21,6 +20,7 @@ export default function AdminLayout() {
   // Đưa tất cả các chức năng chính của Admin vào chung 1 mảng
   const menuItems = [
     { path: '/admin', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Tổng quan Đơn hàng' },
+    { path: '/admin/finance-report', icon: <Wallet className="w-5 h-5" />, label: 'Báo cáo Tài chính' },
     { path: '/admin/products', icon: <Package className="w-5 h-5" />, label: 'Quản lý Kính (Kho)' },
     { path: '/admin/sales', icon: <Percent className="w-5 h-5" />, label: 'Quản lý Khuyến mãi' },
     { path: '/admin/brand', icon: <Tag className="w-5 h-5" />, label: 'Quản lý Nhãn hàng' },
@@ -90,7 +90,9 @@ export default function AdminLayout() {
           </div>
         </main>
       </div>
-      <Footer />
+      <footer className="bg-white border-t border-gray-100 py-4 text-center text-xs text-gray-500">
+        &copy; {new Date().getFullYear()} Dũng System. All rights reserved.
+      </footer>
     </div>
   );
 }

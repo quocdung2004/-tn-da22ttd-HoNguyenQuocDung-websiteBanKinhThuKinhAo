@@ -373,12 +373,21 @@ const productRoutes = require('./routes/productRoutes');
 app.use('/api/products', productRoutes);
 const orderRoutes = require('./routes/orderRoutes');
 app.use('/api/orders', orderRoutes);
+const dashboardRoutes = require('./routes/dashboardRoutes');
+app.use('/api/dashboard', dashboardRoutes);
 const importReceiptRoutes = require('./routes/importReceiptRoutes');
 app.use('/api/imports', importReceiptRoutes);
 const adminRoutes = require('./routes/adminRoutes');
 app.use('/api/admin', adminRoutes);
 const walletRoutes = require('./routes/walletRoutes');
 app.use('/api/wallet', walletRoutes);
+const shipperRoutes = require('./routes/shipper.routes');
+app.use('/api/shipper', shipperRoutes);
+
+// Đăng ký định tuyến báo cáo chi tiết tài chính (Finance Report details)
+const { verifyAdmin } = require('./middleware/authMiddleware');
+const dashboardController = require('./controllers/dashboardController');
+app.get('/api/reports/finance-details', verifyToken, verifyAdmin, dashboardController.getFinanceReportDetails);
 
 // Đăng ký định tuyến thông báo (Notification System)
 const notificationRoutes = require('./routes/notificationRoutes');

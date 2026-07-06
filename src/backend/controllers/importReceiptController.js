@@ -80,7 +80,7 @@ exports.createReceipt = async (req, res) => {
           const newProduct = new Product({
             name: item.newProductName.trim(),
             price: 0, // Giá bán lẻ mặc định ban đầu là 0
-            importPrice: Number(item.importPrice),
+            importPrice: Math.round(Number(item.importPrice) || 0),
             stock: Number(item.quantity),
             isDraft: true,
             isActive: false // Chưa cho phép hiển thị ra website
@@ -89,24 +89,31 @@ exports.createReceipt = async (req, res) => {
           finalProductId = newProduct._id;
           finalProduct = newProduct;
         } else {
-          // Sản phẩm có sẵn: Tính giá bình quân gia quyền
-          const product = await Product.findById(item.productId);
-          const oldStock = Math.max(0, product.stock || 0);
-          const oldImportPrice = product.importPrice || 0;
-          const importQty = Number(item.quantity);
-          const importPrice = Number(item.importPrice);
-
-          const totalStock = oldStock + importQty;
-          let newWeightedImportPrice = importPrice;
-          if (totalStock > 0) {
-            newWeightedImportPrice = Math.round(((oldStock * oldImportPrice) + (importQty * importPrice)) / totalStock);
+          // Sản phẩm có sẵn: Lấy thông tin oldStock và oldImportPrice trong Database dùng transaction session
+          const product = await Product.findById(item.productId).session(sessionOpts.session || null);
+          if (!product) {
+            throw new Error(`Không tìm thấy sản phẩm với ID ${item.productId}!`);
           }
 
+          const oldStock = Math.max(0, product.stock || 0);
+          const oldImportPrice = product.importPrice || 0;
+          const newQuantity = Number(item.quantity);
+          const newImportPrice_From_Receipt = Number(item.importPrice);
+
+          // Tính toán Giá vốn mới (AVCO) theo công thức:
+          // newImportPrice = ((oldStock * oldImportPrice) + (newQuantity * newImportPrice_From_Receipt)) / (oldStock + newQuantity)
+          const totalStock = oldStock + newQuantity;
+          let newImportPrice = newImportPrice_From_Receipt;
+          if (totalStock > 0) {
+            newImportPrice = Math.round(((oldStock * oldImportPrice) + (newQuantity * newImportPrice_From_Receipt)) / totalStock);
+          }
+
+          // Cập nhật bảng Product bằng Mongoose: Sử dụng $inc để cộng stock, và $set để cập nhật importPrice
           finalProduct = await Product.findByIdAndUpdate(
             item.productId,
             {
-              $inc: { stock: importQty },
-              $set: { importPrice: newWeightedImportPrice }
+              $inc: { stock: newQuantity },
+              $set: { importPrice: newImportPrice }
             },
             { new: true, ...sessionOpts }
           );

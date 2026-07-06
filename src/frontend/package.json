@@ -10,8 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@headlessui/react": "^2.2.10",
     "@mediapipe/tasks-vision": "^0.10.32",
+    "@remixicon/react": "^4.9.0",
     "@tailwindcss/postcss": "^4.2.1",
+    "@tremor/react": "^3.18.7",
+    "axios": "^1.18.1",
     "fix-webm-duration": "^1.0.6",
     "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.577.0",

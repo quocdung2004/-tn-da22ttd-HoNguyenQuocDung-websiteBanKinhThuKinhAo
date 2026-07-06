@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, User, Menu, X, Glasses, ChevronRight, ChevronDown, LogOut, Package, Wallet, Eye, Heart } from 'lucide-react';
+import { ShoppingCart, User, Menu, X, Glasses, ChevronRight, ChevronDown, LogOut, Package, Wallet, Eye, Heart, Truck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext'; // Import Trạm phát sóng (Đổi đường dẫn nếu cần)
 import { getCartKey } from '../utils/cartHelper';
 import NotificationBell from './NotificationBell';
@@ -64,10 +64,11 @@ const Navbar = () => {
               <Link to="/" className="text-gray-600 hover:text-blue-600 font-medium transition">Cửa hàng</Link>
               <Link to="/my-prescription" className="text-gray-600 hover:text-blue-600 font-medium transition">Đo thị lực</Link>
               
-              {/* Chỉ hiện cho Staff hoặc Admin */}
-              {user && (user.role === 1 || user.role === 2) && (
+              {/* Chỉ hiện cho Staff, Admin hoặc Shipper */}
+              {user && (user.role === 1 || user.role === 2 || user.role === 3) && (
                 <>
                   <div className="h-6 w-[1px] bg-gray-300 mx-2"></div>
+                  {user.role === 3 && <Link to="/shipper" className="text-xs bg-indigo-150 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200 font-bold">Shipper</Link>}
                   {user.role === 2 && <Link to="/staff/orders" className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200">Staff</Link>}
                   {user.role === 1 && <Link to="/admin" className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200">Admin</Link>}
                 </>
@@ -117,6 +118,12 @@ const Navbar = () => {
                           <User className="w-4 h-4" />
                           <span className="font-medium">Hồ sơ cá nhân</span>
                         </Link>
+                        {user.role === 3 && (
+                          <Link to="/shipper" className="flex items-center space-x-3 px-4 py-2.5 text-sm text-indigo-650 hover:bg-indigo-50 font-bold transition" onClick={() => setIsProfileOpen(false)}>
+                            <Truck className="w-4 h-4" />
+                            <span>Trang Shipper</span>
+                          </Link>
+                        )}
                         <Link to="/my-prescription" className="flex items-center space-x-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-blue-600 transition" onClick={() => setIsProfileOpen(false)}>
                           <Eye className="w-4 h-4" />
                           <span className="font-medium">Hồ sơ độ cận</span>
@@ -200,6 +207,12 @@ const Navbar = () => {
                 <User className="w-5 h-5" />
                 <span>Hồ sơ cá nhân</span>
               </Link>
+              {user.role === 3 && (
+                <Link to="/shipper" onClick={closeMenu} className="flex items-center space-x-3 text-indigo-600 hover:text-indigo-700 font-bold py-2">
+                  <Truck className="w-5 h-5" />
+                  <span>Trang Shipper</span>
+                </Link>
+              )}
               <Link to="/my-prescription" onClick={closeMenu} className="flex items-center space-x-3 text-gray-700 hover:text-blue-600 font-medium py-2">
                 <Eye className="w-5 h-5" />
                 <span>Hồ sơ độ cận</span>

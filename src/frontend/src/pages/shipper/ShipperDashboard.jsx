@@ -16,14 +16,18 @@ import {
   Clock,
   ArrowRight,
   ShieldCheck,
-  Camera
+  Camera,
+  LogOut,
+  Home
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useNavigate, Link } from 'react-router-dom';
 import Footer from '../../components/Footer';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
 export default function ShipperDashboard() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' | 'reconciliation' | 'returns' | 'scan'
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -128,6 +132,13 @@ export default function ShipperDashboard() {
   useEffect(() => {
     fetchShipperOrders();
   }, []);
+
+  const handleLogout = () => {
+    if (window.confirm("Bạn có chắc chắn muốn đăng xuất khỏi tài khoản shipper?")) {
+      logout();
+      navigate('/login');
+    }
+  };
 
   // 1.5. Khởi tạo Scanner cho Tab Quét QR
   useEffect(() => {
@@ -434,13 +445,29 @@ export default function ShipperDashboard() {
               </p>
             </div>
           </div>
-          <button
-            onClick={fetchShipperOrders}
-            className="p-2 bg-slate-800 hover:bg-slate-700 active:scale-95 transition text-slate-300 rounded-xl border border-slate-700/50"
-            title="Làm mới dữ liệu"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <Link
+              to="/"
+              className="p-2 bg-slate-800 hover:bg-slate-700 active:scale-95 transition text-slate-300 rounded-xl border border-slate-700/50"
+              title="Về trang chủ cửa hàng"
+            >
+              <Home className="w-4 h-4" />
+            </Link>
+            <button
+              onClick={fetchShipperOrders}
+              className="p-2 bg-slate-800 hover:bg-slate-700 active:scale-95 transition text-slate-300 rounded-xl border border-slate-700/50"
+              title="Làm mới dữ liệu"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <button
+              onClick={handleLogout}
+              className="p-2 bg-red-950/30 hover:bg-red-900/40 border border-red-900/40 active:scale-95 transition text-red-400 rounded-xl"
+              title="Đăng xuất"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
 

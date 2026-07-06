@@ -451,6 +451,14 @@ exports.updateOrderStatus = async (req, res) => {
     const { status: newStatus, cancelReason } = req.body;
     const { id } = req.params; // ID của đơn hàng trong MongoDB (_id)
 
+    // Rào chắn bảo vệ: Chỉ Shipper mới được chuyển sang shipping, shipped, completed
+    if (['shipping', 'shipped', 'completed'].includes(newStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Không thể đổi thủ công sang trạng thái này. Đơn hàng phải do Shipper tự nhận và cập nhật thông qua Ứng dụng Shipper!'
+      });
+    }
+
     // 1. Tìm đơn hàng
     const order = await Order.findById(id);
     if (!order) {

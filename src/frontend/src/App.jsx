@@ -34,6 +34,7 @@ import ImportManager from './pages/admin/ImportManager';
 import UserManager from './pages/admin/UserManager';
 import BannerManager from './pages/admin/BannerManager';
 import CancelRequests from './pages/admin/CancelRequests'; // Trang quản trị duyệt hủy đơn hàng (PHASE 2)
+import FinanceReport from './pages/admin/FinanceReport';
 
 // Import Pages (Staff)
 import OrderManagement from './pages/staff/OrderManagement';
@@ -120,7 +121,8 @@ export default function App() {
                 <AdminLayout />
               </ProtectedRoute>
             }>
-              <Route index element={<AdminDashboard />} />
+               <Route index element={<AdminDashboard />} />
+              <Route path="finance-report" element={<FinanceReport />} />
               <Route path="products" element={<AdminProducts />} />
               <Route path="sales" element={<SaleManager />} />
               <Route path="orders" element={<OrderManagement />} />

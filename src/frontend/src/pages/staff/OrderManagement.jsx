@@ -163,22 +163,12 @@ export default function OrderManagement() {
   const getAvailableStatuses = (currentStatus, shipperId) => {
     console.log('🔍 [getAvailableStatuses] Check input:', { currentStatus, shipperId, isStaff });
 
-    if (!isStaff) {
-      // Admin có toàn quyền điều hành tự do để sửa sai sót (thêm 'shipped' để quản lý)
-      return ['pending', 'paid', 'processing', 'shipping', 'shipped', 'completed', 'cancelled', 'cancel_requested']; // FIX BUG SHIPPED
-    }
-
-    if (shipperId !== null && shipperId !== undefined) {
-      console.log(`🔒 [getAvailableStatuses] Khóa dropdown vì đơn hàng đã giao cho Shipper (ID: ${shipperId})`);
-      return [currentStatus];
-    }
-
     if (currentStatus === 'pending' || currentStatus === 'paid') {
       return [currentStatus, 'processing', 'cancelled'];
     }
 
     if (currentStatus === 'processing') {
-      return [currentStatus, 'shipping'];
+      return [currentStatus, 'cancelled'];
     }
 
     return [currentStatus];
@@ -403,7 +393,7 @@ export default function OrderManagement() {
                       <td className="p-4 text-center max-w-[180px]">
                         <select 
                           value={order.status}
-                          disabled={isUpdating || (isStaff && (order.shipperId !== null || order.status === 'completed' || order.status === 'cancelled'))}
+                          disabled={isUpdating || getAvailableStatuses(order.status, order.shipperId).length <= 1}
                           onChange={(e) => updateOrderStatus(order._id, e.target.value)}
                           className="bg-gray-55 border border-gray-200 text-gray-700 text-xs rounded-xl focus:ring-blue-500 focus:border-blue-500 w-full p-2.5 outline-none cursor-pointer font-bold disabled:opacity-50"
                         >
@@ -413,6 +403,11 @@ export default function OrderManagement() {
                             </option>
                           ))}
                         </select>
+                        {['processing', 'shipping', 'shipped'].includes(order.status) && (
+                          <div className="text-[9px] text-gray-400 font-bold mt-1 leading-tight">
+                            * Shipper sẽ cập nhật giao nhận qua App
+                          </div>
+                        )}
                       </td>
 
                       {/* Nút Xem Chi Tiết */}
@@ -505,7 +500,7 @@ export default function OrderManagement() {
                     <span className="text-gray-400 text-xs block mb-1">Đổi trạng thái nhanh:</span>
                     <select
                       value={selectedOrder.status}
-                      disabled={isUpdating || (isStaff && (selectedOrder.shipperId !== null || selectedOrder.status === 'completed' || selectedOrder.status === 'cancelled'))}
+                      disabled={isUpdating || getAvailableStatuses(selectedOrder.status, selectedOrder.shipperId).length <= 1}
                       onChange={(e) => {
                         const newStatus = e.target.value;
                         if (newStatus === 'cancelled') {
@@ -515,7 +510,7 @@ export default function OrderManagement() {
                           updateOrderStatus(selectedOrder._id, newStatus);
                         }
                       }}
-                      className="bg-white border border-gray-200 text-gray-800 text-xs rounded-xl p-2 font-bold outline-none cursor-pointer w-full"
+                      className="bg-white border border-gray-200 text-gray-800 text-xs rounded-xl p-2 font-bold outline-none cursor-pointer w-full disabled:opacity-50"
                     >
                       {getAvailableStatuses(selectedOrder.status, selectedOrder.shipperId).map(st => (
                         <option key={st} value={st}>
@@ -523,6 +518,11 @@ export default function OrderManagement() {
                         </option>
                       ))}
                     </select>
+                    {['processing', 'shipping', 'shipped'].includes(selectedOrder.status) && (
+                      <div className="text-[10px] text-gray-400 font-bold mt-1 leading-tight">
+                        * Trạng thái giao hàng sẽ do Shipper tự động cập nhật qua App
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

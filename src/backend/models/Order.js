@@ -81,4 +81,9 @@ const orderSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+orderSchema.index({ status: 1, createdAt: -1 });
+orderSchema.index({ paymentMethod: 1, codStatus: 1 });
+orderSchema.index({ returnPhysicalStatus: 1 });
+orderSchema.index({ shipperId: 1, status: 1 });
+
 module.exports = mongoose.model('Order', orderSchema);
