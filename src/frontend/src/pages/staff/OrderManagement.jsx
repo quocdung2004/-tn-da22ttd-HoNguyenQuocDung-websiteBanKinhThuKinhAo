@@ -228,7 +228,12 @@ export default function OrderManagement() {
 
     return matchesSearch && matchesStatus;
   });
-
+  const toInputDate = (dateObj) => {
+    if (!dateObj) return '';
+    const d = new Date(dateObj);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().split('T')[0];
+  };
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto">
