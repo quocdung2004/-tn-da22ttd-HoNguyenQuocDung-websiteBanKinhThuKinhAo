@@ -59,6 +59,8 @@ export default function ProductDetail() {
         const currentProd = data.products.find(p => p._id === id);
         setProduct(currentProd);
         setActiveARProduct(currentProd);
+        
+        fetchSavedPrescription(currentProd);
 
         const arAvailable = data.products.filter(p => p.arUrl && p.arUrl.trim() !== '');
         setAllArProducts(arAvailable);
@@ -77,7 +79,7 @@ export default function ProductDetail() {
     }
   };
   
-  const fetchSavedPrescription = async () => {
+  const fetchSavedPrescription = async (prodObj) => {
     const token = localStorage.getItem('glassesToken');
     if (!token) return;
     try {
@@ -87,7 +89,15 @@ export default function ProductDetail() {
       const data = await res.json();
       if (data.success && data.prescription) {
         setSavedPrescription(data.prescription);
-        setPrescriptionOption('saved');
+        
+        const currentProduct = prodObj || product;
+        const isPrescription = currentProduct?.category?.name?.toLowerCase().includes('cận') || false;
+        if (isPrescription) {
+          setPrescriptionOption('saved');
+        } else {
+          setPrescriptionOption('none');
+        }
+
         const rx = data.prescription;
         setPrescriptionForm({
           rightEye: {
@@ -316,23 +326,40 @@ export default function ProductDetail() {
     if (!user) {
       showToast('Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng!', 'error');
       setTimeout(() => {
-        navigate('/login');
+        navigate('/login', { state: { from: window.location.pathname } });
       }, 1500);
       return;
     }
 
-    const rx = getActivePrescription();
-    if (prescriptionOption === 'custom') {
-      if (rx.rightEye.sphere === '' && rx.leftEye.sphere === '') {
-        showToast('Vui lòng nhập thông số độ cận (SPH)!', 'error');
-        return;
-      }
-    } else if (prescriptionOption === 'saved' && !savedPrescription) {
-      showToast('Bạn chưa lưu hồ sơ độ cận. Vui lòng chọn Nhập mới hoặc Không cần độ cận!', 'error');
-      return;
+    const isPrescription = product.category?.name?.toLowerCase().includes('cận') || false;
+
+    let rx = getActivePrescription();
+    let currentPrescriptionOption = prescriptionOption;
+
+    if (!isPrescription) {
+      currentPrescriptionOption = 'none';
+      rx = {
+        rightEye: { sphere: '', cylinder: '', axis: '' },
+        leftEye: { sphere: '', cylinder: '', axis: '' },
+        pd: '',
+        issuedDate: '',
+        note: ''
+      };
     }
 
-    const isRx = prescriptionOption !== 'none';
+    if (isPrescription) {
+      if (currentPrescriptionOption === 'custom') {
+        if (rx.rightEye.sphere === '' && rx.leftEye.sphere === '') {
+          showToast('Vui lòng nhập thông số độ cận (SPH)!', 'error');
+          return;
+        }
+      } else if (currentPrescriptionOption === 'saved' && !savedPrescription) {
+        showToast('Bạn chưa lưu hồ sơ độ cận. Vui lòng chọn Nhập mới hoặc Không cần độ cận!', 'error');
+        return;
+      }
+    }
+
+    const isRx = isPrescription && currentPrescriptionOption !== 'none';
     const cartItemId = isRx 
       ? `${product._id}_rx_${rx.rightEye.sphere || 0}_${rx.leftEye.sphere || 0}_${rx.rightEye.cylinder || 0}_${rx.leftEye.cylinder || 0}`
       : `${product._id}_std`;
@@ -358,7 +385,7 @@ export default function ProductDetail() {
       pd: isRx && rx.pd !== '' ? Number(rx.pd) : null,
       rxDate: isRx && rx.issuedDate ? rx.issuedDate : null,
       rxNote: isRx ? rx.note || '' : '',
-      prescriptionMode: prescriptionOption,
+      prescriptionMode: currentPrescriptionOption,
       quantity: 1
     };
 
@@ -379,23 +406,40 @@ export default function ProductDetail() {
     if (!user) {
       showToast('Vui lòng đăng nhập để thực hiện mua ngay!', 'error');
       setTimeout(() => {
-        navigate('/login');
+        navigate('/login', { state: { from: window.location.pathname } });
       }, 1500);
       return;
     }
 
-    const rx = getActivePrescription();
-    if (prescriptionOption === 'custom') {
-      if (rx.rightEye.sphere === '' && rx.leftEye.sphere === '') {
-        showToast('Vui lòng nhập thông số độ cận (SPH)!', 'error');
-        return;
-      }
-    } else if (prescriptionOption === 'saved' && !savedPrescription) {
-      showToast('Bạn chưa lưu hồ sơ độ cận. Vui lòng chọn Nhập mới hoặc Không cần độ cận!', 'error');
-      return;
+    const isPrescription = product.category?.name?.toLowerCase().includes('cận') || false;
+
+    let rx = getActivePrescription();
+    let currentPrescriptionOption = prescriptionOption;
+
+    if (!isPrescription) {
+      currentPrescriptionOption = 'none';
+      rx = {
+        rightEye: { sphere: '', cylinder: '', axis: '' },
+        leftEye: { sphere: '', cylinder: '', axis: '' },
+        pd: '',
+        issuedDate: '',
+        note: ''
+      };
     }
 
-    const isRx = prescriptionOption !== 'none';
+    if (isPrescription) {
+      if (currentPrescriptionOption === 'custom') {
+        if (rx.rightEye.sphere === '' && rx.leftEye.sphere === '') {
+          showToast('Vui lòng nhập thông số độ cận (SPH)!', 'error');
+          return;
+        }
+      } else if (currentPrescriptionOption === 'saved' && !savedPrescription) {
+        showToast('Bạn chưa lưu hồ sơ độ cận. Vui lòng chọn Nhập mới hoặc Không cần độ cận!', 'error');
+        return;
+      }
+    }
+
+    const isRx = isPrescription && currentPrescriptionOption !== 'none';
     const cartItemId = isRx 
       ? `${product._id}_rx_${rx.rightEye.sphere || 0}_${rx.leftEye.sphere || 0}_${rx.rightEye.cylinder || 0}_${rx.leftEye.cylinder || 0}`
       : `${product._id}_std`;
@@ -421,7 +465,7 @@ export default function ProductDetail() {
       pd: isRx && rx.pd !== '' ? Number(rx.pd) : null,
       rxDate: isRx && rx.issuedDate ? rx.issuedDate : null,
       rxNote: isRx ? rx.note || '' : '',
-      prescriptionMode: prescriptionOption,
+      prescriptionMode: currentPrescriptionOption,
       quantity: 1
     };
 
@@ -575,17 +619,19 @@ export default function ProductDetail() {
             <div className="h-px bg-gray-100 my-8"></div>
             <p className="text-gray-500 text-lg leading-relaxed mb-10">{product.description || "Gọng kính cao cấp, chất liệu siêu nhẹ mang lại cảm giác thoải mái khi đeo cả ngày."}</p>
 
-            <div className="bg-gray-50 rounded-3xl p-6 mb-8 border border-gray-100 flex items-center justify-between shadow-sm">
-              <div>
-                <h3 className="font-bold text-gray-900 text-lg">Thông số thị lực</h3>
-                <p className="text-sm text-gray-400 mt-0.5 font-medium">
-                  {getPrescriptionSummary()}
-                </p>
+            {product.category?.name?.toLowerCase().includes('cận') && (
+              <div className="bg-gray-50 rounded-3xl p-6 mb-8 border border-gray-100 flex items-center justify-between shadow-sm">
+                <div>
+                  <h3 className="font-bold text-gray-900 text-lg">Thông số thị lực</h3>
+                  <p className="text-sm text-gray-400 mt-0.5 font-medium">
+                    {getPrescriptionSummary()}
+                  </p>
+                </div>
+                <button onClick={() => setShowPrescriptionSheet(true)} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 text-blue-600 hover:bg-blue-50 transition-all active:scale-90">
+                  <Edit3 className="w-6 h-6" />
+                </button>
               </div>
-              <button onClick={() => setShowPrescriptionSheet(true)} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 text-blue-600 hover:bg-blue-50 transition-all active:scale-90">
-                <Edit3 className="w-6 h-6" />
-              </button>
-            </div>
+            )}
 
             {(!user || user.role === 0) && (
               <button

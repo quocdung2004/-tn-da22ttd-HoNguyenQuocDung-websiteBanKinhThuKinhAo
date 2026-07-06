@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
   const [formData, setFormData] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const navigate = useNavigate();
-const { login } = useAuth();
+  const location = useLocation();
+  const { login } = useAuth();
+  
+  const from = location.state?.from || '/';
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -26,7 +30,7 @@ const { login } = useAuth();
         if (data.user.role === 1) navigate('/admin');
         else if (data.user.role === 2) navigate('/staff');
         else if (data.user.role === 3) navigate('/shipper');
-        else navigate('/');
+        else navigate(from);
       } else {
         setError(data.message);
       }

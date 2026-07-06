@@ -114,7 +114,7 @@ exports.createOrder = async (req, res) => {
       }
       item.quantity = quantity;
 
-      const product = await Product.findById(item.productId);
+      const product = await Product.findById(item.productId).populate('category');
       if (!product) {
         return res.status(400).json({ success: false, message: `Sản phẩm với ID ${item.productId} không tồn tại trên hệ thống!` });
       }
@@ -144,6 +144,7 @@ exports.createOrder = async (req, res) => {
     for (const item of items) {
       const product = productsCache[item.productId.toString()];
       const importPriceAtPurchase = product.importPrice || 0;
+      const isPrescription = product.category?.name?.toLowerCase().includes('cận') || false;
       
       // GIẢI QUYẾT GIÁ KHUYẾN MÃI DƯỚI SERVER (Tuyệt đối không tin cậy frontend gửi lên, truyền activeSales cache)
       const saleDetails = await resolveProductSalePrice(product, activeSales);
@@ -173,19 +174,19 @@ exports.createOrder = async (req, res) => {
         originalPriceAtPurchase: finalOriginalPriceAtPurchase,
         discountAtPurchase: finalDiscountAtPurchase,
         saleIdAtPurchase: finalSaleIdAtPurchase,
-        hasPrescription: item.hasPrescription || false,
-        od: item.od || '',
-        os: item.os || '',
-        od_sph: item.od_sph !== undefined ? Number(item.od_sph) : null,
-        od_cyl: item.od_cyl !== undefined ? Number(item.od_cyl) : null,
-        od_axis: item.od_axis !== undefined ? Number(item.od_axis) : null,
-        os_sph: item.os_sph !== undefined ? Number(item.os_sph) : null,
-        os_cyl: item.os_cyl !== undefined ? Number(item.os_cyl) : null,
-        os_axis: item.os_axis !== undefined ? Number(item.os_axis) : null,
-        pd: item.pd !== undefined ? Number(item.pd) : null,
-        rxDate: item.rxDate ? new Date(item.rxDate) : null,
-        rxNote: item.rxNote || '',
-        prescriptionMode: item.prescriptionMode || 'none'
+        hasPrescription: isPrescription ? (item.hasPrescription || false) : false,
+        od: isPrescription ? (item.od || '') : '',
+        os: isPrescription ? (item.os || '') : '',
+        od_sph: isPrescription && item.od_sph !== undefined && item.od_sph !== null && item.od_sph !== '' ? Number(item.od_sph) : null,
+        od_cyl: isPrescription && item.od_cyl !== undefined && item.od_cyl !== null && item.od_cyl !== '' ? Number(item.od_cyl) : null,
+        od_axis: isPrescription && item.od_axis !== undefined && item.od_axis !== null && item.od_axis !== '' ? Number(item.od_axis) : null,
+        os_sph: isPrescription && item.os_sph !== undefined && item.os_sph !== null && item.os_sph !== '' ? Number(item.os_sph) : null,
+        os_cyl: isPrescription && item.os_cyl !== undefined && item.os_cyl !== null && item.os_cyl !== '' ? Number(item.os_cyl) : null,
+        os_axis: isPrescription && item.os_axis !== undefined && item.os_axis !== null && item.os_axis !== '' ? Number(item.os_axis) : null,
+        pd: isPrescription && item.pd !== undefined && item.pd !== null && item.pd !== '' ? Number(item.pd) : null,
+        rxDate: isPrescription && item.rxDate ? new Date(item.rxDate) : null,
+        rxNote: isPrescription ? (item.rxNote || '') : '',
+        prescriptionMode: isPrescription ? (item.prescriptionMode || 'none') : 'none'
       });
     }
 

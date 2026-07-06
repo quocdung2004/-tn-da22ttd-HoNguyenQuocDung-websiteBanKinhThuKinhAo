@@ -14,7 +14,7 @@ export default function OrderManagement() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  
+
   // State quản lý chi tiết đơn hàng (Modal)
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -23,10 +23,10 @@ export default function OrderManagement() {
 
   // Log thông tin User & Quyền hạn
   useEffect(() => {
-    console.log('👤 [AuthContext] Current User info:', { 
-      username: user?.username, 
-      role: user?.role, 
-      isStaff: isStaff 
+    console.log('👤 [AuthContext] Current User info:', {
+      username: user?.username,
+      role: user?.role,
+      isStaff: isStaff
     });
   }, [user, isStaff]);
 
@@ -84,7 +84,7 @@ export default function OrderManagement() {
             shipperId: order.shipperId || null
           };
         });
-        
+
         console.log('📋 [fetchOrders] Tổng số đơn hàng nạp được:', mappedOrders.length);
         setOrders(mappedOrders);
       } else {
@@ -143,7 +143,7 @@ export default function OrderManagement() {
       if (data.success) {
         // Cập nhật trạng thái trên giao diện chính
         setOrders(prev => prev.map(o => o._id === orderId ? { ...o, status: newStatus } : o));
-        
+
         // Nếu đang mở Modal chi tiết đơn hàng này, cập nhật trạng thái hiển thị trong Modal
         if (selectedOrder && selectedOrder._id === orderId) {
           setSelectedOrder(prev => ({ ...prev, status: newStatus }));
@@ -178,6 +178,7 @@ export default function OrderManagement() {
     switch (status) {
       case 'pending': return 'Chờ xác nhận';
       case 'paid': return 'Đã thanh toán';
+      case 'processing': return 'Đang xử lý';
       case 'shipping': return 'Đang giao hàng';
       case 'shipped': return 'Đã giao (Chờ thu tiền)'; // FIX BUG SHIPPED
       case 'cancel_requested': return 'Yêu cầu hủy đơn'; // FIX BUG SHIPPED
@@ -191,21 +192,21 @@ export default function OrderManagement() {
   const renderStatusBadge = (status) => {
     switch (status) {
       case 'pending':
-        return <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Clock className="w-3 h-3"/> Chờ xác nhận</span>;
+        return <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Clock className="w-3 h-3" /> Chờ xác nhận</span>;
       case 'paid':
-        return <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><CheckCircle className="w-3 h-3"/> Đã thanh toán</span>;
+        return <span className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><CheckCircle className="w-3 h-3" /> Đã thanh toán</span>;
       case 'processing':
-        return <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Clock className="w-3 h-3"/> Đang xử lý</span>;
+        return <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Clock className="w-3 h-3" /> Đang xử lý</span>;
       case 'shipping':
-        return <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Truck className="w-3 h-3"/> Đang giao hàng</span>;
+        return <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Truck className="w-3 h-3" /> Đang giao hàng</span>;
       case 'shipped': // FIX BUG SHIPPED
-        return <span className="bg-teal-100 text-teal-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><CheckCircle className="w-3 h-3"/> Đã giao (Chờ thu tiền)</span>;
+        return <span className="bg-teal-100 text-teal-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><CheckCircle className="w-3 h-3" /> Đã giao (Chờ thu tiền)</span>;
       case 'cancel_requested': // FIX BUG SHIPPED
-        return <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><AlertCircle className="w-3 h-3"/> Yêu cầu hủy đơn</span>;
+        return <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><AlertCircle className="w-3 h-3" /> Yêu cầu hủy đơn</span>;
       case 'completed':
-        return <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><CheckCircle className="w-3 h-3"/> Hoàn tất</span>;
+        return <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><CheckCircle className="w-3 h-3" /> Hoàn tất</span>;
       case 'cancelled':
-        return <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><XCircle className="w-3 h-3"/> Đã hủy</span>;
+        return <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><XCircle className="w-3 h-3" /> Đã hủy</span>;
       default:
         return <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs font-bold w-fit">{status}</span>;
     }
@@ -218,8 +219,8 @@ export default function OrderManagement() {
 
   // Bộ lọc & Ô Tìm kiếm
   const filteredOrders = orders.filter(order => {
-    const matchesSearch = 
-      order.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const matchesSearch =
+      order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.customer.phone.includes(searchTerm) ||
       order.customer.name.toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -231,7 +232,7 @@ export default function OrderManagement() {
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto">
-        
+
         {/* TIÊU ĐỀ HỆ THỐNG */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div>
@@ -258,7 +259,7 @@ export default function OrderManagement() {
               <p className="text-3xl font-black text-amber-600">{pendingCount}</p>
             </div>
           </div>
-          
+
           {isStaff ? (
             // Nếu là Staff, ẩn doanh thu tài chính, thay vào đó hiển thị KPI năng suất đơn hoàn tất
             <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-4 hover:shadow-md transition">
@@ -284,15 +285,15 @@ export default function OrderManagement() {
         <div className="bg-white p-4 rounded-t-3xl border-b border-gray-100 flex flex-col md:flex-row gap-4 justify-between items-center shadow-sm">
           <div className="relative w-full md:w-96">
             <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <input 
-              type="text" 
-              placeholder="Tìm theo Mã đơn, Tên hoặc SĐT..." 
+            <input
+              type="text"
+              placeholder="Tìm theo Mã đơn, Tên hoặc SĐT..."
               className="w-full pl-11 pr-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          
+
           <div className="flex gap-2 w-full md:w-auto">
             <select
               value={statusFilter}
@@ -309,8 +310,8 @@ export default function OrderManagement() {
               <option value="completed">Hoàn tất</option>
               <option value="cancelled">Đã hủy</option>
             </select>
-            
-            <button 
+
+            <button
               onClick={fetchOrders}
               className="px-4 py-3 bg-gray-50 text-blue-600 hover:bg-blue-50 rounded-2xl font-bold transition text-sm flex items-center gap-1.5"
             >
@@ -321,7 +322,7 @@ export default function OrderManagement() {
 
         {/* BẢNG DỮ LIỆU ĐƠN HÀNG */}
         <div className="bg-white rounded-b-3xl shadow-sm border border-gray-100 overflow-hidden">
-          
+
           {loading ? (
             // LOADING STATE
             <div className="p-20 flex flex-col items-center justify-center gap-4">
@@ -333,7 +334,7 @@ export default function OrderManagement() {
             <div className="p-20 flex flex-col items-center justify-center gap-4">
               <AlertCircle className="w-16 h-16 text-red-500" />
               <p className="text-red-600 font-black text-center text-lg">{error}</p>
-              <button 
+              <button
                 onClick={fetchOrders}
                 className="mt-2 px-6 py-3 bg-gray-900 text-white font-bold rounded-2xl hover:bg-blue-600 transition shadow-lg"
               >
@@ -363,7 +364,7 @@ export default function OrderManagement() {
                 <tbody className="divide-y divide-gray-100">
                   {filteredOrders.map(order => (
                     <tr key={order._id} className="hover:bg-blue-50/20 transition-colors">
-                      
+
                       {/* Mã & Ngày */}
                       <td className="p-4">
                         <span className="font-black text-blue-600 text-sm">{order.id}</span>
@@ -391,7 +392,7 @@ export default function OrderManagement() {
 
                       {/* Trực tiếp đổi trạng thái với bộ lọc nghiêm ngặt */}
                       <td className="p-4 text-center max-w-[180px]">
-                        <select 
+                        <select
                           value={order.status}
                           disabled={isUpdating || getAvailableStatuses(order.status, order.shipperId).length <= 1}
                           onChange={(e) => updateOrderStatus(order._id, e.target.value)}
@@ -412,7 +413,7 @@ export default function OrderManagement() {
 
                       {/* Nút Xem Chi Tiết */}
                       <td className="p-4 text-center">
-                        <button 
+                        <button
                           onClick={() => setSelectedOrder(order)}
                           className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white rounded-xl transition inline-flex items-center justify-center"
                           title="Xem chi tiết"
@@ -435,14 +436,14 @@ export default function OrderManagement() {
       {selectedOrder && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
-            
+
             {/* Header Modal */}
             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <div>
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Chi tiết đơn hàng thực tế</span>
                 <h2 className="text-xl font-black text-gray-900 mt-0.5">Mã đơn: <span className="text-blue-600">{selectedOrder.id}</span></h2>
               </div>
-              
+
               <div className="flex items-center gap-4">
                 <div className="flex flex-col items-center">
                   <OrderInvoiceQR orderId={selectedOrder._id} orderCode={selectedOrder.id} />
@@ -450,8 +451,8 @@ export default function OrderManagement() {
                     Shipper quét mã này để nhận nhiệm vụ
                   </span>
                 </div>
-                
-                <button 
+
+                <button
                   onClick={() => setSelectedOrder(null)}
                   className="p-2 bg-white text-gray-400 hover:text-gray-900 rounded-full border shadow-sm hover:shadow-md transition"
                 >
@@ -462,7 +463,7 @@ export default function OrderManagement() {
 
             {/* Content (Có scroll) */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
-              
+
               {/* PHẦN 1: THÔNG TIN KHÁCH HÀNG & GIAO NHẬN */}
               <div className="bg-gray-50 p-5 rounded-2xl border border-gray-100">
                 <h3 className="font-black text-gray-900 mb-3 uppercase text-xs tracking-wider text-blue-600">Thông tin người nhận</h3>
@@ -488,13 +489,13 @@ export default function OrderManagement() {
                   <span className="text-gray-400 text-xs font-bold uppercase block mb-1">Phương thức thanh toán</span>
                   <p className="font-bold text-gray-800">{selectedOrder.paymentMethod === 'cod' ? 'Thanh toán tiền mặt khi nhận hàng (COD)' : 'Chuyển khoản QR qua cổng PayOS'}</p>
                 </div>
-                
+
                 <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 flex flex-col justify-between">
                   <div>
                     <span className="text-gray-400 text-xs font-bold uppercase block mb-1.5">Trạng thái vận đơn</span>
                     {renderStatusBadge(selectedOrder.status)}
                   </div>
-                  
+
                   {/* Trình cập nhật ngay trong Modal */}
                   <div className="mt-3">
                     <span className="text-gray-400 text-xs block mb-1">Đổi trạng thái nhanh:</span>
@@ -538,11 +539,11 @@ export default function OrderManagement() {
                       ) : (
                         <div className="w-16 h-16 bg-gray-55 rounded-xl border flex items-center justify-center text-gray-300 flex-shrink-0"><Package className="w-8 h-8" /></div>
                       )}
-                      
+
                       <div className="flex-1 min-w-0">
                         <p className="font-bold text-gray-900 truncate" title={item.name}>{item.name}</p>
                         <p className="text-xs text-gray-500 mt-1 font-medium">Giá: {item.price.toLocaleString('vi-VN')}đ | Số lượng: {item.quantity}</p>
-                        
+
                         {/* Thông số độ cận (Prescription Specs) */}
                         {item.hasPrescription ? (
                           <div className="mt-3 bg-blue-50/50 p-3 rounded-xl border border-blue-100/30 text-xs space-y-2">
@@ -607,7 +608,7 @@ export default function OrderManagement() {
                           <span className="text-[10px] text-gray-400 bg-gray-50 px-2 py-0.5 rounded mt-2 inline-block font-bold">Kính không độ / Thời trang</span>
                         )}
                       </div>
-                      
+
                       <div className="text-right flex-shrink-0">
                         <span className="font-black text-gray-900 text-sm">{(item.price * item.quantity).toLocaleString('vi-VN')}đ</span>
                       </div>
@@ -624,7 +625,7 @@ export default function OrderManagement() {
                 <span className="text-xs text-gray-400 font-bold block uppercase">Tổng tiền thanh toán</span>
                 <span className="text-2xl font-black text-blue-600">{selectedOrder.total.toLocaleString('vi-VN')}đ</span>
               </div>
-              <button 
+              <button
                 onClick={() => setSelectedOrder(null)}
                 className="px-6 py-3 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-2xl transition"
               >
@@ -644,7 +645,7 @@ export default function OrderManagement() {
               <XCircle className="w-7 h-7" />
               <h3 className="text-xl font-bold text-gray-900">Xác Nhận Hủy Đơn Hàng</h3>
             </div>
-            
+
             <p className="text-gray-500 text-sm mb-6 leading-relaxed">
               Bạn đang thực hiện hủy đơn hàng này trực tiếp. Vui lòng cung cấp lý do hủy chi tiết để thông báo cho khách hàng và lưu trữ lịch sử hệ thống.
             </p>

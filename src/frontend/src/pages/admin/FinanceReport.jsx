@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import axiosClient from '../../api/axiosClient';
-import { Card, Title, Subtitle, Badge, Text, DateRangePicker } from '@tremor/react';
-import { Download, Wallet, Package, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import axios from 'axios';
+import { Card, Title, Subtitle, Badge, Text } from '@tremor/react';
+import { Download, Wallet, Package, Loader2, AlertCircle } from 'lucide-react';
 
 const formatCurrency = (value) => (
   new Intl.NumberFormat('vi-VN', {
@@ -32,6 +32,8 @@ export default function FinanceReport() {
     try {
       setIsLoading(true);
       setError(null);
+      const token = localStorage.getItem('glassesToken');
+
       let url = '/api/reports/finance-details';
       const params = [];
       if (dateRange?.from) {
@@ -44,7 +46,9 @@ export default function FinanceReport() {
         url += `?${params.join('&')}`;
       }
 
-      const response = await axiosClient.get(url);
+      const response = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       if (response.data && response.data.success) {
         setData(response.data.data || []);
       } else {
@@ -144,6 +148,14 @@ export default function FinanceReport() {
     URL.revokeObjectURL(url);
   };
 
+  // Hàm helper chuyển Date thành chuỗi YYYY-MM-DD chuẩn múi giờ hiện tại để nạp vào HTML
+  const toInputDate = (dateObj) => {
+    if (!dateObj) return '';
+    const d = new Date(dateObj);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().split('T')[0];
+  };
+
   return (
     <div className="p-4 sm:p-8 bg-slate-50/50 min-h-screen pb-24">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -161,12 +173,57 @@ export default function FinanceReport() {
 
           {/* Action Toolbar */}
           <div className="flex flex-wrap items-center gap-3">
-            <DateRangePicker
-              value={dateRange}
-              onValueChange={setDateRange}
-              placeholder="Chọn ngày tháng"
-              className="w-full sm:w-auto"
-            />
+            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2.5 shadow-sm focus-within:ring-2 focus-within:ring-blue-500 transition w-full sm:w-auto">
+              <input
+                type="date"
+                value={toInputDate(dateRange.from)}
+                max={toInputDate(dateRange.to)} // Khóa UI: Không cho chọn sau Ngày Kết Thúc
+                onChange={(e) => {
+                  if (e.target.value) {
+                    const newFrom = new Date(e.target.value);
+                    setDateRange(prev => ({
+                      from: newFrom,
+                      // Tự động đẩy Ngày Kết Thúc lên bằng Ngày Bắt Đầu nếu gõ tay vượt quá
+                      to: (prev.to && newFrom > prev.to) ? newFrom : prev.to
+                    }));
+                  }
+                }}
+                className="outline-none text-sm text-slate-700 bg-transparent cursor-pointer font-medium w-full sm:w-[130px]"
+                title="Từ ngày"
+              />
+              <span className="text-slate-300 font-black">-</span>
+              <input
+                type="date"
+                value={toInputDate(dateRange.to)}
+                min={toInputDate(dateRange.from)} // Khóa UI: Không cho chọn trước Ngày Bắt Đầu
+                max={toInputDate(new Date())} // Chặn chọn ngày của tương lai
+                onChange={(e) => {
+                  if (e.target.value) {
+                    const newTo = new Date(e.target.value);
+                    setDateRange(prev => ({
+                      // Tự động lùi Ngày Bắt Đầu về bằng Ngày Kết Thúc nếu gõ tay lùi quá sâu
+                      from: (prev.from && newTo < prev.from) ? newTo : prev.from,
+                      to: newTo
+                    }));
+                  }
+                }}
+                className="outline-none text-sm text-slate-700 bg-transparent cursor-pointer font-medium w-full sm:w-[130px]"
+                title="Đến ngày"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setDateRange({ from: null, to: null })}
+              className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition border shadow-sm ${
+                !dateRange.from && !dateRange.to
+                  ? 'bg-blue-600 border-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              Tất cả
+            </button>
+
             <button
               onClick={handleExportExcel}
               disabled={isLoading || calculatedData.length === 0}
@@ -174,13 +231,6 @@ export default function FinanceReport() {
             >
               <Download className="w-4 h-4" />
               <span>Xuất Excel</span>
-            </button>
-            <button
-              onClick={fetchFinanceReport}
-              className="p-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition shadow-sm outline-none"
-              title="Làm mới dữ liệu"
-            >
-              <RefreshCw className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -238,7 +288,10 @@ export default function FinanceReport() {
                     Bảng đối soát doanh số bán lẻ kính mát thực tế phục vụ tính toán dòng tiền
                   </Subtitle>
                 </div>
-                <Badge color="emerald">Đối soát dòng tiền tự động</Badge>
+                {/* Thay thế thẻ <Badge> mặc định bằng thẻ span tự custom */}
+                <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-xs rounded-full">
+                  Đối soát dòng tiền tự động
+                </span>
               </div>
 
               <div className="overflow-x-auto border border-slate-100 rounded-xl">

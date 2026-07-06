@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@config "../tailwind.config.js";
 @source "../node_modules/@tremor/**/*.{js,ts,jsx,tsx}";
 
 /* Tailwind v4 Safelisting for Tremor Dynamic Classes */
