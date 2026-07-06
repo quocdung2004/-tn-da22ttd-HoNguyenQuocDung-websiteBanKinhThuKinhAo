@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import axios from 'axios';
+import axiosClient from '../../api/axiosClient';
 import { Card, Title, Subtitle, Badge, Text, DateRangePicker } from '@tremor/react';
 import { Download, Wallet, Package, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 
@@ -32,8 +32,6 @@ export default function FinanceReport() {
     try {
       setIsLoading(true);
       setError(null);
-      const token = localStorage.getItem('glassesToken');
-
       let url = '/api/reports/finance-details';
       const params = [];
       if (dateRange?.from) {
@@ -46,9 +44,7 @@ export default function FinanceReport() {
         url += `?${params.join('&')}`;
       }
 
-      const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await axiosClient.get(url);
       if (response.data && response.data.success) {
         setData(response.data.data || []);
       } else {
