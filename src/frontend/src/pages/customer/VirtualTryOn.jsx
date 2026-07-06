@@ -3099,6 +3099,7 @@ export default function VirtualTryOn({
           const targetQuat = new THREE.Quaternion();
           faceMat4.decompose(_pos, targetQuat, _scale);
 
+
           if (showCleanFullOccluderRef.current && !showProduction2PassRef.current && !showPass1MeshAuditRef.current && !showPass2InterferenceRef.current) {
             targetQuat.y = -targetQuat.y;
             targetQuat.z = -targetQuat.z;

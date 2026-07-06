@@ -59,17 +59,17 @@ export default function ProductDetail() {
         const currentProd = data.products.find(p => p._id === id);
         setProduct(currentProd);
         setActiveARProduct(currentProd);
-        
+
         fetchSavedPrescription(currentProd);
 
         const arAvailable = data.products.filter(p => p.arUrl && p.arUrl.trim() !== '');
         setAllArProducts(arAvailable);
 
         if (currentProd) {
-          const related = data.products.filter(p => 
-            p._id !== currentProd._id && 
-            ((p.category && p.category._id === currentProd.category?._id) || 
-             (p.brand && p.brand._id === currentProd.brand?._id))
+          const related = data.products.filter(p =>
+            p._id !== currentProd._id &&
+            ((p.category && p.category._id === currentProd.category?._id) ||
+              (p.brand && p.brand._id === currentProd.brand?._id))
           ).slice(0, 4);
           setRelatedProducts(related);
         }
@@ -78,7 +78,7 @@ export default function ProductDetail() {
       console.error("❌ Lỗi tải dữ liệu sản phẩm:", error);
     }
   };
-  
+
   const fetchSavedPrescription = async (prodObj) => {
     const token = localStorage.getItem('glassesToken');
     if (!token) return;
@@ -89,7 +89,7 @@ export default function ProductDetail() {
       const data = await res.json();
       if (data.success && data.prescription) {
         setSavedPrescription(data.prescription);
-        
+
         const currentProduct = prodObj || product;
         const isPrescription = currentProduct?.category?.name?.toLowerCase().includes('cận') || false;
         if (isPrescription) {
@@ -240,7 +240,7 @@ export default function ProductDetail() {
   };
 
   const hasPrescription = prescriptionOption !== 'none';
-  
+
   const getActivePrescription = () => {
     if (prescriptionOption === 'saved' && savedPrescription) {
       return {
@@ -360,7 +360,7 @@ export default function ProductDetail() {
     }
 
     const isRx = isPrescription && currentPrescriptionOption !== 'none';
-    const cartItemId = isRx 
+    const cartItemId = isRx
       ? `${product._id}_rx_${rx.rightEye.sphere || 0}_${rx.leftEye.sphere || 0}_${rx.rightEye.cylinder || 0}_${rx.leftEye.cylinder || 0}`
       : `${product._id}_std`;
 
@@ -440,7 +440,7 @@ export default function ProductDetail() {
     }
 
     const isRx = isPrescription && currentPrescriptionOption !== 'none';
-    const cartItemId = isRx 
+    const cartItemId = isRx
       ? `${product._id}_rx_${rx.rightEye.sphere || 0}_${rx.leftEye.sphere || 0}_${rx.rightEye.cylinder || 0}_${rx.leftEye.cylinder || 0}`
       : `${product._id}_std`;
 
@@ -532,11 +532,10 @@ export default function ProductDetail() {
                     key={idx}
                     type="button"
                     onClick={() => setActiveImageIndex(idx)}
-                    className={`w-20 h-20 rounded-2xl overflow-hidden border-2 bg-gray-50 p-2 transition-all duration-300 shrink-0 ${
-                      activeImageIndex === idx
+                    className={`w-20 h-20 rounded-2xl overflow-hidden border-2 bg-gray-50 p-2 transition-all duration-300 shrink-0 ${activeImageIndex === idx
                         ? 'border-blue-600 scale-105 shadow-md'
                         : 'border-gray-200 hover:border-blue-400'
-                    }`}
+                      }`}
                   >
                     <img
                       src={imgUrl}
@@ -551,11 +550,10 @@ export default function ProductDetail() {
             <button
               onClick={() => setIsAROpen(true)}
               disabled={!is3DReady}
-              className={`w-full py-5 rounded-3xl font-black text-xl flex items-center justify-center space-x-3 transition-all ${
-                !is3DReady
+              className={`w-full py-5 rounded-3xl font-black text-xl flex items-center justify-center space-x-3 transition-all ${!is3DReady
                   ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   : 'bg-gray-900 text-white shadow-xl hover:bg-indigo-600 hover:scale-[1.01]'
-              }`}
+                }`}
             >
               <Camera className="w-7 h-7" />
               <span>{!is3DReady ? "SẢN PHẨM NÀY CHƯA CÓ FILE 3D" : "THỬ KÍNH 3D NGAY"}</span>
@@ -572,13 +570,12 @@ export default function ProductDetail() {
                 {[1, 2, 3, 4, 5].map((star) => (
                   <Star
                     key={star}
-                    className={`w-4 h-4 ${
-                      star <= (product.averageRating || 0)
+                    className={`w-4 h-4 ${star <= (product.averageRating || 0)
                         ? 'fill-amber-400 text-amber-400'
                         : star - 0.5 <= (product.averageRating || 0)
-                        ? 'fill-amber-400/50 text-amber-400'
-                        : 'text-gray-200'
-                    }`}
+                          ? 'fill-amber-400/50 text-amber-400'
+                          : 'text-gray-200'
+                      }`}
                   />
                 ))}
               </div>
@@ -586,7 +583,7 @@ export default function ProductDetail() {
                 {product.averageRating ? product.averageRating.toFixed(1) : '0.0'} ({product.totalReviews || 0} đánh giá)
               </span>
             </div>
-            
+
             <div className="mt-4 flex items-baseline gap-3 flex-wrap">
               {product.discountPercent > 0 ? (
                 <>
@@ -633,28 +630,27 @@ export default function ProductDetail() {
               </div>
             )}
 
-            {(!user || user.role === 0) && (
-              <button
-                type="button"
-                onClick={handleWishlistToggle}
-                disabled={wishlistUpdating}
-                className={`w-full py-4 rounded-3xl font-black text-lg flex items-center justify-center gap-3 border-2 transition-all active:scale-95 mb-4 ${
-                  isWishlisted
-                    ? 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100'
-                    : 'bg-white text-gray-800 border-gray-200 hover:border-red-200 hover:text-red-600'
-                }`}
-              >
-                <Heart className={`w-6 h-6 ${isWishlisted ? 'fill-red-500 text-red-500' : ''}`} />
-                {isWishlisted ? 'Đã yêu thích' : 'Thêm yêu thích'}
-              </button>
-            )}
+            <button onClick={handleBuyNow} className="w-full py-6 rounded-3xl font-black text-lg flex items-center justify-center gap-2 shadow-2xl bg-gray-900 text-white hover:bg-indigo-600 transition-all active:scale-95 shadow-gray-900/10 mb-4">
+              MUA NGAY
+            </button>
 
             <div className="flex gap-4">
+              {(!user || user.role === 0) && (
+                <button
+                  type="button"
+                  onClick={handleWishlistToggle}
+                  disabled={wishlistUpdating}
+                  className={`flex-1 py-6 rounded-3xl font-black text-lg flex items-center justify-center gap-3 border-2 transition-all active:scale-95 ${isWishlisted
+                      ? 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100'
+                      : 'bg-white text-gray-800 border-gray-200 hover:border-red-200 hover:text-red-600'
+                    }`}
+                >
+                  <Heart className={`w-6 h-6 ${isWishlisted ? 'fill-red-500 text-red-500' : ''}`} />
+                  {isWishlisted ? 'Đã yêu thích' : 'Thêm yêu thích'}
+                </button>
+              )}
               <button onClick={handleAddToCart} disabled={isAdded} className={`flex-1 py-6 rounded-3xl font-black text-lg flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 ${isAdded ? 'bg-green-500 text-white shadow-green-200' : 'bg-blue-600 text-white shadow-blue-200 hover:bg-blue-700'}`}>
                 {isAdded ? <><ShieldCheck className="w-6 h-6 animate-bounce" /> ĐÃ THÊM!</> : <><ShoppingCart className="w-6 h-6" /> THÊM VÀO GIỎ</>}
-              </button>
-              <button onClick={handleBuyNow} className="flex-1 py-6 rounded-3xl font-black text-lg flex items-center justify-center gap-2 shadow-2xl bg-gray-900 text-white hover:bg-indigo-600 transition-all active:scale-95 shadow-gray-900/10">
-                MUA NGAY
               </button>
             </div>
           </div>
@@ -686,13 +682,13 @@ export default function ProductDetail() {
             <div className="lg:w-1/3">
               <h3 className="text-2xl font-black text-gray-900 uppercase tracking-tight mb-2">Đánh giá sản phẩm</h3>
               <p className="text-gray-500 text-sm mb-6">Ý kiến của khách hàng là động lực cải tiến chất lượng phục vụ của chúng tôi.</p>
-              
+
               {isEligible ? (
                 <form onSubmit={handleSaveReview} className="bg-gray-50 p-6 rounded-[32px] border border-gray-100 shadow-sm space-y-4">
                   <div className="text-xs font-black text-blue-600 uppercase tracking-wider">
                     {userReview ? 'Chỉnh sửa đánh giá của bạn' : 'Gửi đánh giá của bạn'}
                   </div>
-                  
+
                   {/* Chọn sao */}
                   <div>
                     <label className="block text-xs font-bold text-gray-400 mb-1.5">Số sao đánh giá:</label>
@@ -705,9 +701,8 @@ export default function ProductDetail() {
                           className="text-amber-400 hover:scale-110 transition active:scale-95"
                         >
                           <Star
-                            className={`w-8 h-8 ${
-                              star <= ratingInput ? 'fill-amber-400 text-amber-400' : 'text-gray-300'
-                            }`}
+                            className={`w-8 h-8 ${star <= ratingInput ? 'fill-amber-400 text-amber-400' : 'text-gray-300'
+                              }`}
                           />
                         </button>
                       ))}
@@ -770,9 +765,8 @@ export default function ProductDetail() {
                             {[1, 2, 3, 4, 5].map((star) => (
                               <Star
                                 key={star}
-                                className={`w-3.5 h-3.5 ${
-                                  star <= r.rating ? 'fill-amber-400 text-amber-400' : 'text-gray-200'
-                                }`}
+                                className={`w-3.5 h-3.5 ${star <= r.rating ? 'fill-amber-400 text-amber-400' : 'text-gray-200'
+                                  }`}
                               />
                             ))}
                           </div>
