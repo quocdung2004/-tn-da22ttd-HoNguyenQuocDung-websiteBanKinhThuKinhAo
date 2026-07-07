@@ -33,12 +33,103 @@ export default function ShipperManagement() {
   
   // States cho Tab 2: Đối soát
   const [reconciliations, setReconciliations] = useState([]);
+  const [reconciliationTab, setReconciliationTab] = useState('pending'); // 'pending' | 'history'
+  const [reconciliationHistory, setReconciliationHistory] = useState([]);
+  const [expandedRows, setExpandedRows] = useState({}); // Lưu { reconCode: boolean }
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [submittingId, setSubmittingId] = useState(null);
 
   const token = localStorage.getItem('glassesToken');
+
+  // Helper sinh mã đối soát an toàn
+  const generateReconCode = (shipperId, reconciledAt) => {
+    const defaultLegacyCode = `DS-${shipperId.toUpperCase()}-LEGACY`;
+    if (!reconciledAt) return defaultLegacyCode;
+    const dateObj = new Date(reconciledAt);
+    if (isNaN(dateObj.getTime())) return defaultLegacyCode;
+    const yyyy = dateObj.getFullYear();
+    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const dd = String(dateObj.getDate()).padStart(2, '0');
+    const hh = String(dateObj.getHours()).padStart(2, '0');
+    const min = String(dateObj.getMinutes()).padStart(2, '0');
+    return `DS-${shipperId.toUpperCase()}-${yyyy}${mm}${dd}${hh}${min}`;
+  };
+
+  // Helper hiển thị thời gian duyệt an toàn
+  const formatReconciledDate = (reconciledAt) => {
+    if (!reconciledAt) return <span className="text-gray-400 italic">Dữ liệu cũ</span>;
+    const dateObj = new Date(reconciledAt);
+    if (isNaN(dateObj.getTime())) {
+      return <span className="text-gray-400 italic">Dữ liệu cũ</span>;
+    }
+    return dateObj.toLocaleString('vi-VN');
+  };
+
+  const toggleExpandRow = (reconCode) => {
+    setExpandedRows(prev => ({
+      ...prev,
+      [reconCode]: !prev[reconCode]
+    }));
+  };
+
+  const handleExportHistory = () => {
+    if (reconciliationHistory.length === 0) {
+      alert('Không có dữ liệu lịch sử đối soát để xuất!');
+      return;
+    }
+
+    const formattedData = [];
+    reconciliationHistory.forEach(item => {
+      const reconCode = generateReconCode(item.shipperId, item.reconciledAt);
+      let reconTime = 'Dữ liệu cũ';
+      if (item.reconciledAt) {
+        const dateObj = new Date(item.reconciledAt);
+        if (!isNaN(dateObj.getTime())) {
+          reconTime = dateObj.toLocaleString('vi-VN');
+        }
+      }
+      
+      item.orders.forEach(order => {
+        formattedData.push({
+          'Mã Phiếu Nộp': reconCode,
+          'Thời Gian Duyệt': reconTime,
+          'Tên Shipper': item.shipperName,
+          'Tài Khoản Shipper': item.shipperId,
+          'Mã Đơn Hàng': order.orderCode,
+          'Khách Hàng': order.customerName,
+          'Tiền Thu Hộ COD (VNĐ)': order.total,
+          'Người Duyệt (Admin)': item.reconciledBy || 'Admin'
+        });
+      });
+    });
+
+    const headers = Object.keys(formattedData[0]);
+
+    const csvRows = formattedData.map(row => {
+      return headers.map(fieldName => {
+        let cellData = row[fieldName] === null || row[fieldName] === undefined ? '' : row[fieldName].toString();
+        if (cellData.includes(',') || cellData.includes('"') || cellData.includes('\n')) {
+          cellData = `"${cellData.replace(/"/g, '""')}"`;
+        }
+        return cellData;
+      }).join(',');
+    });
+
+    const csvContent = '\uFEFF' + headers.join(',') + '\n' + csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Lich_Su_Thu_Tien_COD.csv`);
+    document.body.appendChild(link);
+    link.click();
+
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   // Tải toàn bộ dữ liệu (đơn hàng, shippers, yêu cầu đối soát)
   const fetchData = async () => {
@@ -71,8 +162,15 @@ export default function ShipperManagement() {
         });
         const reconData = await reconRes.json();
 
-        if (reconData.success) {
+        // 4. Lấy lịch sử đối soát đã hoàn thành
+        const historyRes = await fetch('/api/orders/admin/reconciliation-history', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const historyData = await historyRes.json();
+
+        if (reconData.success && historyData.success) {
           setReconciliations(reconData.requests || []);
+          setReconciliationHistory(historyData.history || []);
         } else {
           throw new Error('API trả về kết quả không thành công.');
         }
@@ -141,6 +239,23 @@ export default function ShipperManagement() {
           }
         ];
         setReconciliations(mockReconciliationRequests);
+
+        const mockHistory = [
+          {
+            shipperId: 'shipper_nam',
+            shipperName: 'Nguyễn Hoài Nam',
+            reconciledAt: '2026-07-06T15:30:00.000Z',
+            orderCount: 3,
+            totalCod: 1850000,
+            reconciledBy: 'admin',
+            orders: [
+              { orderCode: 'ORD-2026A10', total: 650000, customerName: 'Phạm Thu Trang', createdAt: '2026-07-05T01:00:00.000Z' },
+              { orderCode: 'ORD-2026A11', total: 700000, customerName: 'Lê Hoàng Long', createdAt: '2026-07-05T03:00:00.000Z' },
+              { orderCode: 'ORD-2026A12', total: 500000, customerName: 'Nguyễn Văn Đạt', createdAt: '2026-07-05T06:00:00.000Z' }
+            ]
+          }
+        ];
+        setReconciliationHistory(mockHistory);
       }
     } finally {
       setLoading(false);
@@ -425,97 +540,222 @@ export default function ShipperManagement() {
         {/* TAB 2: DUYỆT ĐỐI SOÁT DÒNG TIỀN */}
         {!loading && activeTab === 'reconciliation' && (
           <div className="space-y-4">
-            {reconciliations.length === 0 ? (
-              <div className="bg-white p-20 rounded-3xl border border-gray-150 text-center text-gray-400 shadow-sm">
-                <ShieldCheck className="w-16 h-16 text-emerald-200 mx-auto mb-4" />
-                <p className="font-black text-lg text-slate-800">Không có yêu cầu đối soát nào chờ duyệt</p>
-                <p className="text-sm text-slate-500 mt-1">Toàn bộ dòng tiền mặt nộp bởi shipper đã được kiểm và duyệt hoàn tất.</p>
+            
+            {/* SUB-TABS CHO ĐỐI SOÁT */}
+            <div className="flex items-center justify-between border-b border-gray-200 mb-6 pb-2">
+              <div className="flex gap-6">
+                <button
+                  onClick={() => setReconciliationTab('pending')}
+                  className={`pb-2.5 text-sm font-bold border-b-2 transition-all ${
+                    reconciliationTab === 'pending'
+                      ? 'border-indigo-650 text-indigo-600 font-black'
+                      : 'border-transparent text-gray-400 hover:text-slate-650'
+                  }`}
+                >
+                  Chờ đối soát ({reconciliations.length})
+                </button>
+                <button
+                  onClick={() => setReconciliationTab('history')}
+                  className={`pb-2.5 text-sm font-bold border-b-2 transition-all ${
+                    reconciliationTab === 'history'
+                      ? 'border-indigo-650 text-indigo-600 font-black'
+                      : 'border-transparent text-gray-400 hover:text-slate-650'
+                  }`}
+                >
+                  Lịch sử đã thu ({reconciliationHistory.length})
+                </button>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-6">
-                {reconciliations.map(recon => (
-                  <div 
-                    key={recon._id} 
-                    className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden"
-                  >
-                    {/* Header Nhóm Shipper */}
-                    <div className="p-5 bg-slate-50 border-b border-gray-150 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
-                          <User className="w-6 h-6" />
+
+              {reconciliationTab === 'history' && reconciliationHistory.length > 0 && (
+                <button
+                  onClick={handleExportHistory}
+                  className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl transition text-xs shadow-sm active:scale-98"
+                >
+                  Xuất Excel
+                </button>
+              )}
+            </div>
+
+            {reconciliationTab === 'pending' ? (
+              reconciliations.length === 0 ? (
+                <div className="bg-white p-20 rounded-3xl border border-gray-150 text-center text-gray-400 shadow-sm">
+                  <ShieldCheck className="w-16 h-16 text-emerald-200 mx-auto mb-4" />
+                  <p className="font-black text-lg text-slate-800">Không có yêu cầu đối soát nào chờ duyệt</p>
+                  <p className="text-sm text-slate-500 mt-1">Toàn bộ dòng tiền mặt nộp bởi shipper đã được kiểm và duyệt hoàn tất.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-6">
+                  {reconciliations.map(recon => (
+                    <div 
+                      key={recon._id} 
+                      className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden"
+                    >
+                      {/* Header Nhóm Shipper */}
+                      <div className="p-5 bg-slate-50 border-b border-gray-150 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
+                            <User className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-slate-800 text-base flex items-center gap-2">
+                              {recon.shipperName} 
+                              <span className="text-xs text-slate-400 font-medium">({recon._id})</span>
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-0.5">Số điện thoại: {recon.shipperPhone || 'Không có'}</p>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="font-black text-slate-800 text-base flex items-center gap-2">
-                            {recon.shipperName} 
-                            <span className="text-xs text-slate-400 font-medium">({recon._id})</span>
-                          </h3>
-                          <p className="text-xs text-slate-500 mt-0.5">Số điện thoại: {recon.shipperPhone || 'Không có'}</p>
+
+                        {/* Tiền mặt thu hộ & Nút Duyệt */}
+                        <div className="flex items-center gap-5 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-gray-150">
+                          <div className="text-left sm:text-right mr-2">
+                            <span className="text-[10px] text-slate-400 font-extrabold uppercase block tracking-wider">Số đơn: {recon.orderCount} đơn</span>
+                            <span className="text-xl font-black text-emerald-600">
+                              {recon.totalCod.toLocaleString('vi-VN')}đ
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-3">
+                            <button
+                              onClick={() => handleRejectReconciliation(recon._id, recon.shipperName, recon.totalCod)}
+                              disabled={submittingId === recon._id}
+                              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-98 disabled:opacity-50 transition text-white font-bold text-xs rounded-2xl flex items-center gap-1.5 shadow-md shadow-rose-600/10"
+                            >
+                              <X className="w-3.5 h-3.5" /> Chưa nhận tiền
+                            </button>
+
+                            <button
+                              onClick={() => handleApproveReconciliation(recon._id, recon.shipperName, recon.totalCod)}
+                              disabled={submittingId === recon._id}
+                              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-705 active:scale-98 disabled:opacity-50 transition text-white font-bold text-xs rounded-2xl flex items-center gap-1.5 shadow-md shadow-emerald-600/10"
+                            >
+                              <Check className="w-3.5 h-3.5" /> Đã nhận tiền - Duyệt giải ngân
+                            </button>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Tiền mặt thu hộ & Nút Duyệt */}
-                      <div className="flex items-center gap-5 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-gray-150">
-                        <div className="text-left sm:text-right mr-2">
-                          <span className="text-[10px] text-slate-400 font-extrabold uppercase block tracking-wider">Số đơn: {recon.orderCount} đơn</span>
-                          <span className="text-xl font-black text-emerald-600">
-                            {recon.totalCod.toLocaleString('vi-VN')}đ
-                          </span>
+                      {/* Chi tiết danh sách đơn của Shipper này */}
+                      <div className="p-4 bg-white divide-y divide-gray-100">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 pb-2.5">
+                          Chi tiết danh sách đơn hàng đối soát
                         </div>
+                        
+                        <div className="space-y-1">
+                          {recon.orders.map(order => (
+                            <div 
+                              key={order._id} 
+                              className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 hover:bg-slate-50 rounded-2xl transition duration-150 gap-2"
+                            >
+                              <div className="flex items-center gap-3">
+                                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                                <div>
+                                  <span className="font-bold text-slate-800 text-sm">{order.orderCode}</span>
+                                  <span className="text-slate-400 text-xs font-semibold ml-2">Khách hàng: {order.customerName}</span>
+                                </div>
+                              </div>
 
-                        <div className="flex flex-wrap items-center gap-3">
-                          <button
-                            onClick={() => handleRejectReconciliation(recon._id, recon.shipperName, recon.totalCod)}
-                            disabled={submittingId === recon._id}
-                            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-98 disabled:opacity-50 transition text-white font-bold text-xs rounded-2xl flex items-center gap-1.5 shadow-md shadow-rose-600/10"
-                          >
-                            <X className="w-3.5 h-3.5" /> Chưa nhận tiền
-                          </button>
-
-                          <button
-                            onClick={() => handleApproveReconciliation(recon._id, recon.shipperName, recon.totalCod)}
-                            disabled={submittingId === recon._id}
-                            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-705 active:scale-98 disabled:opacity-50 transition text-white font-bold text-xs rounded-2xl flex items-center gap-1.5 shadow-md shadow-emerald-600/10"
-                          >
-                            <Check className="w-3.5 h-3.5" /> Đã nhận tiền - Duyệt giải ngân
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Chi tiết danh sách đơn của Shipper này */}
-                    <div className="p-4 bg-white divide-y divide-gray-100">
-                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 pb-2.5">
-                        Chi tiết danh sách đơn hàng đối soát
-                      </div>
-                      
-                      <div className="space-y-1">
-                        {recon.orders.map(order => (
-                          <div 
-                            key={order._id} 
-                            className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 hover:bg-slate-50 rounded-2xl transition duration-150 gap-2"
-                          >
-                            <div className="flex items-center gap-3">
-                              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                              <div>
-                                <span className="font-bold text-slate-800 text-sm">{order.orderCode}</span>
-                                <span className="text-slate-400 text-xs font-semibold ml-2">Khách hàng: {order.customerName}</span>
+                              <div className="flex items-center gap-4 text-xs">
+                                <span className="text-slate-400">{new Date(order.createdAt).toLocaleDateString('vi-VN')}</span>
+                                <span className="font-bold text-slate-800 text-sm">
+                                  {order.total.toLocaleString('vi-VN')}đ
+                                </span>
                               </div>
                             </div>
-
-                            <div className="flex items-center gap-4 text-xs">
-                              <span className="text-slate-400">{new Date(order.createdAt).toLocaleDateString('vi-VN')}</span>
-                              <span className="font-bold text-slate-800 text-sm">
-                                {order.total.toLocaleString('vi-VN')}đ
-                              </span>
-                            </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
                     </div>
+                  ))}
+                </div>
+              )
+            ) : (
+              // Tab 2: Lịch sử đã thu
+              reconciliationHistory.length === 0 ? (
+                <div className="bg-white p-20 rounded-3xl border border-gray-150 text-center text-gray-400 shadow-sm">
+                  <ShieldCheck className="w-16 h-16 text-indigo-200 mx-auto mb-4" />
+                  <p className="font-black text-lg text-slate-800">Chưa có lịch sử đối soát hoàn thành</p>
+                  <p className="text-sm text-slate-500 mt-1">Các phiên đối soát thành công sẽ được lưu trữ tại đây.</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 text-slate-700">
+                      <thead className="bg-slate-50">
+                        <tr className="text-left text-xs font-black uppercase tracking-wider text-slate-500">
+                          <th className="py-4 px-6">Mã Phiếu Nộp</th>
+                          <th className="py-4 px-6">Thời Gian Duyệt</th>
+                          <th className="py-4 px-6">Shipper</th>
+                          <th className="py-4 px-6 text-center">Số Đơn Hàng</th>
+                          <th className="py-4 px-6 text-right">Tổng Tiền COD</th>
+                          <th className="py-4 px-6">Người Duyệt</th>
+                          <th className="py-4 px-6 text-center">Chi Tiết</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-100 text-sm">
+                        {reconciliationHistory.map((item, idx) => {
+                          const reconCode = generateReconCode(item.shipperId, item.reconciledAt);
+                          return (
+                            <React.Fragment key={idx}>
+                              <tr className="hover:bg-slate-50/50 transition">
+                                <td className="py-4 px-6 font-bold text-indigo-650 font-mono">{reconCode}</td>
+                                <td className="py-4 px-6 text-slate-500 font-mono">
+                                  {formatReconciledDate(item.reconciledAt)}
+                                </td>
+                                <td className="py-4 px-6 font-semibold text-slate-850">
+                                  {item.shipperName} <span className="text-xs text-slate-400 font-medium">({item.shipperId})</span>
+                                </td>
+                                <td className="py-4 px-6 text-center font-bold text-slate-650">{item.orderCount} đơn</td>
+                                <td className="py-4 px-6 text-right font-black font-mono text-emerald-600">
+                                  {item.totalCod.toLocaleString('vi-VN')}đ
+                                </td>
+                                <td className="py-4 px-6 text-slate-600 font-medium">
+                                  {item.reconciledBy || 'Admin'}
+                                </td>
+                                <td className="py-4 px-6 text-center">
+                                  <button
+                                    onClick={() => toggleExpandRow(reconCode)}
+                                    className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition"
+                                  >
+                                    {expandedRows[reconCode] ? 'Thu gọn' : 'Xem chi tiết'}
+                                  </button>
+                                </td>
+                              </tr>
+                              {expandedRows[reconCode] && (
+                                <tr>
+                                  <td colSpan={7} className="bg-slate-50/70 p-5 border-t border-b border-slate-100">
+                                    <div className="max-w-4xl mx-auto space-y-2">
+                                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                                        Chi tiết danh sách đơn hàng đối soát
+                                      </p>
+                                      <div className="bg-white rounded-2xl border border-slate-100 divide-y divide-slate-100 overflow-hidden">
+                                        {item.orders.map(order => (
+                                          <div key={order._id || order.orderCode} className="flex justify-between items-center p-3 text-xs">
+                                            <div className="flex items-center gap-2">
+                                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                              <span className="font-bold text-slate-800">{order.orderCode}</span>
+                                              <span className="text-slate-400 font-semibold">Khách: {order.customerName}</span>
+                                            </div>
+                                            <div className="flex items-center gap-4">
+                                              <span className="text-slate-400 font-mono">{new Date(order.createdAt).toLocaleDateString('vi-VN')}</span>
+                                              <span className="font-bold text-slate-800">{order.total.toLocaleString('vi-VN')}đ</span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                ))}
-              </div>
+                </div>
+              )
             )}
+
           </div>
         )}
 

@@ -77,6 +77,8 @@ const orderSchema = new mongoose.Schema({
   processingStartedAt: { type: Date },
   stockRestored: { type: Boolean, default: false }, // Biến cờ bảo vệ chống hoàn stock trùng lặp
   quotaRestored: { type: Boolean, default: false }, // Biến cờ bảo vệ chống hoàn quota sale trùng lặp
+  reconciledBy: { type: String, default: null },
+  reconciledAt: { type: Date, default: null },
 
   createdAt: { type: Date, default: Date.now }
 });

@@ -770,7 +770,9 @@ exports.getOrderDetailReport = async (req, res) => {
       let statusText = 'Chờ xử lý';
       if (o.status === 'completed') statusText = 'Đã hoàn thành';
       else if (o.status === 'processing') statusText = 'Đang xử lý';
-      else if (o.status === 'shipping' || o.status === 'shipped') statusText = 'Đang giao';
+      else if (o.status === 'shipping') statusText = 'Đang giao';
+      else if (o.status === 'shipped') statusText = 'Đã giao (Chờ thu tiền)';
+      else if (o.status === 'cancel_requested') statusText = 'Yêu cầu hủy đơn';
       else if (o.status === 'cancelled') statusText = 'Đã hủy';
 
       const formattedDate = new Date(o.createdAt).toLocaleDateString('vi-VN');

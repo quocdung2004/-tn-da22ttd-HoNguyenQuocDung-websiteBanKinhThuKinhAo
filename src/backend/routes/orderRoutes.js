@@ -54,6 +54,9 @@ router.post('/admin/approve-reconciliation', verifyToken, verifyAdminOnly, admin
 // Từ chối đối soát nộp tiền cho shipper
 router.post('/admin/reject-reconciliation', verifyToken, verifyAdminOnly, adminShipperController.rejectReconciliation);
 
+// Lấy lịch sử đối soát đã hoàn thành (codStatus === 'reconciled')
+router.get('/admin/reconciliation-history', verifyToken, verifyAdminOnly, adminShipperController.getReconciliationHistory);
+
 // Route Lấy danh sách toàn bộ Đơn hàng (Chỉ Admin và Staff)
 router.get('/', verifyToken, verifyStaffOrAdmin, orderController.getOrders);
 

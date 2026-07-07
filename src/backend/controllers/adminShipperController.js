@@ -188,7 +188,9 @@ exports.approveReconciliation = async (req, res) => {
       { 
         $set: { 
           codStatus: 'reconciled',
-          status: 'completed' // Chuyển đổi trạng thái đơn hàng sang hoàn tất
+          status: 'completed', // Chuyển đổi trạng thái đơn hàng sang hoàn tất
+          reconciledBy: req.user?.username || 'admin',
+          reconciledAt: new Date()
         } 
       }
     );
@@ -285,5 +287,81 @@ exports.rejectReconciliation = async (req, res) => {
   } catch (error) {
     console.error('Lỗi từ chối đối soát shipper:', error);
     res.status(500).json({ success: false, message: 'Lỗi máy chủ khi từ chối đối soát!' });
+  }
+};
+
+// 7. API getReconciliationHistory: Lấy danh sách các đơn đã đối soát (codStatus: 'reconciled')
+exports.getReconciliationHistory = async (req, res) => {
+  try {
+    const history = await Order.aggregate([
+      // Lọc các đơn đã đối soát thành công
+      {
+        $match: {
+          codStatus: 'reconciled'
+        }
+      },
+      // Lookup sang collection users để lấy thông tin shipper
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'shipperId',
+          foreignField: 'username',
+          as: 'shipperInfo'
+        }
+      },
+      // Giải nén mảng shipperInfo
+      {
+        $unwind: {
+          path: '$shipperInfo',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      // Gom nhóm theo shipperId và thời gian duyệt đối soát reconciledAt
+      {
+        $group: {
+          _id: {
+            shipperId: '$shipperId',
+            reconciledAt: '$reconciledAt'
+          },
+          shipperName: { $first: { $ifNull: ['$shipperInfo.name', '$_id.shipperId'] } },
+          orderCount: { $sum: 1 },
+          totalCod: { $sum: '$total' },
+          reconciledBy: { $first: '$reconciledBy' },
+          orders: {
+            $push: {
+              _id: '$_id',
+              orderCode: '$orderCode',
+              total: '$total',
+              customerName: '$customerInfo.name',
+              createdAt: '$createdAt'
+            }
+          }
+        }
+      },
+      // Định dạng output và sắp xếp theo ngày đối soát mới nhất
+      {
+        $project: {
+          _id: 0,
+          shipperId: '$_id.shipperId',
+          reconciledAt: '$_id.reconciledAt',
+          shipperName: 1,
+          orderCount: 1,
+          totalCod: 1,
+          reconciledBy: 1,
+          orders: 1
+        }
+      },
+      {
+        $sort: { reconciledAt: -1 }
+      }
+    ]);
+
+    res.json({
+      success: true,
+      history
+    });
+  } catch (error) {
+    console.error('Lỗi lấy lịch sử đối soát:', error);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi lấy lịch sử đối soát!' });
   }
 };

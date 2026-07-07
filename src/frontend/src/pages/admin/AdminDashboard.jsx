@@ -1020,61 +1020,86 @@ function DetailModal({ isOpen, title, type, onClose }) {
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  
+  const { socket } = useSocket();
 
   // Step 2: Lazy Fetching logic
+  const fetchData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const token = localStorage.getItem('glassesToken');
+
+      let url = '';
+      if (type === 'orders') {
+        // Map title to correct filter parameter
+        let filter = 'today';
+        if (title.includes('tháng')) {
+          filter = title.includes('Doanh thu') ? 'thisMonth' : 'profitMonth';
+        } else if (title.includes('năm')) {
+          filter = title.includes('Doanh thu') ? 'thisYear' : 'profitYear';
+        } else if (title.includes('hôm nay')) {
+          filter = 'today';
+        }
+        url = `/api/dashboard/details/orders?filter=${filter}`;
+      } else if (type === 'inventory') {
+        url = '/api/dashboard/details/inventory';
+      }
+
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const json = await res.json();
+      if (json.success) {
+        setData(json.data || []);
+      } else {
+        throw new Error(json.message || 'Lỗi không thể tải dữ liệu chi tiết.');
+      }
+    } catch (err) {
+      console.error('Lỗi khi tải chi tiết khoan sâu:', err);
+      setError(err.message || 'Lỗi kết nối máy chủ.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [type, title]);
+
   useEffect(() => {
     if (!isOpen) {
       setData([]);
       return;
     }
+    fetchData();
+  }, [isOpen, fetchData]);
 
-    const fetchData = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const token = localStorage.getItem('glassesToken');
+  // Đồng bộ Socket.io realtime cho modal báo cáo
+  useEffect(() => {
+    if (!socket || !isOpen) return undefined;
 
-        let url = '';
-        if (type === 'orders') {
-          // Map title to correct filter parameter
-          let filter = 'today';
-          if (title.includes('tháng')) {
-            filter = title.includes('Doanh thu') ? 'thisMonth' : 'profitMonth';
-          } else if (title.includes('năm')) {
-            filter = title.includes('Doanh thu') ? 'thisYear' : 'profitYear';
-          } else if (title.includes('hôm nay')) {
-            filter = 'today';
-          }
-          url = `/api/dashboard/details/orders?filter=${filter}`;
-        } else if (type === 'inventory') {
-          url = '/api/dashboard/details/inventory';
-        }
-
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const json = await res.json();
-        if (json.success) {
-          setData(json.data || []);
-        } else {
-          throw new Error(json.message || 'Lỗi không thể tải dữ liệu chi tiết.');
-        }
-      } catch (err) {
-        console.error('Lỗi khi tải chi tiết khoan sâu:', err);
-        setError(err.message || 'Lỗi kết nối máy chủ.');
-      } finally {
-        setIsLoading(false);
-      }
+    const handleRealtimeUpdate = () => {
+      console.log('⚡ [Socket.IO] Modal nhận sự kiện cập nhật đơn hàng. Đang làm mới dữ liệu modal...');
+      fetchData();
     };
 
-    fetchData();
-  }, [isOpen, type, title]);
+    socket.on('order:statusChanged', handleRealtimeUpdate);
+    socket.on('order:new', handleRealtimeUpdate);
+    socket.on('product:stockUpdated', handleRealtimeUpdate);
+
+    return () => {
+      socket.off('order:statusChanged', handleRealtimeUpdate);
+      socket.off('order:new', handleRealtimeUpdate);
+      socket.off('product:stockUpdated', handleRealtimeUpdate);
+    };
+  }, [socket, isOpen, fetchData]);
 
   // Step 3: Calculate Grand Total
   const totals = useMemo(() => {
     if (type === 'orders') {
       const totalAmount = data.reduce((sum, item) => {
-        const isSuccess = item.status === 'Đã hoàn thành' || item.status === 'Đang giao' || item.status === 'Đang giao hàng';
+        const isSuccess = 
+          item.status === 'Đã hoàn thành' || 
+          item.status === 'Đang giao' || 
+          item.status === 'Đang giao hàng' ||
+          item.status === 'Đã giao (Chờ thu tiền)';
         return sum + (isSuccess ? Number(item.total || 0) : 0);
       }, 0);
       return { totalAmount };
@@ -1223,8 +1248,10 @@ function DetailModal({ isOpen, title, type, onClose }) {
                           <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black ${order.status === 'Đã hoàn thành' ? 'bg-emerald-50 text-emerald-600' :
                             order.status === 'Đang xử lý' ? 'bg-blue-50 text-blue-600' :
                               order.status === 'Đang giao' || order.status === 'Đang giao hàng' ? 'bg-violet-50 text-violet-600' :
-                                order.status === 'Chờ xử lý' ? 'bg-amber-50 text-amber-600' :
-                                  'bg-rose-50 text-rose-600'
+                                order.status === 'Đã giao (Chờ thu tiền)' ? 'bg-indigo-50 text-indigo-600' :
+                                  order.status === 'Yêu cầu hủy đơn' ? 'bg-orange-50 text-orange-600' :
+                                    order.status === 'Chờ xử lý' ? 'bg-amber-50 text-amber-600' :
+                                      'bg-rose-50 text-rose-600'
                             }`}>
                             {order.status}
                           </span>
