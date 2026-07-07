@@ -76,12 +76,14 @@ exports.createReceipt = async (req, res) => {
         let finalProduct;
 
         if (item.productId === 'new-product' || !item.productId) {
-          // Tạo sản phẩm mới dưới dạng Nháp
+          // Tạo sản phẩm mới dưới dạng Nháp, cách ly tồn kho chờ duyệt
           const newProduct = new Product({
             name: item.newProductName.trim(),
             price: 0, // Giá bán lẻ mặc định ban đầu là 0
-            importPrice: Math.round(Number(item.importPrice) || 0),
-            stock: Number(item.quantity),
+            importPrice: 0,
+            stock: 0,
+            pendingStock: Number(item.quantity),
+            pendingImportPrice: Math.round(Number(item.importPrice) || 0),
             isDraft: true,
             isActive: false // Chưa cho phép hiển thị ra website
           });
@@ -89,31 +91,32 @@ exports.createReceipt = async (req, res) => {
           finalProductId = newProduct._id;
           finalProduct = newProduct;
         } else {
-          // Sản phẩm có sẵn: Lấy thông tin oldStock và oldImportPrice trong Database dùng transaction session
+          // Sản phẩm có sẵn: Lấy thông tin pendingStock và pendingImportPrice cũ
           const product = await Product.findById(item.productId).session(sessionOpts.session || null);
           if (!product) {
             throw new Error(`Không tìm thấy sản phẩm với ID ${item.productId}!`);
           }
 
-          const oldStock = Math.max(0, product.stock || 0);
-          const oldImportPrice = product.importPrice || 0;
+          const currentPendingStock = product.pendingStock || 0;
+          const currentPendingImportPrice = product.pendingImportPrice || 0;
           const newQuantity = Number(item.quantity);
-          const newImportPrice_From_Receipt = Number(item.importPrice);
+          const newImportPriceFromReceipt = Number(item.importPrice);
 
-          // Tính toán Giá vốn mới (AVCO) theo công thức:
-          // newImportPrice = ((oldStock * oldImportPrice) + (newQuantity * newImportPrice_From_Receipt)) / (oldStock + newQuantity)
-          const totalStock = oldStock + newQuantity;
-          let newImportPrice = newImportPrice_From_Receipt;
-          if (totalStock > 0) {
-            newImportPrice = Math.round(((oldStock * oldImportPrice) + (newQuantity * newImportPrice_From_Receipt)) / totalStock);
+          // Tính lũy kế giá nhập chờ duyệt bằng công thức AVCO cho phần pending
+          const totalPendingStock = currentPendingStock + newQuantity;
+          let newPendingImportPrice = newImportPriceFromReceipt;
+          if (totalPendingStock > 0) {
+            newPendingImportPrice = Math.round(((currentPendingStock * currentPendingImportPrice) + (newQuantity * newImportPriceFromReceipt)) / totalPendingStock);
           }
 
-          // Cập nhật bảng Product bằng Mongoose: Sử dụng $inc để cộng stock, và $set để cập nhật importPrice
+          // Cập nhật pendingStock và pendingImportPrice
           finalProduct = await Product.findByIdAndUpdate(
             item.productId,
             {
-              $inc: { stock: newQuantity },
-              $set: { importPrice: newImportPrice }
+              $set: { 
+                pendingStock: totalPendingStock,
+                pendingImportPrice: newPendingImportPrice
+              }
             },
             { new: true, ...sessionOpts }
           );
@@ -125,12 +128,13 @@ exports.createReceipt = async (req, res) => {
           importPrice: Number(item.importPrice)
         });
 
-        // Realtime Stock và LowStock check
+        // Realtime Stock và LowStock check (tồn kho chính chưa đổi nên báo tin với lý do 'import_staged')
         if (finalProduct) {
           getIO().emit('product:stockUpdated', {
             productId: finalProduct._id.toString(),
             stock: finalProduct.stock,
-            reason: 'import'
+            pendingStock: finalProduct.pendingStock,
+            reason: 'import_staged'
           });
           await checkAndEmitLowStockNotification(finalProduct);
         }

@@ -21,6 +21,11 @@ export default function OrderManagement() {
   const [cancellingOrderId, setCancellingOrderId] = useState(null);
   const [adminCancelReason, setAdminCancelReason] = useState('');
 
+  // State xử lý yêu cầu hủy đơn
+  const [isHandlingCancel, setIsHandlingCancel] = useState(false);
+  const [rejectingCancelRequestId, setRejectingCancelRequestId] = useState(null);
+  const [cancelRejectReason, setCancelRejectReason] = useState('');
+
   // Log thông tin User & Quyền hạn
   useEffect(() => {
     console.log('👤 [AuthContext] Current User info:', {
@@ -81,7 +86,10 @@ export default function OrderManagement() {
             paymentMethod: order.paymentMethod,
             status: (order.status || '').trim(), // FIX BUG SHIPPED
             date: order.createdAt,
-            shipperId: order.shipperId || null
+            shipperId: order.shipperId || null,
+            cancelReason: order.cancelReason || '',
+            cancelRequestedAt: order.cancelRequestedAt || null,
+            previousStatusBeforeCancelRequest: order.previousStatusBeforeCancelRequest || null
           };
         });
 
@@ -156,6 +164,52 @@ export default function OrderManagement() {
       alert('Không thể kết nối đến máy chủ để cập nhật trạng thái.');
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleCancelRequest = async (orderId, action, rejectReason = '') => {
+    if (action === 'approve') {
+      const confirmApprove = window.confirm(
+        'Bạn có chắc chắn muốn duyệt hủy đơn hàng này không? Quá trình hoàn kho sẽ được tự động kích hoạt.'
+      );
+      if (!confirmApprove) return;
+    }
+
+    setIsHandlingCancel(true);
+    try {
+      const token = localStorage.getItem('glassesToken');
+      const response = await fetch(`/api/orders/${orderId}/handle-cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ action, rejectReason })
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        alert(
+          action === 'approve'
+            ? 'Đã chấp nhận hủy đơn hàng và hoàn trả tồn kho thành công!'
+            : 'Đã từ chối yêu cầu hủy đơn hàng thành công!'
+        );
+        // Load lại danh sách đơn hàng
+        await fetchOrders();
+        // Cập nhật selectedOrder cục bộ để Modal cập nhật tức thì
+        setSelectedOrder(prev => {
+          if (!prev) return null;
+          const nextStatus = action === 'approve' ? 'cancelled' : (prev.previousStatusBeforeCancelRequest || 'processing');
+          return { ...prev, status: nextStatus };
+        });
+      } else {
+        alert(data.message || 'Lỗi xử lý yêu cầu hủy đơn!');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Lỗi kết nối máy chủ khi xử lý yêu cầu hủy!');
+    } finally {
+      setIsHandlingCancel(false);
     }
   };
 
@@ -469,6 +523,55 @@ export default function OrderManagement() {
             {/* Content (Có scroll) */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
 
+              {/* ALERT PANEL CHO YÊU CẦU HỦY ĐƠN */}
+              {selectedOrder.status === 'cancel_requested' && (
+                <div className="p-5 bg-red-50 rounded-2xl border-2 border-red-200 flex flex-col gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-6 h-6 text-red-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-black text-red-800 text-sm">⚠️ Khách hàng đang yêu cầu hủy đơn hàng này!</h4>
+                      <div className="mt-2 text-xs text-red-700 space-y-1">
+                        <p><span className="font-bold">Lý do khách hàng cung cấp:</span></p>
+                        <p className="bg-white border border-red-100 rounded-xl p-3 font-medium text-gray-700 shadow-inner mt-1 italic">
+                          "{selectedOrder.cancelReason || 'Không có lý do chi tiết'}"
+                        </p>
+                        {selectedOrder.cancelRequestedAt && (
+                          <p className="text-[10px] text-gray-400 mt-2 font-medium">
+                            Yêu cầu gửi lúc: {new Date(selectedOrder.cancelRequestedAt).toLocaleString('vi-VN')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-2 border-t border-red-100/50">
+                    <button
+                      type="button"
+                      disabled={isHandlingCancel}
+                      onClick={() => {
+                        setRejectingCancelRequestId(selectedOrder._id);
+                        setCancelRejectReason('');
+                      }}
+                      className="bg-white border border-gray-200 text-gray-700 font-bold px-4 py-2 rounded-xl text-xs hover:bg-gray-50 transition shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      Từ chối hủy
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isHandlingCancel}
+                      onClick={() => handleCancelRequest(selectedOrder._id, 'approve')}
+                      className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition shadow-sm shadow-red-100 flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isHandlingCancel ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        'Duyệt Hủy đơn'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* PHẦN 1: THÔNG TIN KHÁCH HÀNG & GIAO NHẬN */}
               <div className="bg-gray-50 p-5 rounded-2xl border border-gray-100">
                 <h3 className="font-black text-gray-900 mb-3 uppercase text-xs tracking-wider text-blue-600">Thông tin người nhận</h3>
@@ -692,6 +795,69 @@ export default function OrderManagement() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      {/* Modal từ chối yêu cầu hủy đơn (do khách hàng gửi) */}
+      {rejectingCancelRequestId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-gray-100 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-3 text-gray-900 mb-4">
+              <XCircle className="w-7 h-7 text-red-500" />
+              <h3 className="text-xl font-bold">Từ chối yêu cầu hủy</h3>
+            </div>
+            
+            <p className="text-gray-500 text-sm mb-6 leading-relaxed">
+              Bạn đang từ chối yêu cầu hủy của khách hàng cho đơn này. Vui lòng nhập lý do từ chối cụ thể (Bắt buộc).
+            </p>
+
+            <form 
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!cancelRejectReason.trim()) {
+                  alert('Vui lòng nhập lý do từ chối hủy đơn!');
+                  return;
+                }
+                const reason = cancelRejectReason.trim();
+                setRejectingCancelRequestId(null);
+                setCancelRejectReason('');
+                await handleCancelRequest(rejectingCancelRequestId, 'reject', reason);
+              }} 
+              className="space-y-6"
+            >
+              <div>
+                <label className="block text-gray-750 text-xs font-bold uppercase mb-2">Lý do từ chối *</label>
+                <textarea
+                  required
+                  rows={4}
+                  value={cancelRejectReason}
+                  onChange={(e) => setCancelRejectReason(e.target.value)}
+                  placeholder="Nhập lý do (ví dụ: Hàng đã được bàn giao cho đơn vị vận chuyển)..."
+                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRejectingCancelRequestId(null);
+                    setCancelRejectReason('');
+                  }}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold px-5 py-3 rounded-2xl text-sm transition"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="submit"
+                  disabled={isHandlingCancel}
+                  className="bg-red-650 hover:bg-red-700 text-white font-bold px-5 py-3 rounded-2xl text-sm transition shadow-md shadow-red-200 flex items-center gap-1.5"
+                >
+                  {isHandlingCancel && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Xác nhận từ chối
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

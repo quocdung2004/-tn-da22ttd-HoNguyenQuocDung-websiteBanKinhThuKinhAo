@@ -11,6 +11,8 @@ const productSchema = new mongoose.Schema({
   averageRating: { type: Number, default: 0 }, // Điểm đánh giá trung bình
   totalReviews: { type: Number, default: 0 }, // Tổng số đánh giá
   soldQuantity: { type: Number, default: 0 }, // Số lượng đã bán
+  pendingStock: { type: Number, default: 0 }, // Tồn kho đang chờ duyệt
+  pendingImportPrice: { type: Number, default: 0 }, // Giá nhập chờ duyệt
 
   // Liên kết khóa ngoại (Foreign Key)
   brand: { type: mongoose.Schema.Types.ObjectId, ref: 'Brand' },

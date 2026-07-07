@@ -33,6 +33,7 @@ router.get('/shop', optionalVerifyToken, productController.getProductsShop);
 router.get('/:id', optionalVerifyToken, productController.getProductById);
 router.post('/', verifyToken, verifyAdmin, handleProductUpload, productController.createProduct);
 router.put('/:id', verifyToken, verifyAdmin, handleProductUpload, productController.updateProduct);
+router.post('/approve-restock', verifyToken, verifyAdmin, productController.approveRestock);
 router.delete('/:id', verifyToken, verifyAdmin, productController.deleteProduct);
 router.put('/:id/restore', verifyToken, verifyAdmin, productController.restoreProduct);
 

@@ -417,9 +417,9 @@ function UnifiedDashboardView({
               </div>
             </div>
             <div className="text-right flex flex-col items-end">
-              <Badge color={getShortfallBadgeColor(financeComparison.revenueShortfallPercent)} size="sm">
+              <span className="text-sm font-bold text-slate-800">
                 Hao hụt: {(financeComparison.revenueShortfallPercent || 0).toFixed(1)}%
-              </Badge>
+              </span>
               <Text className="text-[10px] text-slate-400 font-semibold mt-2">
                 Thất thu: {formatCurrency(financeComparison.revenueShortfall)}
               </Text>
@@ -457,9 +457,9 @@ function UnifiedDashboardView({
               </div>
             </div>
             <div className="text-right flex flex-col items-end">
-              <Badge color={getShortfallBadgeColor(financeComparison.profitShortfallPercent)} size="sm">
+              <span className="text-sm font-bold text-slate-800">
                 Hao hụt: {(financeComparison.profitShortfallPercent || 0).toFixed(1)}%
-              </Badge>
+              </span>
               <Text className="text-[10px] text-slate-400 font-semibold mt-2">
                 Hao hụt lợi nhuận: {formatCurrency(financeComparison.profitShortfall)}
               </Text>

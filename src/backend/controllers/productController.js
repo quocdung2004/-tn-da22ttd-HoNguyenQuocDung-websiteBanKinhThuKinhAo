@@ -417,3 +417,77 @@ exports.restoreProduct = async (req, res) => {
     res.status(500).json({ success: false, message: 'Lỗi máy chủ!' });
   }
 };
+
+// [POST] Phê duyệt nhập kho & cập nhật giá bán lẻ mới (Staging Inventory Approval)
+exports.approveRestock = async (req, res) => {
+  try {
+    const { productId, newSalePrice } = req.body;
+
+    if (!productId) {
+      return res.status(400).json({ success: false, message: 'Thiếu ID sản phẩm!' });
+    }
+    if (newSalePrice === undefined || newSalePrice === null || isNaN(newSalePrice) || Number(newSalePrice) <= 0) {
+      return res.status(400).json({ success: false, message: 'Giá bán lẻ mới không hợp lệ! Vui lòng nhập số lớn hơn 0.' });
+    }
+
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm!' });
+    }
+
+    const pendingStock = product.pendingStock || 0;
+    const pendingImportPrice = product.pendingImportPrice || 0;
+
+    if (pendingStock <= 0) {
+      return res.status(400).json({ success: false, message: 'Không có sản phẩm/số lượng nào đang ở trạng thái chờ duyệt cho sản phẩm này!' });
+    }
+
+    const currentStock = Math.max(0, product.stock || 0);
+    const currentImportPrice = product.importPrice || 0;
+
+    // Chạy công thức AVCO
+    const totalStock = currentStock + pendingStock;
+    let newImportPrice = currentImportPrice;
+    if (totalStock > 0) {
+      newImportPrice = Math.round(
+        ((currentStock * currentImportPrice) + (pendingStock * pendingImportPrice)) / totalStock
+      );
+    }
+
+    // Cập nhật sản phẩm
+    product.stock = totalStock;
+    product.importPrice = newImportPrice;
+    product.price = Number(newSalePrice);
+    
+    // Reset phần chờ duyệt
+    product.pendingStock = 0;
+    product.pendingImportPrice = 0;
+
+    // Nếu sản phẩm là bản nháp (do mới tạo khi nhập kho), tự động cho hoạt động
+    if (product.isDraft) {
+      product.isDraft = false;
+      product.isActive = true;
+    }
+
+    await product.save();
+
+    // Phát tín hiệu Realtime Stock cập nhật
+    getIO().emit('product:stockUpdated', {
+      productId: product._id.toString(),
+      stock: product.stock,
+      pendingStock: 0,
+      reason: 'restock_approved'
+    });
+    await checkAndEmitLowStockNotification(product);
+
+    res.json({
+      success: true,
+      message: `Phê duyệt nhập kho thành công! Sản phẩm đã được cập nhật tồn kho chính (${product.stock}) và giá bán mới (${product.price} VND).`,
+      product
+    });
+  } catch (error) {
+    console.error('Lỗi phê duyệt nhập kho:', error);
+    res.status(500).json({ success: false, message: 'Lỗi máy chủ khi phê duyệt nhập kho!' });
+  }
+};
+

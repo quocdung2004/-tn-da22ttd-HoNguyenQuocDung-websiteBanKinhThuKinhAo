@@ -440,7 +440,20 @@ export default function MyOrders() {
                   </div>
 
                   <div className="flex items-center justify-between sm:justify-end gap-6 w-full sm:w-auto">
-                    {showCancelBtn && (
+                    {['shipping', 'shipped'].includes(order.status) ? (
+                      <div className="relative group">
+                        <button
+                          disabled
+                          className="text-xs font-bold px-4 py-2 rounded-xl bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed shadow-none"
+                        >
+                          Yêu cầu hủy đơn
+                        </button>
+                        <div className="absolute bottom-full mb-2 hidden group-hover:block bg-gray-900 text-white text-[10px] p-2 rounded-lg w-48 text-center shadow-lg font-medium left-1/2 -translate-x-1/2 z-10 leading-tight">
+                          Đơn hàng đang được giao đến bạn. Vui lòng từ chối nhận hàng khi shipper liên hệ.
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-t-4 border-t-gray-900 border-x-4 border-x-transparent"></div>
+                        </div>
+                      </div>
+                    ) : showCancelBtn && (
                       <button
                         onClick={() => handleCancelClick(order, canDirectCancel)}
                         className={`text-xs font-bold px-4 py-2 rounded-xl transition border shadow-sm ${

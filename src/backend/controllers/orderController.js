@@ -622,7 +622,14 @@ exports.requestOrderCancel = async (req, res) => {
     }
 
     const status = order.status;
-    if (['cancelled', 'completed', 'shipping', 'shipped', 'cancel_requested'].includes(status)) {
+    if (['shipping', 'shipped'].includes(status)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Đơn hàng đang được giao đến bạn nên không thể yêu cầu hủy. Vui lòng từ chối nhận hàng khi shipper liên hệ.' 
+      });
+    }
+
+    if (['cancelled', 'completed', 'cancel_requested'].includes(status)) {
       return res.status(400).json({ success: false, message: 'Trạng thái đơn hàng không khả dụng để gửi yêu cầu hủy!' });
     }
 
@@ -782,7 +789,8 @@ exports.handleOrderCancel = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Đơn hàng không nằm trong trạng thái yêu cầu hủy!' });
     }
 
-    // Task 2: Chặn Staff (role 2) duyệt hủy đơn hàng đã xuất kho (processing/shipping)
+    // Cho phép Staff duyệt hủy đơn ở bất kỳ trạng thái nào theo yêu cầu nghiệp vụ mới
+    /*
     if (action === 'approve' && req.user?.role === 2) {
       const originalStatus = order.previousStatusBeforeCancelRequest;
       if (['processing', 'shipping'].includes(originalStatus)) {
@@ -792,6 +800,7 @@ exports.handleOrderCancel = async (req, res) => {
         });
       }
     }
+    */
 
     let customerUser = null;
     if (order.username) {

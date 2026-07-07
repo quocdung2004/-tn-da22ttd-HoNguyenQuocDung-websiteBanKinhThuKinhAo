@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Image as ImageIcon, Edit, Trash2, X, Box, Search, RotateCcw } from 'lucide-react';
+import { Plus, Image as ImageIcon, Edit, Trash2, X, Box, Search, RotateCcw, Check, TrendingUp, AlertCircle, HelpCircle } from 'lucide-react';
 import { useSocket } from '../../context/SocketContext';
 
 export default function ProductManager() {
@@ -10,6 +10,12 @@ export default function ProductManager() {
   const [searchTerm, setSearchTerm] = useState('');
   const [draftProducts, setDraftProducts] = useState([]);
   const [selectedDraftId, setSelectedDraftId] = useState('');
+
+  // STATE PHÊ DUYỆT NHẬP KHO (STAGING INVENTORY)
+  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
+  const [selectedApproveProduct, setSelectedApproveProduct] = useState(null);
+  const [newSalePrice, setNewSalePrice] = useState('');
+  const [approvalLoading, setApprovalLoading] = useState(false);
   
   // STATE CỦA FORM
   const [formData, setFormData] = useState({ 
@@ -276,6 +282,62 @@ export default function ProductManager() {
     }
   };
 
+  const handleApproveRestock = async (e) => {
+    e.preventDefault();
+    if (!selectedApproveProduct) return;
+    if (!newSalePrice || isNaN(newSalePrice) || Number(newSalePrice) <= 0) {
+      alert("Vui lòng nhập giá bán lẻ mới hợp lệ!");
+      return;
+    }
+
+    setApprovalLoading(true);
+    try {
+      const token = localStorage.getItem('glassesToken');
+      const response = await fetch('/api/products/approve-restock', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({
+          productId: selectedApproveProduct._id,
+          newSalePrice: Number(newSalePrice)
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert(data.message);
+        // Load lại danh sách sản phẩm
+        await fetchData();
+        // Reset states
+        setSelectedApproveProduct(null);
+        setNewSalePrice('');
+        
+        // Nếu không còn sản phẩm nào chờ duyệt, tự động đóng modal duyệt
+        const updatedProducts = products.map(p => 
+          p._id === selectedApproveProduct._id 
+            ? { ...p, pendingStock: 0, pendingImportPrice: 0 } 
+            : p
+        );
+        const hasPendingLeft = updatedProducts.some(p => p.pendingStock > 0);
+        if (!hasPendingLeft) {
+          setIsApprovalModalOpen(false);
+        }
+      } else {
+        alert(data.message || 'Có lỗi xảy ra khi phê duyệt!');
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Lỗi kết nối máy chủ khi phê duyệt nhập kho!');
+    } finally {
+      setApprovalLoading(false);
+    }
+  };
+
+  const pendingProducts = products.filter(p => p.pendingStock > 0);
+  const totalPendingItems = pendingProducts.length;
+
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8 relative">
       <div className="max-w-7xl mx-auto space-y-8">
@@ -284,12 +346,23 @@ export default function ProductManager() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <h1 className="text-3xl font-black text-gray-900">Kho Kính mắt</h1>
           
-          <button 
-            onClick={() => setIsModalOpen(true)} 
-            className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-200"
-          >
-            <Plus className="w-5 h-5" /> Thêm Kính mới
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            {totalPendingItems > 0 && (
+              <button 
+                onClick={() => setIsApprovalModalOpen(true)} 
+                className="flex items-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-emerald-700 transition shadow-lg shadow-emerald-100 animate-pulse"
+              >
+                <Box className="w-5 h-5" /> Duyệt nhập kho ({totalPendingItems})
+              </button>
+            )}
+
+            <button 
+              onClick={() => setIsModalOpen(true)} 
+              className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-200"
+            >
+              <Plus className="w-5 h-5" /> Thêm Kính mới
+            </button>
+          </div>
         </div>
 
         {/* THẺ THỐNG KÊ DANH MỤC KÍNH (CARDS/BADGES) */}
@@ -392,9 +465,29 @@ export default function ProductManager() {
                         <span className={`px-2 py-1.5 rounded-lg text-sm font-bold ${prod.stock > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                           {prod.stock} cái
                         </span>
+                        {prod.pendingStock > 0 && (
+                          <div className="mt-1">
+                            <span className="bg-amber-100 text-amber-800 text-[11px] px-2 py-0.5 rounded-md font-bold block w-fit">
+                              Chờ duyệt: +{prod.pendingStock}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-center gap-3">
+                          {prod.pendingStock > 0 && (
+                            <button 
+                              onClick={() => {
+                                setSelectedApproveProduct(prod);
+                                setNewSalePrice(prod.price || '');
+                                setIsApprovalModalOpen(true);
+                              }} 
+                              className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition" 
+                              title="Định giá & Duyệt nhập kho"
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                          )}
                           <button onClick={() => handleEdit(prod)} className="p-2 bg-yellow-50 text-yellow-600 rounded-lg hover:bg-yellow-100 transition" title="Sửa">
                             <Edit className="w-4 h-4" />
                           </button>
@@ -484,7 +577,7 @@ export default function ProductManager() {
                         <option value="">-- Chọn sản phẩm nháp để hoàn thiện thông tin --</option>
                         {draftProducts.map(d => (
                           <option key={d._id} value={d._id}>
-                            {d.name} (Tồn kho: {d.stock} cái, Giá nhập sỉ: {d.importPrice?.toLocaleString('vi-VN')}đ)
+                            {d.name} (Tồn kho: {d.stock} cái{d.pendingStock > 0 ? ` + ${d.pendingStock} chờ duyệt` : ''}, Giá sỉ: {(d.importPrice || d.pendingImportPrice || 0).toLocaleString('vi-VN')}đ)
                           </option>
                         ))}
                       </select>
@@ -701,6 +794,247 @@ export default function ProductManager() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== MODAL DUYỆT NHẬP KHO (STAGING INVENTORY) ===================== */}
+      {isApprovalModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto relative animate-in zoom-in-95 duration-200">
+            
+            {/* Header */}
+            <div className="sticky top-0 bg-white z-10 px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <h2 className="text-xl font-black text-gray-900 flex items-center gap-2">
+                <Box className="w-5 h-5 text-emerald-600" />
+                {selectedApproveProduct ? `Định giá Lên kệ: ${selectedApproveProduct.name}` : `Duyệt nhập kho & Cách ly tồn kho (${totalPendingItems})`}
+              </h2>
+              <button 
+                onClick={() => {
+                  setIsApprovalModalOpen(false);
+                  setSelectedApproveProduct(null);
+                  setNewSalePrice('');
+                }} 
+                className="p-2 bg-gray-100 text-gray-600 rounded-full hover:bg-red-100 hover:text-red-600 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              {/* PHẦN 1: DANH SÁCH CÁC SẢN PHẨM CHỜ DUYỆT */}
+              {!selectedApproveProduct ? (
+                <div className="space-y-4">
+                  <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 text-sm text-amber-800 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Chế độ Cách ly tồn kho (Staging Inventory) đang hoạt động</p>
+                      <p className="mt-1 text-xs">Các sản phẩm dưới đây vừa được nhập hàng bằng Phiếu nhập. Tồn kho và giá nhập mới đang được lưu trữ ở trạng thái Chờ duyệt. Bạn bắt buộc phải thiết lập Giá bán lẻ mới trước khi chính thức cho sản phẩm lên kệ.</p>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto border border-gray-100 rounded-2xl">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+                          <th className="px-6 py-3 font-bold">Hình ảnh</th>
+                          <th className="px-6 py-3 font-bold">Sản phẩm</th>
+                          <th className="px-6 py-3 font-bold">Kho chính</th>
+                          <th className="px-6 py-3 font-bold">Lô chờ duyệt</th>
+                          <th className="px-6 py-3 font-bold">Giá sỉ chờ duyệt</th>
+                          <th className="px-6 py-3 font-bold text-center">Hành động</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 text-sm">
+                        {pendingProducts.map((prod) => (
+                          <tr key={prod._id} className="hover:bg-gray-50/50 transition">
+                            <td className="px-6 py-4">
+                              <img src={prod.images && prod.images[0] ? prod.images[0] : '/placeholder.png'} alt={prod.name} className="h-12 w-12 object-cover rounded-lg border border-gray-200 bg-white" />
+                            </td>
+                            <td className="px-6 py-4">
+                              <p className="font-bold text-gray-900">{prod.name}</p>
+                              <p className="text-xs text-gray-500">{prod.category?.name} • {prod.brand?.name}</p>
+                            </td>
+                            <td className="px-6 py-4 text-gray-600 font-medium">
+                              {prod.stock || 0} cái
+                            </td>
+                            <td className="px-6 py-4 text-amber-700 font-bold">
+                              +{prod.pendingStock} cái
+                            </td>
+                            <td className="px-6 py-4 text-slate-700 font-semibold">
+                              {(prod.pendingImportPrice || 0).toLocaleString('vi-VN')}đ
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <button 
+                                onClick={() => {
+                                  setSelectedApproveProduct(prod);
+                                  setNewSalePrice(prod.price || '');
+                                }} 
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition"
+                              >
+                                Định giá & Duyệt
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                /* PHẦN 2: FORM ĐỊNH GIÁ & DUYỆT MỘT SẢN PHẨM */
+                <form onSubmit={handleApproveRestock} className="space-y-6">
+                  {/* AUTO-FILL / PRE-FILLED READ-ONLY FIELDS */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Tên gọng kính</label>
+                      <input 
+                        type="text" 
+                        value={selectedApproveProduct.name || ''} 
+                        disabled 
+                        className="w-full px-4 py-2.5 bg-gray-150 border border-gray-200 rounded-xl text-gray-600 text-sm font-semibold outline-none cursor-not-allowed" 
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Danh mục kính</label>
+                      <input 
+                        type="text" 
+                        value={selectedApproveProduct.category?.name || 'Chưa phân loại'} 
+                        disabled 
+                        className="w-full px-4 py-2.5 bg-gray-150 border border-gray-200 rounded-xl text-gray-600 text-sm font-semibold outline-none cursor-not-allowed" 
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1.5">Nhãn hàng / Thương hiệu</label>
+                      <input 
+                        type="text" 
+                        value={selectedApproveProduct.brand?.name || 'Không có'} 
+                        disabled 
+                        className="w-full px-4 py-2.5 bg-gray-150 border border-gray-200 rounded-xl text-gray-600 text-sm font-semibold outline-none cursor-not-allowed" 
+                      />
+                    </div>
+                  </div>
+
+                  {/* THÔNG SỐ VỀ KHO & CHI PHÍ */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="p-4 bg-white border border-gray-100 rounded-xl shadow-sm text-center">
+                      <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Tồn kho chính hiện tại</p>
+                      <p className="text-lg font-black text-gray-800 mt-1">{selectedApproveProduct.stock || 0} cái</p>
+                      <p className="text-[10px] text-gray-500">Giá sỉ cũ: {(selectedApproveProduct.importPrice || 0).toLocaleString('vi-VN')}đ</p>
+                    </div>
+                    
+                    <div className="p-4 bg-amber-50/50 border border-amber-100 rounded-xl shadow-sm text-center">
+                      <p className="text-[11px] font-bold text-amber-600 uppercase tracking-wider">Nhập mới (Staged)</p>
+                      <p className="text-lg font-black text-amber-700 mt-1">+{selectedApproveProduct.pendingStock || 0} cái</p>
+                      <p className="text-[10px] text-amber-600">Giá sỉ mới: {(selectedApproveProduct.pendingImportPrice || 0).toLocaleString('vi-VN')}đ</p>
+                    </div>
+
+                    <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-xl shadow-sm text-center">
+                      <p className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Ước tính Giá vốn AVCO</p>
+                      <p className="text-lg font-black text-blue-800 mt-1">
+                        {(() => {
+                          const cStock = selectedApproveProduct.stock || 0;
+                          const cPrice = selectedApproveProduct.importPrice || 0;
+                          const pStock = selectedApproveProduct.pendingStock || 0;
+                          const pPrice = selectedApproveProduct.pendingImportPrice || 0;
+                          const total = cStock + pStock;
+                          const avco = total > 0 ? Math.round(((cStock * cPrice) + (pStock * pPrice)) / total) : pPrice;
+                          return avco.toLocaleString('vi-VN');
+                        })()}đ
+                      </p>
+                      <p className="text-[10px] text-blue-500">Sau khi duyệt sỉ</p>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl shadow-sm text-center">
+                      <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Giá bán lẻ hiện tại</p>
+                      <p className="text-lg font-black text-slate-700 mt-1">
+                        {selectedApproveProduct.price ? `${selectedApproveProduct.price.toLocaleString('vi-VN')}đ` : '0đ (Sản phẩm mới)'}
+                      </p>
+                      <p className="text-[10px] text-slate-500">Đang niêm yết</p>
+                    </div>
+                  </div>
+
+                  {/* NHẬP GIÁ BÁN LẺ MỚI & TÌNH TOÁN BIÊN LỢI NHUẬN DỰ KIẾN */}
+                  <div className="p-5 bg-emerald-50/30 border border-emerald-100 rounded-2xl space-y-4">
+                    <div>
+                      <label className="block text-sm font-black text-gray-800 mb-2 flex items-center gap-1.5">
+                        <TrendingUp className="w-5 h-5 text-emerald-600" />
+                        Thiết lập Giá bán lẻ mới (VNĐ) <span className="text-red-500">*</span>
+                      </label>
+                      <input 
+                        required 
+                        type="number" 
+                        min="1000"
+                        placeholder="Nhập giá bán lẻ cho khách..."
+                        value={newSalePrice} 
+                        onChange={e => setNewSalePrice(e.target.value)} 
+                        className="w-full px-4 py-3 rounded-xl border border-emerald-200 focus:ring-2 focus:ring-emerald-500 bg-white outline-none font-bold text-lg text-emerald-800" 
+                      />
+                      <p className="text-[11px] text-gray-500 mt-1.5">Mẹo: Hệ thống tự động lấy giá bán lẻ cũ làm mặc định. Vui lòng kiểm tra lại để bảo vệ biên lợi nhuận trước biến động của giá nhập sỉ.</p>
+                    </div>
+
+                    {/* DỰ KIẾN LỢI NHUẬN GỐP */}
+                    {newSalePrice && !isNaN(newSalePrice) && Number(newSalePrice) > 0 && (
+                      <div className="pt-2 border-t border-emerald-100 grid grid-cols-2 gap-4 text-sm font-bold">
+                        {(() => {
+                          const cStock = selectedApproveProduct.stock || 0;
+                          const cPrice = selectedApproveProduct.importPrice || 0;
+                          const pStock = selectedApproveProduct.pendingStock || 0;
+                          const pPrice = selectedApproveProduct.pendingImportPrice || 0;
+                          const total = cStock + pStock;
+                          const avco = total > 0 ? Math.round(((cStock * cPrice) + (pStock * pPrice)) / total) : pPrice;
+                          
+                          const sale = Number(newSalePrice);
+                          const profit = sale - avco;
+                          const margin = ((profit / sale) * 100).toFixed(1);
+                          const isLoss = profit < 0;
+
+                          return (
+                            <>
+                              <div className="p-3 bg-white rounded-xl border border-emerald-100">
+                                <span className="text-xs text-gray-400 font-bold block">Lợi nhuận gộp / chiếc</span>
+                                <span className={`text-base font-extrabold block mt-0.5 ${isLoss ? 'text-red-600' : 'text-emerald-700'}`}>
+                                  {profit.toLocaleString('vi-VN')}đ
+                                </span>
+                              </div>
+                              <div className="p-3 bg-white rounded-xl border border-emerald-100">
+                                <span className="text-xs text-gray-400 font-bold block">Biên lợi nhuận gộp</span>
+                                <span className={`text-base font-extrabold block mt-0.5 ${isLoss ? 'text-red-600' : 'text-emerald-700'}`}>
+                                  {margin}% {isLoss && '(BÁN LỖ!)'}
+                                </span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Nút Hành động */}
+                  <div className="pt-4 flex justify-end gap-3 border-t border-gray-100">
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setSelectedApproveProduct(null);
+                        setNewSalePrice('');
+                      }} 
+                      className="px-6 py-3 rounded-xl font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 transition"
+                    >
+                      Quay lại danh sách
+                    </button>
+                    <button 
+                      type="submit" 
+                      disabled={approvalLoading} 
+                      className={`px-8 py-3 text-white font-bold rounded-xl transition shadow-lg ${approvalLoading ? 'bg-gray-400' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200'}`}
+                    >
+                      {approvalLoading ? 'Đang duyệt sỉ...' : 'Phê duyệt lên kệ'}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         </div>
